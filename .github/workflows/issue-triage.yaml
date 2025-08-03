@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Auto-triage new issue
+      - name: Auto-triage new or updated issue
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GL_TOKEN }}
@@ -48,25 +48,64 @@ jobs:
             else if (body.includes('[duration:] 1 week')) size = '1 Week';
             else if (body.includes('[duration:] 2 weeks')) size = '2 Weeks and above';
 
-            // --- Add to project and get itemId ---
-            const addResult = await github.graphql(`
-              mutation($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: {
-                  projectId: $projectId,
-                  contentId: $contentId
-                }) {
-                  item {
-                    id
+            // --- Check if issue is already in project ---
+            const projectQuery = await github.graphql(`
+              query($projectId: ID!, $issueId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 100, filterBy: {contentId: $issueId}) {
+                      nodes {
+                        id
+                      }
+                    }
                   }
                 }
               }
             `, {
               projectId,
-              contentId: issue_id
+              issueId: issue_id,
             });
 
-            const itemId = addResult.addProjectV2ItemById.item.id;
+            let itemId;
+            const existing = projectQuery.node.items.nodes;
+            if (existing.length > 0) {
+              itemId = existing[0].id;
+            } else {
+              const added = await github.graphql(`
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: {
+                    projectId: $projectId,
+                    contentId: $contentId
+                  }) {
+                    item { id }
+                  }
+                }
+              `, {
+                projectId,
+                contentId: issue_id
+              });
+              itemId = added.addProjectV2ItemById.item.id;
+            }
 
+            // --- Always set status to Backlog ---
+            await github.graphql(`
+              mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                updateProjectV2ItemFieldValue(input: $input) {
+                  projectV2Item { id }
+                }
+              }
+            `, {
+              input: {
+                projectId,
+                itemId,
+                fieldId: 'PVTSSF_lAHOBFQM7s4A_i9kzgyndCQ', // Status
+                value: {
+                  singleSelectOptionId: 'f75ad846' // "Backlog"
+                }
+              }
+            });
+
+            // --- Set Priority and Size fields ---
             const fieldMappings = {
               'Priority': {
                 'P0': '79628723',

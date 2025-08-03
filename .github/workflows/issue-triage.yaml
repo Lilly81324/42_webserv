@@ -50,26 +50,29 @@ jobs:
 
             // --- Check if issue is already in project ---
             const projectQuery = await github.graphql(`
-              query($projectId: ID!, $issueId: ID!) {
+              query($projectId: ID!) {
                 node(id: $projectId) {
                   ... on ProjectV2 {
-                    items(first: 100, filterBy: {contentId: $issueId}) {
+                    items(first: 100) {
                       nodes {
                         id
+                        content {
+                          ... on Issue {
+                            id
+                          }
+                        }
                       }
                     }
                   }
                 }
               }
-            `, {
-              projectId,
-              issueId: issue_id,
-            });
+            `, { projectId });
 
             let itemId;
-            const existing = projectQuery.node.items.nodes;
-            if (existing.length > 0) {
-              itemId = existing[0].id;
+            const items = projectQuery.node.items.nodes;
+            const existingItem = items.find(item => item.content?.id === issue_id);
+            if (existingItem) {
+              itemId = existingItem.id;
             } else {
               const added = await github.graphql(`
                 mutation($projectId: ID!, $contentId: ID!) {

@@ -1,0 +1,62 @@
+name: On Issue Assigned
+
+on:
+  issues:
+    types: [assigned]
+
+jobs:
+  branch-and-move:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create branch & move issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GL_TOKEN }}
+          script: |
+            const labels = context.payload.issue.labels.map(l => l.name.toLowerCase());
+            const allowed = ['feature', 'bug', 'refactor'];
+            if (!labels.some(l => allowed.includes(l))) {
+              console.log("Label does not match. Exiting.");
+              return;
+            }
+
+            const assignee = context.payload.assignee.login;
+            const issueNumber = context.issue.number;
+            const branchName = `${issueNumber}_${assignee}`.toLowerCase();
+
+            const repo = context.repo;
+            const { data: repoData } = await github.rest.repos.get(repo);
+            const baseRef = await github.rest.git.getRef({
+              ...repo,
+              ref: `heads/${repoData.default_branch}`,
+            });
+
+            await github.rest.git.createRef({
+              ...repo,
+              ref: `refs/heads/${branchName}`,
+              sha: baseRef.data.object.sha,
+            });
+
+            // Update Project Status to "Ready"
+            const issueId = context.payload.issue.node_id;
+            const projectId = 'PVT_kwHOBFQM7s4A_i9k';
+            const fieldId = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndCQ'; // Status
+            const optionId = '61e4505c'; // "Ready"
+
+            await github.graphql(`
+              mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                updateProjectV2ItemFieldValue(input: $input) {
+                  projectV2Item { id }
+                }
+              }
+            `, {
+              input: {
+                projectId,
+                itemId: issueId,
+                fieldId,
+                value: {
+                  singleSelectOptionId: optionId
+                }
+              }
+            });

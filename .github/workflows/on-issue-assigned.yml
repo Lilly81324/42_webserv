@@ -108,17 +108,5 @@ jobs:
                 value: { singleSelectOptionId: statusOptionId_Ready }
               }
             });
-            const prOpenUrl =
-            `https://github.com/${repo.owner}/${repo.repo}/compare/developer...${branchName}` +
-            `?expand=1&title=${encodeURIComponent('[#' + issue_number + '] ' + context.payload.issue.title)}` +
-            `&body=${encodeURIComponent('Closes #' + issue_number)}`;
 
-            await github.rest.issues.createComment({
-            ...repo,
-            issue_number,
-            body:
-                `🧩 Open a PR from this branch:\n` +
-                `[Create Pull Request](${prOpenUrl})\n\n` +
-                `This keeps **you** as the PR austhor.`
-            });
 

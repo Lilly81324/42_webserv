@@ -29,8 +29,8 @@ jobs:
             // Project config
             const projectId = 'PVT_kwHOBFQM7s4A_i9k';
             const statusFieldId = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndCQ';
-            const statusOptionId_InProgress = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndEA'; 
-            const statusOptionId_InReview   = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndEE';
+            const statusOptionId_InProgress = '47fc9ee4'; 
+            const statusOptionId_InReview   = 'df73e18b';
 
             // Helper: find item id for the issue in the project
             async function findItemId(issueNodeId) {
@@ -61,35 +61,53 @@ jobs:
               console.log('Moved to In Progress');
             }
 
-            if (endMatch) {
-              await github.graphql(`
-                mutation($input: UpdateProjectV2ItemFieldValueInput!) {
-                  updateProjectV2ItemFieldValue(input:$input){ projectV2Item{ id } }
-                }`, {
-                input: {
-                  projectId, itemId, fieldId: statusFieldId,
-                  value: { singleSelectOptionId: statusOptionId_InReview }
-                }
-              });
-              console.log('Moved to In Review');
-
-              // Open a PR if none exists from the branch {issueNumber}_{assignee}
-              const assignees = issue.assignees.map(a => a.login);
-              if (assignees.length) {
-                const branchPrefix = `${issue.number}_`;
-                const { data: branches } = await github.rest.repos.listBranches({ ...repo, protected: false });
-                const match = branches.find(b => b.name.startsWith(branchPrefix));
-                if (match) {
-                  try {
-                    const pr = await github.rest.pulls.create({
-                      ...repo,
-                      title: `[END] [#${issue.number}] ${issue.title}`,
-                      head: match.name,
-                      base: 'developer',
-                      body: `Auto PR for issue #${issue.number}`
+            if(endMatch){
+                    await github.graphql(`
+                        mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                        updateProjectV2ItemFieldValue(input:$input){ projectV2Item{ id } }
+                        }`, {
+                        input: {
+                        projectId, itemId, fieldId: statusFieldId,
+                        value: { singleSelectOptionId: statusOptionId_InReview } // e.g. 'df73e18b'
+                        }
                     });
-                    console.log(`Opened PR #${pr.data.number}`);
-                  } catch (e) { console.log('PR create skipped:', e.message); }
-                }
-              }
+                    console.log('Moved to In Review');
+                    const assignees = (issue.assignees || []).map(a => a.login);
+                    if (!assignees.length) return; // nothing to do
+
+                    const branchPrefix = `${issue.number}_`; // you can include assignee if you want: `${issue.number}_${assignees[0]}`
+                    // List branches (paginate)
+                    const branches = [];
+                    for (let page = 1; ; page++) {
+                        const { data } = await github.rest.repos.listBranches({ ...repo, per_page: 100, page });
+                        branches.push(...data);
+                        if (data.length < 100) break;
+                    }
+                    const match = branches.find(b => b.name.startsWith(branchPrefix));
+                    if (!match) { console.log(`No branch found starting with ${branchPrefix}`); return; }
+
+                    const BASE_BRANCH = 'development';
+                      const existing = await github.rest.pulls.list({
+                        ...repo,
+                        state: 'open',
+                        head: `${repo.owner}:${match.name}`,
+                        base: BASE_BRANCH
+                    });
+                    if (existing.data.length) {
+                        console.log(`PR already exists: #${existing.data[0].number}`);
+                        return;
+                    }
+                    const prOpenUrl =
+                    `https://github.com/${repo.owner}/${repo.repo}/compare/${encodeURIComponent(BASE_BRANCH)}...${encodeURIComponent(match.name)}` +
+                    `?expand=1&title=${encodeURIComponent('[#' + issue.number + '] ' + issue.title)}` +
+                    `&body=${encodeURIComponent('Closes #' + issue.number)}`;
+
+                await github.rest.issues.createComment({
+                    ...repo,
+                    issue_number: issue.number,
+                    body:
+                    `🧩 Open a PR from this branch:\n` +
+                    `[Create Pull Request](${prOpenUrl})\n\n` +
+                    `This keeps **you** as the PR author.`
+                });
             }

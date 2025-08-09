@@ -48,8 +48,6 @@ CGI
  	Handle POST/GET data transfer between server and CGI.
 
 B. Bonus
-	If you go for the bonus:
-
  	File upload.
 
 	 Cookies.
@@ -152,9 +150,9 @@ Unit Tests (catch bugs early):
 
 		Tools:
 
-		Catch2 / GoogleTest for C++ unit tests.
+			Catch2 / GoogleTest for C++ unit tests.
 
-		Python requests module for integration tests.
+			Python requests module for integration tests.
 
 5️⃣ Data-Driven Design
 		Store server configs in structs/classes loaded from config files.

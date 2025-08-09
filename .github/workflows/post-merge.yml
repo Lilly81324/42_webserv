@@ -38,7 +38,7 @@ jobs:
               const q = await github.graphql(`
                 query($pid:ID!){
                   node(id:$pid){ ... on ProjectV2 {
-                    items(first:200){ nodes{ id content{... on Issue{ id number }} } }
+                    items(first:100){ nodes{ id content{... on Issue{ id number }} } }
                   } }
                 }`, { pid: projectId });
               const item = q.node.items.nodes.find(n => n.content?.number === num);

@@ -29,8 +29,8 @@ jobs:
             // Project config
             const projectId = 'PVT_kwHOBFQM7s4A_i9k';
             const statusFieldId = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndCQ';
-            const statusOptionId_InProgress = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndEA'; 
-            const statusOptionId_InReview   = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndEE';
+            const statusOptionId_InProgress = '47fc9ee4'; 
+            const statusOptionId_InReview   = 'df73e18b';
 
             // Helper: find item id for the issue in the project
             async function findItemId(issueNodeId) {

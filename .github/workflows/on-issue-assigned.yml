@@ -30,7 +30,7 @@ jobs:
             const repo = context.repo;
 
             // Get 'developer' branch SHA
-            const baseRef = await github.rest.git.getRef({ ...repo, ref: 'heads/developer' });
+            const baseRef = await github.rest.git.getRef({ ...repo, ref: 'heads/development' });
 
             // Create branch if it does not exist
             try {

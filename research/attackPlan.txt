@@ -1,0 +1,196 @@
+Phase 0 — Project scaffold & CI gates
+
+Goal: compile/run skeleton, enforce quality gates early.
+Build:
+
+    Minimal repo layout (/src/{core,http,server,cgi,config,util}, /include, /tests).
+
+    Logger stub, error pages, Makefile.
+
+    CI: build_cpp98, tests-catch2-cpp11, asan-ubsan, clang-format.
+    Interfaces: Logger, Result<T> or status enum, error pages path.
+    Tests: CI green on empty tests; clang-format check passes.
+    Done: CI required checks green; repo “Allow auto-merge” on; branch protections set.
+
+Phase 1 — Core loop, poller, connection FSM (State + Strategy)
+
+Goal: accept many clients concurrently without doing HTTP yet.
+Build:
+
+    EventLoop, Poller (poll/epoll), TimerWheel, ConnectionManager, unique_fd.
+
+    Connection FSM with states: READ_HEADERS (stub) → WRITE (echo “hello”) → CLOSE.
+
+    Back-pressure: write buffer watermarks; pause reads when high.
+
+    Timeouts: header read, body read, write flush, idle keep-alive.
+    Interfaces: Connection::onReadable/onWritable, EventLoop::register(fd, mask).
+    Tests: spin server; 1k concurrent connects; verify no leaks (ASan).
+    Done: no blocking syscalls in loop, graceful SIGINT shutdown, CPU ~idle when idle.
+
+Phase 2 — HTTP request parsing & response building
+
+Goal: parse HTTP/1.1 correctly with safety caps.
+Build:
+
+    HttpParser (request line, headers, CRLF rules), header map (case-insensitive).
+
+    Caps: max header size, max header count.
+
+    Method enum + validation; “400” / “413” paths.
+
+    HttpResponseBuilder: sets Date, Server, Content-Length (when known).
+    Interfaces: HttpRequest (method, target, headers, body_info), HttpResponse.
+    Tests: fuzz odd headers; CL present/missing; oversized header → 431; malformed → 400.
+    Done: parser re-entrant, incremental; never throws through the loop.
+
+Phase 3 — Config lexer/parser → ConfigModel (+ validation pass)
+
+Goal: data-driven server; no hardcoded roots/methods.
+Build:
+
+    ConfigLexer → Token; ConfigParser → ConfigModel (servers, locations).
+
+    Validation pass: roots exist, body limits, duplicate server_name:port conflicts, allowed methods, default directives.
+
+    Error reporting includes line/column.
+    Interfaces: ConfigModel read-only view; VirtualServer, Location structs.
+    Tests: valid/invalid samples; line/column pinpointing; inheritance rules.
+    Done: config errors are human-readable; model is immutable at runtime.
+
+Phase 4 — Routing (Chain of Responsibility) + static files
+
+Goal: route request to Location, serve static files safely.
+Build:
+
+    Router: server select by Host+port; location precedence: =, ^~, regex, longest prefix (documented).
+
+    StaticFileHandler: canonicalize path, block .. traversal, symlink policy, index file, autoindex (if enabled).
+
+    403/404/405/301/302 support; default error pages; Allow header on 405.
+    Interfaces: IHandler (Template Method: prepare/produce), HandlerFactory::create().
+    Tests: matrix of URIs vs locations; redirects; forbidden traversal; missing file; method not allowed.
+    Done: paths always resolve under root; correct precedence shown in tests.
+
+Phase 5 — Request body & uploads (Strategy: body readers)
+
+Goal: handle entity bodies safely and predictably.
+Build:
+
+    ContentLengthReader and ChunkedReader (reject both headers together).
+
+    Per-location body size limit; temp file spill when large (avoid blocking).
+
+    Upload handler (PUT/POST to location), configurable upload dir + permissions.
+    Interfaces: IBodyReader strategy selection; UploadHandler.
+    Tests: small/large uploads; limit exceeded → 413; chunk extensions ignored; keep-alive preserved.
+    Done: back-pressure respected; no event loop stalls during large uploads.
+
+Phase 6 — CGI (execve) with supervision & header parsing
+
+Goal: safe, spec-compliant CGI execution.
+Build:
+
+    CgiHandler, CgiProcess with pipes; build full RFC 3875 env (GATEWAY_INTERFACE, REQUEST_METHOD, SCRIPT_NAME, QUERY_STRING, SERVER_*, REMOTE_ADDR, CONTENT_*).
+
+    Timeout (wall clock) + output cap → 504/502 mapping; kill → reap; clear pipes.
+
+    Parse CGI response headers (Status, Content-Type, blank line); propagate to HttpResponse.
+    Interfaces: CgiConfig (ext → interpreter), ICgiEnvironment.
+    Tests: good script; missing content-type; infinite loop → timeout; big output cap; stderr noise; malformed headers → 502.
+    Done: no interpreter runs in-process; zero zombies; errors mapped correctly.
+
+Phase 7 — Keep-alive, connection reuse, chunked responses
+
+Goal: production-correct HTTP behavior on output.
+Build:
+
+    Connection policy: honor Connection: keep-alive/close; track request count per socket; idle timeout.
+
+    Chunked transfer encoder for dynamic/unknown length responses (CGI / autoindex).
+
+    Always write Content-Length when known; otherwise chunked or close.
+    Interfaces: ResponseWriter with writeFixed / writeChunked.
+    Tests: multiple requests on same socket; pipeline-safe; chunked correctness; idle close.
+    Done: browsers reuse; curl --http1.1 --no-buffer works across handlers.
+
+Phase 8 — Logging, error mapping, observability
+
+Goal: visibility for debugging and grading.
+Build:
+
+    Access log (method, URI, status, bytes, ms, remote addr, req-id).
+
+    Error log with levels; errno text; include request id; optional metrics hooks.
+
+    Central error mapper (syscall → HTTP + message).
+    Interfaces: Logger injected; RequestId util.
+    Tests: log lines present with expected fields; error paths log once.
+    Done: logs actionable; no global singletons.
+
+Phase 9 — Security hardening
+
+Goal: safe by default.
+Build:
+
+    Reconfirm caps (headers/body/timeouts) enforced on all paths.
+
+    CGI env whitelist; scrub inherited env; sanitize script arguments.
+
+    Static path canonicalization + symlink policy documented and enforced.
+    Tests: slowloris headers; traversal attempts; CGI env leak attempts; huge bodies.
+    Done: server resists common misuse without OOM/hangs.
+
+Phase 10 — Performance polish
+
+Goal: stable under load.
+Build:
+
+    Tune buffer sizes; reuse buffers; optional sendfile for large files (if allowed).
+
+    TimerWheel granularity tuned; reduce syscalls; avoid copies in hot path.
+    Tests: 1k keep-alive clients doing small GETs; large file download; latency budget.
+    Done: CPU stays reasonable; no memory growth; p95 latency acceptable.
+
+Phase 11 — Documentation & DX
+
+Goal: make passing and handover easy.
+Build:
+
+    README with config examples; error pages; limits; CGI examples.
+
+    CHECKLIST.md mirroring the annotations (so graders can tick features).
+
+    CONTRIBUTING.md with branch naming (<issue>_<login>), PR template, label meanings.
+    Done: fresh teammate can run server, run tests, and understand config in minutes.
+
+Ticketing template (quick copy/paste)
+
+    Title: [HTTP] Enforce header caps & 431
+
+    Scope: Parser; add max_header_bytes, max_header_count; 431 on overflow; tests.
+
+    Tasks: implement limits; wire to config; unit tests; update docs.
+
+    Acceptance: given >N headers → 431; given >X bytes → 431; log warns once.
+
+    Risks: off-by-one; folded headers; performance regression.
+
+    Links: RFC 9112 § fields; annotated HTTP UML.
+
+Use labels: phase/1-core, phase/2-http, … phase/6-cgi, type/feature, type/test, prio/P1, etc.
+Dependency graph (high-level)
+
+Phase 0 → 1 → 2 → (3,4) → 5 → 6 → 7 → (8,9) → 10 → 11
+(You can overlap 3 and 4: parse config while finishing HTTP.)
+Definition of Done (across all phases)
+
+    Unit + E2E tests added/updated.
+
+    CI required checks green (build, tests, sanitizers, format).
+
+    No leaking FDs (ASan/Valgrind clean in CI/nightly).
+
+    Logs show request-id and error details.
+
+    Docs updated (README/CHANGELOG if needed).

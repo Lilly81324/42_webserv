@@ -17,7 +17,7 @@ jobs:
           github-token: ${{ secrets.GL_TOKEN || github.token }}
           script: |
             const pr = context.payload.pull_request;
-            if (!['main','developer'].includes(pr.base.ref)) return;
+            if (!['main','development'].includes(pr.base.ref)) return;
             await github.graphql(`
               mutation($id:ID!){
                 enablePullRequestAutoMerge(input:{ pullRequestId:$id, mergeMethod:SQUASH }){

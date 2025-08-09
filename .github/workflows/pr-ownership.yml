@@ -9,7 +9,7 @@ permissions:
   issues: write
 
 env:
-  TEAM_CSV: user1,user2,user3   # <-- put your 3 usernames here
+  TEAM_CSV: onlyHydra,Lilly81324,velikov777   # <-- put your 3 usernames here
 
 jobs:
   own-and-request:

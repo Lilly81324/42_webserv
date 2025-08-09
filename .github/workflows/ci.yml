@@ -1,7 +1,7 @@
 name: CI
 on:
   pull_request:
-    branches: [ main, developer ]
+    branches: [ main, development ]
     types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}

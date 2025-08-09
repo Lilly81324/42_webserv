@@ -1,19 +1,38 @@
 @startuml
-title Util Package (Index)
+skinparam packageStyle rectangle
+title Util (helpers used across layers)
 
-package Util {
-  class Logger { + log(lvl,msg) }
-  class MimeTypes { + get(ext):string + loadFromFile(path):bool }
-  class ErrorPageRegistry { + get(code):string + loadDirectory(dir):bool }
-  class PathResolver { + canonical(p):string + isUnderRoot(abs):bool }
-  class FileUtil { + readAll(path):bool + exists(path):bool }
-  class UrlCodec { + percentDecode(s):string + percentEncode(s):string }
-  class QueryString { + parse(qs):map<string,string> }
-  class HttpDate { + now():string + format(time_t):string }
-  class UniqueFd { + get():int + reset(int):void + release():int }
-  class Pipe { + rfd():int + wfd():int }
-  class Buffer { + append(...):void + consume(...):void + aboveHigh():bool }
-  class ErrorMapper { + errnoToHttp(int):int }
+class CiLess <<functor>> {
+  +bool operator()(string a, string b) const
 }
 
+class StringUtil {
+  +string to_lower(string s)
+  +bool   iequal(string a, string b)
+  +string trim(string s)
+  +string url_decode(string s)
+}
+
+class TimeUtil {
+  +long long now_epoch()
+  +string    http_date(long long epoch)
+}
+
+class MimeTypes {
+  +string from_extension(string ext)
+}
+
+class ETagUtil {
+  +string strong_from_bytes(const vector<char>&)
+  +string strong_from_file(const string& absPath)
+}
+
+class CRC32 {
+  +unsigned long compute(const vector<char>&)
+  +unsigned long compute_file(const string& absPath)
+}
+
+ETagUtil ..> CRC32
+
+CiLess ..> StringUtil
 @enduml

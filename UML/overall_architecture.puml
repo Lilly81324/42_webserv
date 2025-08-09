@@ -1,111 +1,69 @@
 @startuml
-title Webserv – Overall Architecture
-skinparam classAttributeIconSize 0
-skinparam componentStyle uml2
+skinparam packageStyle rectangle
+title Overall Architecture (with sessions, cookies, multi-CGI)
 
-package Core {
-  class EventLoop
-  class Poller
-  class TimerWheel
-  class ConnectionManager
-  class Connection
-  class Listener
+package "Config" {
+  class ServerConfig
+  class CgiSpec
 }
 
-package HTTP {
-  interface IHandler
-  abstract class AbstractHandler
-  class StaticFileHandler
-  class UploadHandler
-  class DeleteHandler
-  class CgiHandler
-  class Router
-  class HandlerFactory
-  class HttpParser
+package "HTTP" {
   class HttpRequest
   class HttpResponse
-  class ResponseWriter
+  class Headers
+  class CookieJar
 }
 
-package Config {
-  class ConfigLexer
-  class ConfigParser
-  class ConfigModel
-  class VirtualServer
-  class Location
+package "Core" {
+  class ServerPipeline
+  class SessionManager
+  class Session
 }
 
-package CGI {
+package "Routing" {
+  class Router
+  interface Handler
+}
+
+package "CGI" {
+  class CgiRegistry
   class CgiProcess
-  class CgiConfig
 }
 
-package Util {
-  class Logger
-  class MimeTypes
-  class ErrorPageRegistry
-  class PathResolver
-  class FileUtil
-  class UrlCodec
-  class QueryString
-  class HttpDate
-  class UniqueFd
-  class Pipe
-  class Buffer
-  class ErrorMapper
-  class RequestId
+package "Util" {
+  class CiLess
+  class StringUtil
   class TimeUtil
+  class MimeTypes
 }
 
-class ServerApp
-class AppContext
+' Key relationships
+ServerConfig ..> CgiSpec
+ServerPipeline *-- SessionManager
+ServerPipeline ..> Router
+ServerPipeline ..> CgiRegistry
+ServerPipeline ..> HttpRequest
+ServerPipeline ..> HttpResponse
 
-' Composition / containment
-ServerApp *-- AppContext
-ServerApp *-- EventLoop
-ServerApp *-- Listener
-ServerApp *-- Router
+HttpRequest *-- Headers
+HttpRequest *-- CookieJar
+HttpResponse *-- Headers
+SessionManager ..> HttpRequest
+SessionManager ..> HttpResponse
+Router ..> Handler
+Handler ..> HttpRequest
+Handler ..> HttpResponse
+CgiRegistry ..> CgiSpec
+CgiProcess ..> CgiRegistry
+CgiProcess ..> HttpRequest
+CgiProcess ..> Headers
 
-AppContext o-- Logger
-AppContext o-- ConfigModel
-AppContext o-- MimeTypes
-AppContext o-- ErrorPageRegistry
-AppContext o-- PathResolver
-AppContext o-- TimeUtil
-
-ConnectionManager *-- Connection
-EventLoop *-- Poller
-EventLoop *-- TimerWheel
-Router o-- VirtualServer
-VirtualServer o-- Location
-
-' Realization & inheritance
-IHandler <|.. AbstractHandler
-AbstractHandler <|-- StaticFileHandler
-AbstractHandler <|-- UploadHandler
-AbstractHandler <|-- DeleteHandler
-AbstractHandler <|-- CgiHandler
-
-' Dependencies
-Connection ..> HttpParser
-Connection ..> ResponseWriter
-ResponseWriter ..> HttpResponse
-HttpParser ..> HttpRequest
-Router ..> HandlerFactory
-HandlerFactory ..> IHandler
-StaticFileHandler ..> PathResolver
-StaticFileHandler ..> MimeTypes
-StaticFileHandler ..> FileUtil
-UploadHandler ..> PathResolver
-CgiHandler ..> CgiProcess
-CgiHandler ..> CgiConfig
-CgiProcess ..> UniqueFd
-CgiProcess ..> Pipe
-Connection ..> Buffer
-TimerWheel ..> Connection
-Router ..> ErrorMapper
-ResponseWriter ..> HttpDate
-ResponseWriter ..> ErrorPageRegistry
-Listener ..> UniqueFd
-
+note bottom
+Flow:
+  1) Parse -> HttpRequest (Headers, CookieJar)
+  2) SessionManager.ensure_session() sets cookie if needed
+  3) Router -> Handler OR CGI:
+     - If CGI: CgiRegistry picks interpreter; CgiProcess runs; merge headers/body
+  4) HttpResponse serialized back to client
+end note
 @enduml

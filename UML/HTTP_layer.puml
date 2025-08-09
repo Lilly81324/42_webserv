@@ -1,112 +1,60 @@
-@startuml HTTP_Layer
-title HTTP Layer
+@startuml
+skinparam packageStyle rectangle
 skinparam classAttributeIconSize 0
+title HTTP Layer (updated for Headers + Cookies)
+
+class CiLess <<functor>> {
+  +bool operator()(string a, string b) const
+}
+
+class Headers {
+  -multimap<string,string,CiLess> map_
+  +void add(string k, string v)
+  +void set(string k, string v)
+  +bool get_first(string k, out string v) const
+  +vector<string> get_all(string k) const
+  +void erase(string k)
+  +const multimap<string,string,CiLess>& raw() const
+}
+
+class CookieJar {
+  -map<string,string,CiLess> cookies_
+  +void parse_cookie_header(string line)
+  +bool get(string name, out string value) const
+  +void set_cookie_headers(Headers& h, string name, string value, string path, int max_age, bool http_only, bool secure, string same_site)
+}
 
 class HttpRequest {
-  + method : String
-  + target : String
-  + version : String
-  + headers : String
-  + bodyInfo : String
-  + remoteAddr : String
+  +string  method
+  +string  uri
+  +string  path
+  +string  query
+  +string  http_version
+  +Headers headers
+  +CookieJar cookies
+  +string  session_id
+  +vector<char> body
 }
 
 class HttpResponse {
-  + status : int
-  + reason : String
-  + headers : String
-  + body : String
+  +int     status
+  +string  reason
+  +Headers headers
+  +vector<char> body
+  +void setStatus(int s, string r)
 }
 
-class HttpParser {
-  - maxHeaderBytes : int
-  - maxHeaderCount : int
-  + feed(data:String) : String
-  + done() : bool
-  + request() : HttpRequest
-  + reset() : void
+class HttpPreconditions {
+  +bool has_if_match(const Headers&) const
+  +bool has_if_none_match(const Headers&) const
+  +string if_match(const Headers&) const
+  +string if_none_match(const Headers&) const
 }
 
-class ResponseWriter {
-  - chunked : bool
-  + writeHeaders(res:HttpResponse) : void
-  + writeBody(data:String) : void
-  + writeChunk(data:String) : void
-  + end() : void
-}
 
-interface IHandler {
-  + handle(req:HttpRequest, res:HttpResponse) : String
-}
-
-abstract class AbstractHandler {
-  + handle(req:HttpRequest, res:HttpResponse) : String
-  # prepare(req:HttpRequest) : int
-  # produce(req:HttpRequest, res:HttpResponse) : int
-}
-
-class StaticFileHandler
-class UploadHandler
-class DeleteHandler
-class CgiHandler
-
-class Router {
-  + route(req:HttpRequest) : IHandler
-}
-
-class HandlerFactory {
-  + create(req:HttpRequest, vs:VirtualServer, loc:Location) : IHandler
-}
-
-class VirtualServer
-class Location
-
-class MimeTypes  { 
-	+ get(ext:String) : String 
-	+ loadFromFile(path:String) : bool 
-}
-
-class HttpDate   { 
-	+ now() : String 
-}
-class UrlCodec   { 
-	+ percentDecode(s:String) : String 
-}
-class QueryString { 
-	+ parse(qs:String) : String 
-}
-class ErrorMapper { 
-	+ errnoToHttp(e:int) : int 
-}
-
-IHandler <|.. AbstractHandler
-AbstractHandler <|-- StaticFileHandler
-AbstractHandler <|-- UploadHandler
-AbstractHandler <|-- DeleteHandler
-AbstractHandler <|-- CgiHandler
-
-HttpParser --> HttpRequest
-ResponseWriter --> HttpResponse
-
-Router ..> HandlerFactory : creates
-Router ..> IHandler : selects
-StaticFileHandler ..> MimeTypes : content-type
-StaticFileHandler ..> UrlCodec   : path decode
-ResponseWriter ..> HttpDate      : Date
-Router ..> ErrorMapper           : error map
-UploadHandler ..> QueryString    : form parsing
-CgiHandler ..> UrlCodec          : query/path
-
-note right of HttpParser
-Enforce CRLF, reject both
-Content-Length and chunked.
-Cap header bytes and count.
-end note
-
-note right of ResponseWriter
-Set Date, Server, and
-Content-Length when known.
-Use chunked when unknown.
-end note
-
+HttpRequest *-- Headers
+HttpRequest *-- CookieJar
+HttpResponse *-- Headers
+HttpRequest ..> HttpPreconditions
+CookieJar ..> Headers : "adds Set-Cookie"
 @enduml

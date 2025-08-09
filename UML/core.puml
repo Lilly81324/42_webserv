@@ -1,102 +1,85 @@
 @startuml
-title Core Layer
-skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+title Core Layer (Session management + pipeline hooks)
 
-class Listener {
-  - fd : int
-  - address : String
-  - port : int
-  + open() : bool
-  + close() : void
+class Session {
+  +map<string,string> data
+  +long long expires_at_epoch
 }
 
-class EventLoop {
-  - running : bool
-  - poller : Poller
-  - timers : TimerWheel
-  - conns : ConnectionManager
-  + run() : void
-  + stop() : void
-  + registerFd(fd:int, events:int) : void
-  + modifyFd(fd:int, events:int) : void
-  + unregisterFd(fd:int) : void
+class SessionManager {
+  -map<string,Session> store_
+  -string cookie_name_
+  -int    max_age_
+  +SessionManager(string cookie_name, int max_age)
+  +string ensure_session(HttpRequest& req, HttpResponse& res)
+  +Session* get(string id)
+  +void gc(long long now_epoch)
+  -string gen_id()
 }
 
-class Poller {
-  + add(fd:int, events:int) : void
-  + mod(fd:int, events:int) : void
-  + del(fd:int) : void
-  + wait(timeoutMs:int) : int
+class ServerPipeline {
+  +void handleConnection(...)
+  +void processRequest(HttpRequest& req, HttpResponse& res)
 }
 
-class TimerWheel {
-  + add(deadlineMs:long, label:String) : int
-  + cancel(id:int) : void
-  + tick(nowMs:long) : void
-}
-
-class ConnectionManager {
-  + add(fd:int) : void
-  + remove(fd:int) : void
-  + find(fd:int) : Connection
-  + forEachActive() : void
-}
-
-class Connection {
-  - state : String
-  - readBuf : Buffer
-  - writeBuf : Buffer
-  - headerDeadlineMs : long
-  - bodyDeadlineMs : long
-  - writeDeadlineMs : long
-  - idleDeadlineMs : long
-  - keepAlive : bool
-  + onReadable() : void
-  + onWritable() : void
-  + scheduleDeadlines(nowMs:long) : void
-  + close() : void
-}
-
-class Buffer {
-  - data : String
-  - highMark : int
-  - lowMark : int
-  + append(data:String) : void
-  + consume(n:int) : void
-  + size() : int
-  + aboveHigh() : bool
-  + belowLow() : bool
-}
-
-class UniqueFd {
-  - fd : int
-  + get() : int
-  + reset(newfd:int) : void
-  + release() : int
-  - finalize() : void
-}
-
-class TimeUtil {
-  + nowMs() : long
-  + monotonicMs() : long
-}
-
-EventLoop *-- Poller
-EventLoop *-- TimerWheel
-EventLoop *-- ConnectionManager
-ConnectionManager *-- Connection
-Connection --> Buffer
-Connection ..> UniqueFd
-TimerWheel ..> Connection
-EventLoop ..> TimeUtil
-Listener ..> UniqueFd
-EventLoop ..> Listener
-
-note right of Connection
-States example:
-READ_HEADERS, READ_BODY,
-DISPATCH, WRITE_HEADERS,
-WRITE_BODY, IDLE, CLOSE
+SessionManager ..> HttpRequest : ensure_session()
+SessionManager ..> HttpResponse : set Set-Cookie
+ServerPipeline *-- SessionManager
+ServerPipeline ..> HttpRequest
+ServerPipeline ..> HttpResponse
+note right of ServerPipeline
+processRequest:
+  - parse request/headers
+  - cookies.parse_cookie_header()
+  - if sessions enabled:
+      req.session_id = sessionMgr.ensure_session(req,res)
+  - route(req,res)
+  - optional: cgi
 end note
 
+' === Add to Core UML ===
+class TokenBucket {
+  +double tokens
+  +double rate_per_sec
+  +double burst
+  +long long last_refill_epoch
+  +bool allow(int cost)
+}
+
+class RateLimiter {
+  -map<string, TokenBucket> bucketsByKey
+  +RateLimiter(int rpm, int burst)
+  +bool allow(const string& key, int cost)
+  +void gc(long long now_epoch)
+}
+
+class PutPatchHandler {
+  +int handle_put(const HttpRequest&, HttpResponse&)
+  +int handle_patch(const HttpRequest&, HttpResponse&)
+  -int write_file(const string& absPath, const vector<char>& body, string* newEtag)
+  -bool within_quota(size_t bytes) const
+}
+
+class ReverseProxy {
+  +int forward(const HttpRequest&, HttpResponse&, const Upstream&)
+  +void merge_back_headers(const Headers& from, Headers& to)
+}
+
+class Balancer {
+  +const Upstream* pick(UpstreamPool& pool)
+  +void on_success(Upstream&)
+  +void on_failure(Upstream&)
+}
+
+class HealthChecker {
+  +void tick(UpstreamPool& pool, const string& path)
+}
+
+ServerPipeline *-- RateLimiter
+ServerPipeline *-- PutPatchHandler
+ServerPipeline *-- ReverseProxy
+ServerPipeline ..> Balancer
+ServerPipeline ..> UpstreamPool
+ServerPipeline ..> HealthChecker
 @enduml

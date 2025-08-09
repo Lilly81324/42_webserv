@@ -1,64 +1,62 @@
 @startuml
-title Config Layer
-skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+title Config Layer (sessions + multi-CGI)
 
-class Token
-
-class ConfigLexer {
-  + next() : Token
-  + peek() : Token
-  + reset() : void
+class CgiSpec {
+  +string bin
+  +int    timeout_ms
 }
 
-class ConfigParser {
-  + parse() : ConfigModel
-  + errors() : String
+class ServerConfig {
+  +bool     session_enabled
+  +string   session_cookie_name
+  +int      session_max_age
+  +bool     session_secure
+  +bool     session_http_only
+  +string   session_same_site
+  +map<string,CgiSpec> cgi_mapping
+  +RateLimitConfig rate_limit
+  +PutPatchConfig  write_conf
+  +UpstreamPool    upstreams
+  --
+  +bool isSessionEnabled()
+  +string getSessionCookieName()
+  +int getSessionMaxAge()
+  +bool isSessionSecure()
+  +bool isSessionHttpOnly()
+  +string getSessionSameSite()
+  +map<string,CgiSpec> getCgiMapping()
 }
 
-class ConfigModel {
-  + servers : String
-  + defaults : String
+
+' === Add to Config UML === '
+class RateLimitConfig {
+  +int   requests_per_minute
+  +int   burst
+  +bool  enabled
 }
 
-class VirtualServer {
-  + serverName : String
-  + listenPort : int
-  + errorPageDir : String
+class PutPatchConfig {
+  +string root_directory
+  +int    max_body_bytes
+  +bool   allow_put
+  +bool   allow_patch
+  +bool   generate_etag
 }
 
-class Location {
-  + pattern : String
-  + root : String
-  + autoindex : bool
-  + allowedMethods : String
-  + uploadDir : String
-  + clientMaxBodySize : int
-  + cgiExt : String
-  + redirectTo : String
+class Upstream {
+  +string host
+  +int    port
+  +bool   healthy
+  +int    weight
 }
 
-class ErrorPageRegistry { 
-	+ loadDirectory(dir:String) : bool 
-	+ get(code:int) : String 
-}
-class MimeTypes { 
-	+ loadFromFile(path:String) : bool 
-	+ get(ext:String) : String 
+class UpstreamPool {
+  +vector<Upstream> nodes
+  +string health_path
+  +int    health_interval_ms
+  +string strategy   ' "round_robin" | "least_conn" '
 }
 
-ConfigParser ..> ConfigLexer
-ConfigParser ..> ConfigModel
-ConfigModel o-- VirtualServer
-VirtualServer o-- Location
-ConfigParser ..> ErrorPageRegistry : fill defaults
-ConfigParser ..> MimeTypes : load types
-
-note right of ConfigParser
-On parse: build AST → model,
-then validate: roots exist,
-method sets, body limits,
-duplicate server:port conflicts.
-Emit line/column in errors().
-end note
-
+ServerConfig ..> CgiSpec
 @enduml

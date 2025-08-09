@@ -1,58 +1,38 @@
 @startuml
-title Routing Layer
-skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+title Routing Layer (session-aware handlers)
+
+interface Handler {
+  +void handle(HttpRequest& req, HttpResponse& res)
+}
 
 class Router {
-  - servers : String
-  + selectServer(host:String, port:int) : VirtualServer
-  + matchLocation(path:String, vs:VirtualServer) : Location
-  + route(req:HttpRequest) : IHandler
+  +void addRoute(string method, string path, Handler*)
+  +void route(HttpRequest& req, HttpResponse& res)
+  +void addProxy(string path_prefix)  ' marks RouteEntry::is_proxy = true'
+  +bool isProxyMatch(const HttpRequest&) const
+  +void route_put(const HttpRequest&, HttpResponse&, PutPatchHandler&)
+  +void route_patch(const HttpRequest&, HttpResponse&, PutPatchHandler&)
 }
 
-class VirtualServer {
-  + serverName : String
-  + listenPort : int
-  + defaultRoot : String
-  + errorPageDir : String
+
+class RouteEntry {
+  +string method
+  +string path
+  +bool   is_proxy
 }
 
-class Location {
-  + pattern : String
-  + root : String
-  + autoindex : bool
-  + allowedMethods : String
-  + uploadDir : String
-  + clientMaxBodySize : int
-  + cgiExt : String
-  + redirectTo : String
-}
-
-class PathResolver {
-	 + canonical(p:String) : String 
-	 + isUnderRoot(abs:String) : bool 
-}
-class FileUtil { 
-	+ exists(p:String) : bool 
-	+ isDir(p:String) : bool 
-	+ readAll(p:String) : bool 
-}
-
-Router o-- VirtualServer
-VirtualServer o-- Location
-Router ..> PathResolver
-Router ..> FileUtil
-Router ..> IHandler : return handler
-
+Router ..> Handler
+Handler ..> HttpRequest
+Handler ..> HttpResponse
+Router *-- RouteEntry
 note right of Router
-Precedence (example):
-= exact, ^~ prefer prefix,
-regex, then longest prefix.
+Handlers can access:
+ - req.cookies (CookieJar)
+ - req.session_id (via SessionManager)
+ - headers/body
 end note
 
-note right of PathResolver
-Resolve canonical path,
-block traversal, enforce
-root prefix, symlink policy.
-end note
+
 
 @enduml

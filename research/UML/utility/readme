@@ -1,0 +1,186 @@
+Filesystem & Paths
+
+PathResolver (centralizes safe path handling)
+
+    Purpose: canonicalize paths, prevent traversal, enforce root prefix, control symlinks.
+
+    Fields: 
+			std::string root_; 
+			bool follow_symlinks_;
+
+    Methods:
+
+        std::string join(const std::string& base, const std::string& rel) const
+
+        std::string canonical(const std::string& p) const
+
+        bool isUnderRoot(const std::string& abs) const
+
+        bool exists/isFile/isDir(const std::string&) const
+
+    Notes: used by StaticFileHandler, UploadHandler, CGI script resolution.
+
+FileUtil (small, stateless helpers)
+
+    Methods: 
+		bool readAll(const std::string&, std::string& out), 
+		size_t sizeOf(const std::string&), bool writeAll(...), 
+		bool unlinkSafe(...).
+
+    Notes: wrap errno; no throws.
+
+ErrorPageRegistry (you already have)
+
+    Add: 
+		bool loadDirectory(const std::string& dir) to load 4xx/5xx templates.
+
+ETagGenerator (optional but nice)
+
+    Methods: 
+		std::string fromStat(time_t mtime, size_t size).
+
+    Use: set ETag header for static files.
+
+HTTP formatting & parsing helpers
+
+MimeTypes (you’ll add this)
+
+    Fields: 
+			std::map<std::string,std::string> table_;
+
+    Methods: 
+			bool loadFromFile(path), 
+			void add(ext, type), 
+			const std::string& get(ext) const.
+
+HttpDate (RFC 9110 date formatting)
+
+    Methods: 
+			std::string now() (GMT), 
+			std::string format(time_t).
+
+    Use: set Date header consistently.
+
+HeaderCase (normalize header keys)
+
+    Methods: 
+			static std::string toLower(const std::string&), 
+			static bool iequal(a,b).
+
+    Use: store headers case-insensitive; output original casing if you keep it.
+
+UrlCodec
+
+    Methods: 
+			std::string percentDecode(const std::string&),
+			std::string percentEncode(const std::string&).
+
+    Use: request target, query params, CGI PATH_INFO.
+
+QueryString
+
+    Methods: 
+			std::map<std::string,std::string> parse(const std::string&).
+
+    Use: GET params and application/x-www-form-urlencoded.
+
+RangeUtil (optional, if you implement 206)
+
+    Methods: 
+			bool parseRange(const std::string& hdr, size_t len, std::pair<size_t,size_t>& out).
+
+Buffering & performance
+
+Buffer (simple growable buffer with watermarks)
+
+    Fields: 
+		std::string data_; 
+		size_t hi_, lo_;
+
+    Methods: 
+		append(const char*, size_t), 
+		consume(size_t), 
+		size(), 
+		highWatermark(), 
+		lowWatermark().
+
+    Use: back-pressure in Connection (pause reads when size()>hi_).
+
+BufferPool (optional)
+
+    Methods: 
+		std::vector<char*> acquire(size_t), 
+		release(char*).
+
+    Use: reduce allocations in hot path (bonus).
+
+OS & processes (thin wrappers)
+
+UniqueFd (RAII for file descriptors)
+
+    Fields: int fd_;
+
+    Methods: 
+		get(), 
+		release(), 
+		reset(int), 
+		dtor closes.
+
+    Use: everywhere (sockets, pipes).
+
+Pipe
+
+    Fields: UniqueFd r_, w_;
+
+    Methods: 
+		bool open(), 
+		int rfd(), 
+		int wfd(), 
+		closeBoth().
+
+Subprocess (non-CGI specific, but used by CGI)
+
+    Fields: 
+		pid_t pid_; 
+		Pipe in_, out_, err_;
+
+    Methods: 
+		bool spawn(char* const argv[], char* const envp[]), 
+		bool killTermKill(), 
+		int waitNonBlock(int& status).
+
+Time (monotonic + wall clock)
+
+    Methods: 
+		uint64_t nowMs(), 
+		uint64_t monotonicMs()
+
+    Use: deadlines for header/body read, write flush, idle keep-alive.
+
+Cross-cutting concerns
+
+Logger (you have it)
+
+    Add levels, request-id support: void withRequest(const std::string& id).info(...) or pass id in calls.
+
+RequestId
+
+    Methods: std::string generate() (e.g., timestamp + counter or 8-byte hex).
+
+    Use: include in access/error logs.
+
+ErrorMapper
+
+    Methods: int fromErrno(int e) → HTTP status, const char* errnoText(int e).
+
+    Use: centralize syscall→HTTP decisions.
+
+Limiter (optional rate limiter)
+
+    Fields: per-IP token bucket map.
+
+    Methods: bool allow(ip).
+
+StringUtil (keep tiny helpers here instead of sprinkling)
+
+    Methods: trim, split, toLower, startsWith, endsWith, asciiOnly (for header tokens)

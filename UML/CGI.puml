@@ -1,0 +1,82 @@
+@startuml CGI
+title Util Package (Detailed)
+skinparam classAttributeIconSize 0
+
+class Logger {
+  - level : String
+  + log(level:String, msg:String) : void
+}
+
+class MimeTypes {
+  - table : String
+  - defaultType : String
+  + loadFromFile(path:String) : bool
+  + add(ext:String, type:String) : void
+  + get(ext:String) : String
+}
+
+class ErrorPageRegistry {
+  - pages : String
+  + loadDirectory(dir:String) : bool
+  + add(code:int, html:String) : void
+  + get(code:int) : String
+}
+
+class PathResolver {
+  - root : String
+  - followSymlinks : bool
+  + join(base:String, rel:String) : String
+  + canonical(p:String) : String
+  + isUnderRoot(abs:String) : bool
+  + exists(p:String) : bool
+  + isFile(p:String) : bool
+  + isDir(p:String) : bool
+}
+
+class FileUtil {
+  + readAll(path:String) : bool
+  + writeAll(path:String, data:String) : bool
+  + sizeOf(path:String) : int
+  + unlinkSafe(path:String) : bool
+}
+
+class UrlCodec { 
+	+ percentDecode(s:String) : String 
+	+ percentEncode(s:String) : String 
+}
+
+class QueryString {
+  + parse(qs:String) : String
+}
+class HttpDate { 
+	+ now() : String 
+	+ format(epoch:int) : String 
+}
+class UniqueFd { 
+	+ get() : int 
+	+ reset(fd:int) : void 
+	+ release() : int 
+}
+class Pipe { 
+	+ rfd() : int 
+	+ wfd() : int 
+}
+class Buffer { 
+	+ append(data:String) : void 
+	+ consume(n:int) : void 
+	+ size() : int + aboveHigh() : bool 
+	+ belowLow() : bool 
+}
+class ErrorMapper { 
+	+ errnoToHttp(e:int) : int 
+	+ errnoText(e:int) : String 
+}
+class RequestId { 
+	+ generate() : String 
+}
+class TimeUtil { 
+	+ nowMs() : long 
+	+ monotonicMs() : long 
+}
+
+@enduml

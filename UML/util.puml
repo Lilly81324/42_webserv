@@ -1,0 +1,19 @@
+@startuml
+title Util Package (Index)
+
+package Util {
+  class Logger { + log(lvl,msg) }
+  class MimeTypes { + get(ext):string + loadFromFile(path):bool }
+  class ErrorPageRegistry { + get(code):string + loadDirectory(dir):bool }
+  class PathResolver { + canonical(p):string + isUnderRoot(abs):bool }
+  class FileUtil { + readAll(path):bool + exists(path):bool }
+  class UrlCodec { + percentDecode(s):string + percentEncode(s):string }
+  class QueryString { + parse(qs):map<string,string> }
+  class HttpDate { + now():string + format(time_t):string }
+  class UniqueFd { + get():int + reset(int):void + release():int }
+  class Pipe { + rfd():int + wfd():int }
+  class Buffer { + append(...):void + consume(...):void + aboveHigh():bool }
+  class ErrorMapper { + errnoToHttp(int):int }
+}
+
+@enduml

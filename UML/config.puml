@@ -1,0 +1,64 @@
+@startuml
+title Config Layer
+skinparam classAttributeIconSize 0
+
+class Token
+
+class ConfigLexer {
+  + next() : Token
+  + peek() : Token
+  + reset() : void
+}
+
+class ConfigParser {
+  + parse() : ConfigModel
+  + errors() : String
+}
+
+class ConfigModel {
+  + servers : String
+  + defaults : String
+}
+
+class VirtualServer {
+  + serverName : String
+  + listenPort : int
+  + errorPageDir : String
+}
+
+class Location {
+  + pattern : String
+  + root : String
+  + autoindex : bool
+  + allowedMethods : String
+  + uploadDir : String
+  + clientMaxBodySize : int
+  + cgiExt : String
+  + redirectTo : String
+}
+
+class ErrorPageRegistry { 
+	+ loadDirectory(dir:String) : bool 
+	+ get(code:int) : String 
+}
+class MimeTypes { 
+	+ loadFromFile(path:String) : bool 
+	+ get(ext:String) : String 
+}
+
+ConfigParser ..> ConfigLexer
+ConfigParser ..> ConfigModel
+ConfigModel o-- VirtualServer
+VirtualServer o-- Location
+ConfigParser ..> ErrorPageRegistry : fill defaults
+ConfigParser ..> MimeTypes : load types
+
+note right of ConfigParser
+On parse: build AST → model,
+then validate: roots exist,
+method sets, body limits,
+duplicate server:port conflicts.
+Emit line/column in errors().
+end note
+
+@enduml

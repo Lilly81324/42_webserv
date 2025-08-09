@@ -1,0 +1,58 @@
+@startuml
+title Routing Layer
+skinparam classAttributeIconSize 0
+
+class Router {
+  - servers : String
+  + selectServer(host:String, port:int) : VirtualServer
+  + matchLocation(path:String, vs:VirtualServer) : Location
+  + route(req:HttpRequest) : IHandler
+}
+
+class VirtualServer {
+  + serverName : String
+  + listenPort : int
+  + defaultRoot : String
+  + errorPageDir : String
+}
+
+class Location {
+  + pattern : String
+  + root : String
+  + autoindex : bool
+  + allowedMethods : String
+  + uploadDir : String
+  + clientMaxBodySize : int
+  + cgiExt : String
+  + redirectTo : String
+}
+
+class PathResolver {
+	 + canonical(p:String) : String 
+	 + isUnderRoot(abs:String) : bool 
+}
+class FileUtil { 
+	+ exists(p:String) : bool 
+	+ isDir(p:String) : bool 
+	+ readAll(p:String) : bool 
+}
+
+Router o-- VirtualServer
+VirtualServer o-- Location
+Router ..> PathResolver
+Router ..> FileUtil
+Router ..> IHandler : return handler
+
+note right of Router
+Precedence (example):
+= exact, ^~ prefer prefix,
+regex, then longest prefix.
+end note
+
+note right of PathResolver
+Resolve canonical path,
+block traversal, enforce
+root prefix, symlink policy.
+end note
+
+@enduml

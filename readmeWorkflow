@@ -5,6 +5,11 @@ To trigger automation correctly, **follow the exact formats below** when creatin
 
 ---
 
+
+PLEASE USE THE FOLLOWING TO CLONE :
+	git clone --recurse-submodules <repo-url>
+
+
 ## 🪪 When Creating an Issue
 
 ### 📍 Where:

@@ -1,0 +1,27 @@
+name: CI
+on:
+  pull_request:
+    branches: [ main, developer ]
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  Build (C++98):
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build webserv (C++98)
+        run: make
+  Tests (Catch2, C++11):
+    runs-on: ubuntu-latest
+    needs: Build (C++98)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build tests
+        run: make test
+      - name: Run tests
+        run: ./test_webserv

@@ -1,0 +1,95 @@
+name: On Commit Keywords
+on:
+  push:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  parse-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GL_TOKEN || github.token }}
+          script: |
+            const repo = context.repo;
+
+            // Get the latest commit on this push (head commit)
+            const commit = context.payload.head_commit;
+            if (!commit) { console.log('No head_commit'); return; }
+            const message = commit.message || '';
+            const newMatch = message.match(/\[New\]\s*\[#(\d+)\]/i);
+            const endMatch = message.match(/\[END\]\s*\[#(\d+)\]/i);
+            const issueNumber = +(newMatch?.[1] || endMatch?.[1] || 0);
+            if (!issueNumber) { console.log('No issue reference found'); return; }
+
+            // Project config
+            const projectId = 'PVT_kwHOBFQM7s4A_i9k';
+            const statusFieldId = 'PVTSSF_lAHOBFQM7s4A_i9kzgyndCQ';
+            const statusOptionId_InProgress = 'xxxxxxxx_inprogress'; // TODO: fill
+            const statusOptionId_InReview   = 'xxxxxxxx_inreview';   // TODO: fill
+
+            // Helper: find item id for the issue in the project
+            async function findItemId(issueNodeId) {
+              const q = await github.graphql(`
+                query($pid: ID!) {
+                  node(id:$pid){ ... on ProjectV2 {
+                    items(first:200){ nodes{ id content{... on Issue{ id number }} } }
+                  } }
+                }`, { pid: projectId });
+              const item = q.node.items.nodes.find(n => n.content?.id === issueNodeId);
+              return item?.id;
+            }
+
+            const { data: issue } = await github.rest.issues.get({ ...repo, issue_number: issueNumber });
+            const itemId = await findItemId(issue.node_id);
+            if (!itemId) { console.log('Issue not in project'); return; }
+
+            if (newMatch) {
+              await github.graphql(`
+                mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                  updateProjectV2ItemFieldValue(input:$input){ projectV2Item{ id } }
+                }`, {
+                input: {
+                  projectId, itemId, fieldId: statusFieldId,
+                  value: { singleSelectOptionId: statusOptionId_InProgress }
+                }
+              });
+              console.log('Moved to In Progress');
+            }
+
+            if (endMatch) {
+              await github.graphql(`
+                mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                  updateProjectV2ItemFieldValue(input:$input){ projectV2Item{ id } }
+                }`, {
+                input: {
+                  projectId, itemId, fieldId: statusFieldId,
+                  value: { singleSelectOptionId: statusOptionId_InReview }
+                }
+              });
+              console.log('Moved to In Review');
+
+              // Open a PR if none exists from the branch {issueNumber}_{assignee}
+              const assignees = issue.assignees.map(a => a.login);
+              if (assignees.length) {
+                const branchPrefix = `${issue.number}_`;
+                const { data: branches } = await github.rest.repos.listBranches({ ...repo, protected: false });
+                const match = branches.find(b => b.name.startsWith(branchPrefix));
+                if (match) {
+                  try {
+                    const pr = await github.rest.pulls.create({
+                      ...repo,
+                      title: `[END] [#${issue.number}] ${issue.title}`,
+                      head: match.name,
+                      base: 'developer',
+                      body: `Auto PR for issue #${issue.number}`
+                    });
+                    console.log(`Opened PR #${pr.data.number}`);
+                  } catch (e) { console.log('PR create skipped:', e.message); }
+                }
+              }
+            }

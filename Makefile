@@ -2,7 +2,7 @@
 #                                    CONFIG                                    #
 # **************************************************************************** #
 
-NAM				:= webserv
+NAME				:= webserv
 TEST_BIN		:= test_webserv
 
 # Directories

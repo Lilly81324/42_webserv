@@ -1,16 +1,16 @@
 @startuml
 skinparam packageStyle rectangle
-title CGI Layer (multiple CGI types)
+title CGI Layer (Registry + Process + Handler + Logger)
 
-class CgiSpec {
-  +string bin
-  +int    timeout_ms
+class CgiSpec { 
+	+string bin 
+	+int timeout_ms 
 }
 
 class CgiRegistry {
   -map<string,CgiSpec> by_ext_
   +void add(string ext, CgiSpec spec)
-  +const CgiSpec* find_for_path(string path) const
+  +const CgiSpec* find_for_ext(string ext) const
 }
 
 class CgiProcess {
@@ -20,8 +20,27 @@ class CgiProcess {
            int timeout_ms)
 }
 
-CgiRegistry ..> CgiSpec
-CgiProcess ..> CgiSpec
+class CgiHandler {
+  -const CgiRegistry* reg
+  -Logger* log
+  +CgiHandler(const CgiRegistry*, Logger*)
+  +void handle(HttpRequest&, HttpResponse&)
+  -const CgiSpec* selectSpec(const Location&, const ServerConfig&, const string& path) const
+}
+
+' Util references
+class StringUtil
+class PathUtil
+
+CgiHandler ..> CgiRegistry
+CgiHandler ..> CgiProcess
+CgiHandler ..> Logger
 CgiProcess ..> HttpRequest
-CgiProcess ..> Headers : "CGI response headers"
+CgiProcess ..> Headers
+CgiProcess ..> PathUtil
+CgiProcess ..> StringUtil
+
+note bottom of CgiProcess
+Bypassed when Router selects a proxy location.
+end note
 @enduml

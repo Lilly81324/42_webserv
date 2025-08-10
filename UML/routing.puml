@@ -1,38 +1,44 @@
 @startuml
 skinparam packageStyle rectangle
-title Routing Layer (session-aware handlers)
+title Routing Layer (server & location aware)
 
 interface Handler {
   +void handle(HttpRequest& req, HttpResponse& res)
 }
 
+class StaticHandler {
+  +void handle(HttpRequest&, HttpResponse&)
+}
+
+class CgiHandler {
+  +void handle(HttpRequest&, HttpResponse&)
+  -const CgiSpec* selectSpec(const Location&, const ServerConfig&, const string& path) const
+}
+
+class ProxyHandler {
+  +void handle(HttpRequest&, HttpResponse&)
+}
+
+class PutPatchHandler {
+  +int handle_put(const HttpRequest&, HttpResponse&)
+  +int handle_patch(const HttpRequest&, HttpResponse&)
+}
+
+class RouteResolver {
+  +const VirtualServer* matchServer(const ServerConfig&, const string& host, int port) const
+  +const Location* matchLocation(const VirtualServer&, const string& path) const
+}
+
 class Router {
-  +void addRoute(string method, string path, Handler*)
   +void route(HttpRequest& req, HttpResponse& res)
-  +void addProxy(string path_prefix)  ' marks RouteEntry::is_proxy = true'
-  +bool isProxyMatch(const HttpRequest&) const
-  +void route_put(const HttpRequest&, HttpResponse&, PutPatchHandler&)
-  +void route_patch(const HttpRequest&, HttpResponse&, PutPatchHandler&)
+  -RouteResolver resolver
 }
 
-
-class RouteEntry {
-  +string method
-  +string path
-  +bool   is_proxy
-}
-
-Router ..> Handler
+Router ..> RouteResolver
+Router ..> StaticHandler
+Router ..> CgiHandler
+Router ..> ProxyHandler
+Router ..> PutPatchHandler
 Handler ..> HttpRequest
 Handler ..> HttpResponse
-Router *-- RouteEntry
-note right of Router
-Handlers can access:
- - req.cookies (CookieJar)
- - req.session_id (via SessionManager)
- - headers/body
-end note
-
-
-
 @enduml

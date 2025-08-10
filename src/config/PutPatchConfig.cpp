@@ -1,0 +1,16 @@
+/* --- PutPatchConfig.cpp --- */
+
+/* ------------------------------------------
+author: undefined
+date: 8/10/2025
+------------------------------------------ */
+
+#include "PutPatchConfig.h"
+
+PutPatchConfig::PutPatchConfig() {
+    // Constructor
+}
+
+PutPatchConfig::~PutPatchConfig() {
+    // Destructor
+}

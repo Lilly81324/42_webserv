@@ -1,6 +1,31 @@
 @startuml
 skinparam packageStyle rectangle
-title Overall Architecture (with Util + Logger)
+title Overall Architecture (Networking + HTTP + Core + Routing + CGI + Util + Logger)
+
+package "Networking" {
+  class Server {
+    +void start()
+    +void stop()
+    -EventLoop loop
+    -ServerConfig config
+  }
+  class EventLoop {
+    -fd_set read_fds
+    -fd_set write_fds
+    -int max_fd
+    +void addFD(int fd, int events)
+    +void removeFD(int fd)
+    +void run()
+    +void handleEvents()
+  }
+  class ClientConnection {
+    -int fd
+    -sockaddr_in addr
+    +int readData()
+    +int writeData()
+    +void close()
+  }
+}
 
 package "Config" {
   class ServerConfig
@@ -56,7 +81,13 @@ package "Util" {
   class RandomUtil
 }
 
-' Key relationships
+' ===== Networking Relationships =====
+Server --> EventLoop
+EventLoop --> ClientConnection
+ClientConnection --> HttpRequest
+ClientConnection --> HttpResponse
+
+' ===== Core & Config Relationships =====
 ServerPipeline ..> ServerConfig
 ServerPipeline *-- SessionManager
 ServerPipeline *-- RateLimiter
@@ -64,11 +95,13 @@ ServerPipeline ..> ReverseProxy
 ServerPipeline ..> Balancer
 ServerPipeline ..> Logger
 
+' ===== HTTP Relationships =====
 HttpRequest *-- Headers
 HttpRequest *-- CookieJar
 HttpResponse *-- Headers
 HttpPreconditions ..> ETagUtil
 
+' ===== Routing =====
 Router ..> RouteResolver
 Router ..> StaticHandler
 Router ..> ProxyHandler
@@ -76,11 +109,13 @@ Router ..> CgiHandler
 Router ..> PutPatchHandler
 Router ..> Logger
 
+' ===== CGI =====
 CgiHandler ..> CgiRegistry
 CgiHandler ..> CgiProcess
 CgiProcess ..> HttpRequest
 CgiProcess ..> Headers
 
+' ===== Util =====
 Headers ..> CiLess
 SessionManager ..> TimeUtil
 SessionManager ..> RandomUtil
@@ -92,12 +127,15 @@ StaticHandler ..> PathUtil
 
 note bottom
 Flow:
-  - HTTP parses -> HttpRequest (Headers, CookieJar)
-  - SessionManager.ensure_session() (cookies set via HttpResponse)
+  - Server starts -> EventLoop monitors sockets
+  - ClientConnection accepts & reads data
+  - HTTP parser creates HttpRequest (Headers, CookieJar)
+  - SessionManager.ensure_session() manages cookies
   - Router resolves VirtualServer + Location
   - If proxy -> Balancer picks Upstream -> ReverseProxy.forward()
   - Else if CGI -> CgiHandler -> CgiProcess
   - Else static / PUT / PATCH via handlers
+  - HttpResponse built and sent to ClientConnection
   - Logger records per-step events
 end note
 @enduml

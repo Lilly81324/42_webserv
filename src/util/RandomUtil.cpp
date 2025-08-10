@@ -1,0 +1,16 @@
+/* --- RandomUtil.cpp --- */
+
+/* ------------------------------------------
+author: undefined
+date: 8/10/2025
+------------------------------------------ */
+
+#include "RandomUtil.h"
+
+RandomUtil::RandomUtil() {
+    // Constructor
+}
+
+RandomUtil::~RandomUtil() {
+    // Destructor
+}

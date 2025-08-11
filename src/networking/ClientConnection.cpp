@@ -167,9 +167,12 @@ void ClientConnection::readFromSocket()
 			close();
 			return;
 		}
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
+		if (n < 0)
+		{
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+			close();
 			return;
+		}
 	}
-	close();
-	return;
 }

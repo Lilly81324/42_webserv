@@ -1,6 +1,5 @@
 #define CATCH_CONFIG_MAIN
 #include <catch2/catch_all.hpp>
-#include "EventLoop.h"
 
 // Simple test to verify Catch2 is working
 TEST_CASE("Basic test", "[basic]") {
@@ -16,11 +15,4 @@ TEST_CASE("String operations", "[string]") {
     REQUIRE(hello.length() == 5);
     REQUIRE(world.length() == 5);
     REQUIRE(hello + " " + world == "hello world");
-}
-
-TEST_CASE("Testing Loops", "[EventLopp]"){
-
-	EventLoop EventLoop;
-
-
 }

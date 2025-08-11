@@ -1,28 +1,21 @@
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
-/*   Server.hpp                                         :+:      :+:    :+:   */
+/*   ConfigPrinter.hpp                                  :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
 /*   By: vvelikov <vvelikov@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/08/08 22:05:17 by vvelikov          #+#    #+#             */
-/*   Updated: 2025/08/08 22:09:24 by vvelikov         ###   ########.fr       */
+/*   Created: 2025/08/09 17:11:40 by vvelikov          #+#    #+#             */
+/*   Updated: 2025/08/11 13:30:34 by vvelikov         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-#ifndef SERVER_HPP
-#define SERVER_HPP
+#ifndef CONFIG_PRINTER_HPP
+#define CONFIG_PRINTER_HPP
 
-#include "Config.hpp"
+#include <iosfwd>
+#include "ServerConfig.h"
 
-class Server{
-	private:
-		const Config &_cfg;
-	public:
-		explicit Server(const Config &cfg);
-		~Server();
-		void run();
-};
-
+void printConfigSummary(std::ostream& os, const ServerConfig& cfg);
 
 #endif

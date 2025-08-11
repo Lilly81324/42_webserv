@@ -122,10 +122,11 @@ std::string Headers::serialize(void) const
 	for(it = this->map.begin(); it != this->map.end(); it++)
 	{
 		out.append(it->first);
-		out.append(":");
+		out.append(": ");
 		out.append(it->second);
-		out.append("\n");
+		out.append("\r\n");
 	}
+	out += "\r\n";
 	return (out);
 }
 

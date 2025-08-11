@@ -15,7 +15,6 @@ date: 11/08/2025
 
 using namespace std;
 
-class CiLess;
 
 class CookieJar
 {
@@ -28,15 +27,15 @@ class CookieJar
 		void	erase(const string &key);
 		void	clear(void);
 
-		map<string, string>::const_iterator	CookieJar::getBegin(void) const;
-		map<string, string>::const_iterator	CookieJar::getEnd(void) const;
+		multimap<string, string>::const_iterator	getBegin(void) const;
+		multimap<string, string>::const_iterator	getEnd(void) const;
 		bool	keyExists(string key) const;
 		void	show(ostream &out) const;
 		int		getLength(void) const;
 		bool	isEmpty(void) const;
 		string	get(string key);
 	private:
-		map<string, string> cookies;
+		multimap<string, string> cookies;
 };
 
 ostream	&operator<<(ostream, const CookieJar &target);

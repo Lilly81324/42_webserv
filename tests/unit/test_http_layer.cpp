@@ -46,7 +46,7 @@ TEST_CASE("HTTP Layer tests", "[https]")
 		REQUIRE(empty.isEmpty());
 		REQUIRE(empty.getLength() == 0);
 		// Check Serialization
-		REQUIRE(filled.serialize() == "Message:Hewwo\nType:https\n");
+		REQUIRE(filled.serialize() == "Message: Hewwo\r\nType: https\r\n\r\n");
 		// Check everything on unset Header
 		Headers neww;
 		neww.getBegin();
@@ -55,7 +55,7 @@ TEST_CASE("HTTP Layer tests", "[https]")
 		std::cout << neww;
 		REQUIRE(neww.keyExists("Something") == 0);
 		REQUIRE(neww.keyCount("Something") == 0);
-		REQUIRE(neww.serialize() == "");
+		REQUIRE(neww.serialize() == "\r\n");
 		REQUIRE(neww.get("Something") == "");
 		REQUIRE(neww.getLength() == 0);
 		REQUIRE(neww.isEmpty() == true);

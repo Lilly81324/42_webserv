@@ -23,7 +23,7 @@ CookieJar::~CookieJar()
  * ?
  */
 void CookieJar::setCookieHeaders(\
-	Headers &h, string name, string value, string path, \
+	Headers &h, string key, string value, string path, \
 	int maxAge, bool httpOnly, bool secure, string sameSite)
 {
 	(void)h;
@@ -32,7 +32,9 @@ void CookieJar::setCookieHeaders(\
 	(void)httpOnly;
 	(void)secure;
 	(void)sameSite;
-	(this->cookies[name] = value);
+	// this->cookies.insert(key,value);
+	(void)value;
+	(void)key;
 }
 
 /**
@@ -42,7 +44,9 @@ void CookieJar::setCookieHeaders(\
  */
 void CookieJar::set(string key, string value)
 {
-	this->cookies[key] = value;
+	// this->cookies.insert(key, value);
+	(void)value;
+	(void)key;
 }
 
 /**
@@ -65,7 +69,7 @@ void	CookieJar::clear(void)
 /**
  * @returns Constant Interator to beginning of CookieJar
  */
-map<string, string>::const_iterator CookieJar::getBegin(void) const
+multimap<string, string>::const_iterator CookieJar::getBegin(void) const
 {
 	return (this->cookies.begin());
 }
@@ -73,7 +77,7 @@ map<string, string>::const_iterator CookieJar::getBegin(void) const
 /**
  * @returns Constant Interator to end of CookieJar
  */
-map<string, string>::const_iterator CookieJar::getEnd(void) const
+multimap<string, string>::const_iterator CookieJar::getEnd(void) const
 {
 	return (this->cookies.end());
 }
@@ -139,7 +143,7 @@ string CookieJar::get(string key)
 {
 	if (!this->keyExists(key))
 		return ("");
-	return (this->cookies[key]);
+	return (this->cookies.find(key)->second);
 }
 
 /**

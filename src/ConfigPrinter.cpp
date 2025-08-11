@@ -6,11 +6,11 @@
 /*   By: vvelikov <vvelikov@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/08/09 17:13:51 by vvelikov          #+#    #+#             */
-/*   Updated: 2025/08/09 17:29:37 by vvelikov         ###   ########.fr       */
+/*   Updated: 2025/08/11 13:29:56 by vvelikov         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-#include "ConfigPrinter.hpp"
+#include "ServerConfig.h"
 #include <iostream>
 #include <vector>
 #include <set>
@@ -99,7 +99,7 @@ void printServerBlock(std::ostream& os, const ServerBlock& s) {
 	
 }
 
-void printConfigSummary(std::ostream& os, const Config& cfg) {
+void printConfigSummary(std::ostream& os, const ServerConfig& cfg) {
     const std::vector<ServerBlock>& sv = cfg.servers();
     os << "[INFO] Parsed servers: " << sv.size() << "\n";
     for (std::vector<ServerBlock>::const_iterator it = sv.begin(); it != sv.end(); ++it)

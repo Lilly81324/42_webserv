@@ -12,7 +12,6 @@ Date: 8/11/2025
 
 class UniqueFD
 {
-	int fd_;
 
 	public:
 		explicit UniqueFD(int fd = -1)
@@ -27,6 +26,7 @@ class UniqueFD
 		}
 
 	private:
+		int fd_;
 		UniqueFD(const UniqueFD &);
 		UniqueFD &operator=(const UniqueFD &);
 

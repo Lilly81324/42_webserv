@@ -7,10 +7,10 @@ using namespace std;
 int main(int argc, char const *argv[])
 {
 
-	ServerConfig srvConfig();
+	ServerConfig srvConfig;
 	Server server(srvConfig);
 
-	server.run();
+	server.start();
 
 	(void)argc;
 	(void)argv;

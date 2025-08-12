@@ -95,22 +95,23 @@ void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique
 							   std::map<std::pair<std::string, int>, std::vector<int> > &vsIndiciesByPair)
 {
 
+	unique_pairs.clear();
+	vsIndiciesByPair.clear();
 	std::set<std::pair<std::string, int> > uniq;
 	for (std::vector<VirtualServer>::const_iterator it = srvConfig.servers.begin();
 		 it != srvConfig.servers.end(); ++it)
 	{
 		const int idx = int(it - srvConfig.servers.begin());
-		const std::string host = it->listen_host.empty() ? std::string("0.0.0.0") : it->listen_host;
 		const int port = it->listen_port;
-
+		
+		if(port <= 0 || port >= 65535) continue;
+		
+		const std::string host = it->listen_host.empty() ? std::string("0.0.0.0") : it->listen_host;
 		const std::pair<std::string, int> key(host, port);
-		uniq.insert(key);
+		if (uniq.insert(key).second) 
+			unique_pairs.push_back(key);
 		vsIndiciesByPair[key].push_back(idx);
 	}
-	unique_pairs.clear();
-	for (std::set<std::pair<std::string,int> >::const_iterator sit = uniq.begin();
-			sit != uniq.end(); ++sit)
-		unique_pairs.push_back(*sit);
 }
 
 int Server::createListenSocketRaw(const std::string &host, int port, bool &out_is_ipv6)

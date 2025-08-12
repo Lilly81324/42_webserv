@@ -8,8 +8,8 @@
 #include <cstring>
 
 #include "Server.h"
-#include "stubs/ServerConfig.h" // stubs
-#include "stubs/EventLoop.h"	 // stub
+#include "ServerConfig.h" // stubs
+#include "EventLoop.h"	  // stub
 
 // Helper: pick a free TCP port on 127.0.0.1 (race is acceptable in tests)
 static int pick_free_port()
@@ -31,6 +31,7 @@ static int pick_free_port()
 	::close(fd);
 	return port;
 }
+
 
 TEST_CASE("Server starts one listener for multiple VS on same (host,port)", "[server][startup]")
 {
@@ -54,6 +55,29 @@ TEST_CASE("Server starts one listener for multiple VS on same (host,port)", "[se
 	REQUIRE(s.listenerPortAt(0) == port);
 
 	// EventLoop stub recorded added fds? (optional — if you expose it)
+	s.stop();
+}
+
+TEST_CASE("Server starts multiple listeners for different (host, port)", "[server][startup]")
+{
+	int port1 = pick_free_port();
+	int port2 = pick_free_port();
+
+	ServerConfig cfg;
+	VirtualServer vs1;
+	vs1.listen_host = "127.0.0.1";
+	vs1.listen_port = port1;
+	VirtualServer vs2;
+	vs2.listen_host = "127.0.0.1";
+	vs2.listen_port = port2;
+	cfg.servers.push_back(vs1);
+	cfg.servers.push_back(vs2);
+
+	Server s(cfg);
+	REQUIRE_NOTHROW(s.start());
+	REQUIRE(s.listenerCount() == 2);
+	REQUIRE(s.listenerPortAt(0) == port1);
+	REQUIRE(s.listenerPortAt(1) == port2);
 	s.stop();
 }
 
@@ -114,4 +138,58 @@ TEST_CASE("Server is actually listening (connect succeeds)", "[server][integrati
 
 	::close(cfd);
 	s.stop();
+}
+
+TEST_CASE("Server handles empty configuration", "[server][config]")
+{
+	ServerConfig cfg; // No virtual servers
+	Server s(cfg);
+	REQUIRE_NOTHROW(s.start());
+	REQUIRE(s.listenerCount() == 0);
+	s.stop();
+}
+
+TEST_CASE("Server skips invalid port and continues running", "[server][config]") {
+    ServerConfig cfg;
+
+    // Valid virtual server
+    VirtualServer vs1;
+    vs1.listen_host = "127.0.0.1";
+    vs1.listen_port = 8080; // Valid port
+    cfg.servers.push_back(vs1);
+
+    // Invalid virtual server
+    VirtualServer vs2;
+    vs2.listen_host = "127.0.0.1";
+    vs2.listen_port = -1; // Invalid port
+    cfg.servers.push_back(vs2);
+
+    Server s(cfg);
+
+    // Server should start without throwing
+    REQUIRE_NOTHROW(s.start());
+
+    // Only the valid listener should be created
+    REQUIRE(s.listenerCount() == 1);
+    REQUIRE(s.listenerPortAt(0) == 8080);
+
+    s.stop();
+    REQUIRE(s.listenerCount() == 0); // Ensure all listeners are closed
+}
+TEST_CASE("Server shuts down gracefully", "[server][shutdown]")
+{
+	int port = pick_free_port();
+
+	ServerConfig cfg;
+	VirtualServer vs;
+	vs.listen_host = "127.0.0.1";
+	vs.listen_port = port;
+	cfg.servers.push_back(vs);
+
+	Server s(cfg);
+	REQUIRE_NOTHROW(s.start());
+	REQUIRE(s.listenerCount() == 1);
+
+	s.stop();
+	REQUIRE(s.listenerCount() == 0); // Ensure all listeners are closed
 }

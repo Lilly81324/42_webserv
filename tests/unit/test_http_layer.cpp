@@ -65,7 +65,7 @@ TEST_CASE("HTTP Layer tests", "[https]")
 			REQUIRE(empty.isEmpty());
 			REQUIRE(empty.getLength() == 0);
 			// Check Serialization
-			REQUIRE(filled.serialize() == "Message: Hewwo\r\nType: https\r\n\r\n");
+			REQUIRE(filled.serialize() == "Message: Hewwwo\r\nType: https\r\n\r\n");
 		}
 		{
 			// Check case insensitivity

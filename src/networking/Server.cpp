@@ -7,10 +7,21 @@ date: 8/10/2025
 
 #include "Server.h"
 
-Server::Server() {
-    // Constructor
+Server::Server(ServerConfig &srvConfig) : srvConfig(srvConfig)
+{
+	this->loop = EventLoop();
 }
 
-Server::~Server() {
-    // Destructor
+Server::~Server()
+{
+	// Destructor
+}
+
+void Server::stop()
+{
+	
+}
+
+void Server::start()
+{
 }

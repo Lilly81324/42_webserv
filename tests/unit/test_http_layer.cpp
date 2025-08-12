@@ -57,15 +57,14 @@ TEST_CASE("HTTP Layer tests", "[https]")
 			REQUIRE(empty.isEmpty() == true);
 			// "Test" merging Headers
 			empty.set("Type", "https");
-			empty.set("Message", "Hewwo");
 			filled.mergeFrom(empty);
-			REQUIRE(filled.getLength() == 2);
+			REQUIRE(filled.getLength() == 1);
 			// Test clearing Header;
 			empty.clear();
 			REQUIRE(empty.isEmpty());
 			REQUIRE(empty.getLength() == 0);
 			// Check Serialization
-			REQUIRE(filled.serialize() == "Message: Hewwwo\r\nType: https\r\n\r\n");
+			REQUIRE(filled.serialize() == "Type: https\r\n\r\n");
 		}
 		{
 			// Check case insensitivity

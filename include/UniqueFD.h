@@ -26,7 +26,7 @@ class UniqueFD
 		}
 
 	private:
-		int fd_;
+		int fd;
 		UniqueFD(const UniqueFD &);
 		UniqueFD &operator=(const UniqueFD &);
 

@@ -65,7 +65,7 @@ TEST_CASE("HTTP Layer tests", "[https]")
 			REQUIRE(empty.isEmpty());
 			REQUIRE(empty.getLength() == 0);
 			// Check Serialization
-			REQUIRE(filled.serialize() == "Type: https\r\nMessage: Hewwo\r\n\r\n");
+			REQUIRE(filled.serialize() == "Message: Hewwo\r\nType: https\r\n\r\n");
 		}
 		{
 			// Check case insensitivity
@@ -149,6 +149,27 @@ TEST_CASE("HTTP Layer tests", "[https]")
 			REQUIRE(test.get("Ke") == "3");
 			REQUIRE(test.get("KeY") == "1");
 			REQUIRE(test.get("KEyy") == "5");
+		}
+		{
+			// Check merging from Header
+			Headers source;
+			CookieJar target;
+
+			source.set("ID", "1");
+			source.set("IP", "192");
+			source.set("Access", "valid");
+			source.set("Data", "filled");
+			target.set("Access", "invalid");
+			target.set("Data", "empty");
+			REQUIRE(target.getLength() == 2);
+			REQUIRE(target.get("Access") == "invalid");
+			REQUIRE(target.get("Data") == "empty");
+			target.parseFrom(source);
+			REQUIRE(target.getLength() == 4);
+			REQUIRE(target.get("ID") == "1");
+			REQUIRE(target.get("IP") == "192");
+			REQUIRE(target.get("Access") == "valid");
+			REQUIRE(target.get("Data") == "filled");
 		}
 	}
 }

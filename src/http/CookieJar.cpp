@@ -38,6 +38,20 @@ void CookieJar::setCookieHeaders(\
 }
 
 /**
+ * Merges Header data into CookieJar data
+ * @param target: Target Header to use as source
+ */
+void	CookieJar::parseFrom(const Headers &target)
+{
+	map<string, string, CiLess>::const_iterator it;
+	map<string, string, CiLess>::const_iterator end;
+
+	end = target.getEnd();
+	for (it = target.getBegin(); it != end; it++)
+		this->set(it->first, it->second);
+}
+
+/**
  * Sets value of given key or adds a new pair
  * @param key: Key by which to identify the field
  * @param value: New value to set the keys value to

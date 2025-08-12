@@ -32,17 +32,14 @@ CiLess::~CiLess(void)
  */
 bool CiLess::operator()(const string &left, const string &right) const
 {
-	if (left.size() < right.size())
-		return (true);
-	for (size_t i = 0; i < left.size(); i++)
+	size_t llen = left.size();
+	size_t rlen = right.size();
+	for (size_t i = 0; i < llen && i < rlen; ++i)
 	{
-		if (tolower(left[i]) != tolower(right[i]))
-		{
-			if (tolower(left[i]) < tolower(right[i]))
-				return (true);
-			else
-				return (false);
-		}
+		if (tolower(left[i]) < tolower(right[i]))
+			return true;
+		if (tolower(left[i]) > tolower(right[i]))
+			return false;
 	}
-	return (false);
+	return llen < rlen;
 }

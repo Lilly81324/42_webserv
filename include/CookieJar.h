@@ -22,6 +22,7 @@ class CookieJar
 		~CookieJar();
 
 		void	setCookieHeaders(Headers &h, string name, string value, string path, int maxAge, bool httpOnly, bool secure, string sameSite);
+		void	parseFrom(const Headers &target);
 		void	set(string name, string value);
 		void	erase(const string &key);
 		void	clear(void);

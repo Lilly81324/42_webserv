@@ -32,9 +32,9 @@ AR				:= ar rcs
 # Enable parallel compilation by default
 MAKEFLAGS		+= -j$(shell nproc)
 
-CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP
+CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP -g
 CXXFLAGS_14		:= -Wall -Wextra -Werror -std=c++14 -MMD -MP
-CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP
+CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP -g
 
 INCS			:= -I$(INC_DIR)
 TEST_INCS		:= $(INCS) -I$(TESTS_INC_DIR) -I$(CATCH2_DIR)

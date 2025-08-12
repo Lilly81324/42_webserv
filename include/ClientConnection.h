@@ -71,7 +71,7 @@ class ClientConnection
 		std::vector<char> outBuffer;
 		size_t parseOffset;
 		size_t outOffset;
-		
+
 		/**
 		 * @brief Reads data from the client socket into inBuffer.
 		 *
@@ -87,7 +87,23 @@ class ClientConnection
 		 * - Respects remaining buffer space to avoid overflow
 		 */
 		void readFromSocket();
-		
+
+		/* @brief Processes incoming data from the client connection.
+		*
+		* This method examines the input buffer for complete HTTP headers by searching
+		* for the "\r\n\r\n" sequence. It uses parseOffset for incremental parsing to
+		* avoid rescanning the entire buffer on each call.
+		*
+		* Current behavior (placeholder implementation):
+		* - Only processes data when state is READ_HEADERS
+		* - Searches for complete HTTP headers using helper function headersComplete()
+		* - When headers are complete, generates a simple "hello" HTTP response
+		* - Transitions to WRITE state to send the response
+		*
+		* @note This is a placeholder implementation that will be extended to proper
+		*       HTTP request parsing later.
+		*/
+		void processIncoming();
 		static const size_t READ_CHUNK = 8192;
 		/* Place a limit on Infiles to avoid Issues*/
 		static const size_t MAX_INBUFFER = 1 << 20;
@@ -97,7 +113,7 @@ class ClientConnection
 		~ClientConnection() {};
 		/**
 		 * @brief Retrieves the current state of the client connection.
-		 * 
+		 *
 		 * @return The current State of the client connection.
 		 */
 		State getState() { return this->state; }
@@ -136,23 +152,6 @@ class ClientConnection
 		 * @param state The new state to transition to (READ_HEADERS, WRITE, or CLOSE).
 		 */
 		void changeState(State);
-		/**
-		 * @brief Processes incoming data from the client connection.
-		 *
-		 * This method examines the input buffer for complete HTTP headers by searching
-		 * for the "\r\n\r\n" sequence. It uses parseOffset for incremental parsing to
-		 * avoid rescanning the entire buffer on each call.
-		 *
-		 * Current behavior (placeholder implementation):
-		 * - Only processes data when state is READ_HEADERS
-		 * - Searches for complete HTTP headers using helper function headersComplete()
-		 * - When headers are complete, generates a simple "hello" HTTP response
-		 * - Transitions to WRITE state to send the response
-		 *
-		 * @note This is a placeholder implementation that will be extended to proper
-		 *       HTTP request parsing later.
-		 */
-		void processIncoming();
 		/**
 		 * @brief Closes the client connection and releases any associated resources.
 		 *

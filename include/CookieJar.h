@@ -11,10 +11,9 @@ date: 11/08/2025
 #include <map>
 #include <iostream>
 #include "Headers.h"
-// #include "CiLess.h"
+#include "CiLess.h"
 
 using namespace std;
-
 
 class CookieJar
 {
@@ -27,17 +26,17 @@ class CookieJar
 		void	erase(const string &key);
 		void	clear(void);
 
-		multimap<string, string>::const_iterator	getBegin(void) const;
-		multimap<string, string>::const_iterator	getEnd(void) const;
+		map<string, string>::const_iterator	getBegin(void) const;
+		map<string, string>::const_iterator	getEnd(void) const;
 		bool	keyExists(string key) const;
 		void	show(ostream &out) const;
 		int		getLength(void) const;
 		bool	isEmpty(void) const;
 		string	get(string key);
 	private:
-		multimap<string, string> cookies;
+		map<string, string, CiLess> cookies;
 };
 
-ostream	&operator<<(ostream, const CookieJar &target);
+ostream	&operator<<(ostream &out, const CookieJar &target);
 
 #endif // COOKIEJAR_H

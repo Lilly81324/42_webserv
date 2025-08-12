@@ -21,6 +21,8 @@ CookieJar::~CookieJar()
 
 /**
  * ?
+ * PLACEHOLDER / MISSING FUNCTION
+ * NEEDS TO BE IMPLEMENTED LATER
  */
 void CookieJar::setCookieHeaders(\
 	Headers &h, string key, string value, string path, \
@@ -32,9 +34,7 @@ void CookieJar::setCookieHeaders(\
 	(void)httpOnly;
 	(void)secure;
 	(void)sameSite;
-	// this->cookies.insert(key,value);
-	(void)value;
-	(void)key;
+	this->set(key, value);
 }
 
 /**
@@ -44,9 +44,7 @@ void CookieJar::setCookieHeaders(\
  */
 void CookieJar::set(string key, string value)
 {
-	// this->cookies.insert(key, value);
-	(void)value;
-	(void)key;
+	this->cookies[key] = value;
 }
 
 /**
@@ -67,17 +65,17 @@ void	CookieJar::clear(void)
 }
 
 /**
- * @returns Constant Interator to beginning of CookieJar
+ * @returns Constant Iterator to beginning of CookieJar
  */
-multimap<string, string>::const_iterator CookieJar::getBegin(void) const
+map<string, string, CiLess>::const_iterator CookieJar::getBegin(void) const
 {
 	return (this->cookies.begin());
 }
 
 /**
- * @returns Constant Interator to end of CookieJar
+ * @returns Constant Iterator to end of CookieJar
  */
-multimap<string, string>::const_iterator CookieJar::getEnd(void) const
+map<string, string, CiLess>::const_iterator CookieJar::getEnd(void) const
 {
 	return (this->cookies.end());
 }
@@ -101,7 +99,7 @@ bool CookieJar::keyExists(string key) const
  */
 void	CookieJar::show(ostream &out) const
 {
-	map<string, string>::const_iterator it;
+	map<string, string, CiLess>::const_iterator it;
 
 	for(it = this->cookies.begin(); it != this->cookies.end(); it++)
 	{
@@ -117,7 +115,7 @@ void	CookieJar::show(ostream &out) const
 int	CookieJar::getLength(void) const
 {
 	int count = 0;
-	map<string, string>::const_iterator it;
+	map<string, string, CiLess>::const_iterator it;
 
 	for(it = this->getBegin(); it != this->getEnd(); it++)
 		count++;

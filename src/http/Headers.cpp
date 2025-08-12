@@ -45,7 +45,7 @@ void	Headers::clear(void)
 /**
  * @returns Constant Interator to beginning of Header
  */
-std::map<std::string, std::string>::const_iterator Headers::getBegin(void) const
+std::map<std::string, std::string, CiLess>::const_iterator Headers::getBegin(void) const
 {
 	return (this->map.begin());
 }
@@ -53,7 +53,7 @@ std::map<std::string, std::string>::const_iterator Headers::getBegin(void) const
 /**
  * @returns Constant Interator to end of Header
  */
-std::map<std::string, std::string>::const_iterator Headers::getEnd(void) const
+std::map<std::string, std::string, CiLess>::const_iterator Headers::getEnd(void) const
 {
 	return (this->map.end());
 }
@@ -86,22 +86,12 @@ bool Headers::keyExists(std::string key) const
 }
 
 /**
- * Returns the number of enties for a key
- * @param key: Key to count
- * @returns Returns the number of enties for a key
- */
-int Headers::keyCount(std::string key) const
-{
-	return (this->map.count(key));
-}
-
-/**
  * Displays the Header on output
  * @param out: Output stream to show on
  */
 void	Headers::show(std::ostream &out) const
 {
-	std::map<std::string, std::string>::const_iterator it;
+	std::map<std::string, std::string, CiLess>::const_iterator it;
 
 	for(it = this->map.begin(); it != this->map.end(); it++)
 	{
@@ -116,7 +106,7 @@ void	Headers::show(std::ostream &out) const
  */
 std::string Headers::serialize(void) const
 {
-	std::map<std::string, std::string>::const_iterator it;
+	std::map<std::string, std::string, CiLess>::const_iterator it;
 	std::string out = "";
 
 	for(it = this->map.begin(); it != this->map.end(); it++)
@@ -144,7 +134,7 @@ bool	Headers::isEmpty(void) const
  */
 void	Headers::mergeFrom(const Headers &src)
 {
-	std::map<std::string, std::string>::const_iterator it;
+	std::map<std::string, std::string, CiLess>::const_iterator it;
 
 	for(it = src.getBegin(); it != src.getEnd(); it++)
 		this->set(it->first, it->second);
@@ -156,7 +146,7 @@ void	Headers::mergeFrom(const Headers &src)
 int	Headers::getLength(void) const
 {
 	int count = 0;
-	std::map<std::string, std::string>::const_iterator it;
+	std::map<std::string, std::string, CiLess>::const_iterator it;
 
 	for(it = this->getBegin(); it != this->getEnd(); it++)
 		count++;

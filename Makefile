@@ -105,23 +105,21 @@ endif
 
 # ============================= 42 SCHOOL MANDATORY RULES ============================= #
 
-# 42 School Standard: 'make' must build the main program (C++98)
 all: $(NAME)
 
-# 42 School Standard: remove object files
 clean:
 	@$(RM) $(BUILD_DIR)
 
-# 42 School Standard: remove object files and executable
 fclean: clean
 	@$(RM) $(NAME) $(TEST_BIN) $(TEST_BIN_STUBS)
 
-# 42 School Standard: clean and rebuild everything
-re: fclean all
+# run fclean then all sequentially (no race, no warnings)
+re:
+	@$(MAKE) -s fclean
+	@$(MAKE) -s all
 
 # ============================ ADDITIONAL PROJECT RULES ============================ #
 
-# Production app (same as 'all' for 42 compliance)
 prod: $(NAME)
 
 ifndef DISABLE_TESTS
@@ -131,14 +129,12 @@ catch2-lib: $(CATCH2_LIB_PATH)
 # Standard tests (link against prod-compiled server objects)
 test: $(TEST_BIN)
 
-# Fast test target (builds and runs tests in one command)
 test-fast: $(TEST_BIN)
 	@echo "Running tests..."
 	@./$(TEST_BIN) $(TESTFLAGS)
 else
 test:
 	@echo "Tests disabled in evaluation mode. Use 'make EVAL=0 test' to enable."
-
 test-fast:
 	@echo "Tests disabled in evaluation mode. Use 'make EVAL=0 test-fast' to enable."
 
@@ -152,14 +148,12 @@ run-tests-stubs:
 	@echo "Tests disabled in evaluation mode. Use 'make EVAL=0 run-tests-stubs' to enable."
 endif
 
-# ============================= EVALUATION MODE INFO ============================= #
 eval-info:
 	@echo "=== Evaluation Mode ==="
 	@echo "To disable tests for 42 evaluation: make EVAL=1"
 	@echo "To enable tests for development: make EVAL=0 (or just 'make test')"
 	@echo "Current mode: $(if $(DISABLE_TESTS),EVALUATION (tests disabled),DEVELOPMENT (tests enabled))"
 
-# ================================== HELP ==================================== #
 help:
 	@echo "=== Available Make Targets ==="
 	@echo ""
@@ -216,12 +210,10 @@ $(TEST_BIN): $(OBJS_98_NOMAIN) $(TEST_OBJS_14) $(CATCH2_LIB_PATH)
 	@echo "Linking test executable..."
 	$(CXX) $(OBJS_98_NOMAIN) $(TEST_OBJS_14) $(CATCH2_LIB_PATH) -o $@
 
-# C++14 test objects (Catch2-enabled)
 $(OBJ14_DIR)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_14) -DUNIT_TEST $(TEST_INCS) -c $< -o $@
 
-# C++14 Catch2 objects (with progress indicator)
 $(OBJ14_DIR)/catch2/%.o: $(CATCH2_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	@echo "Compiling Catch2: $(notdir $<)"
@@ -250,7 +242,6 @@ endif
 
 # ------------------------------ Utility targets ------------------------------ #
 
-# Run tests without rebuilding
 run-tests:
 	@if [ -f $(TEST_BIN) ]; then \
 		echo "Running tests..."; \
@@ -260,7 +251,6 @@ run-tests:
 		exit 1; \
 	fi
 
-# Show compilation statistics
 stats:
 	@echo "=== Project Statistics ==="
 	@echo "Production sources: $(words $(SRCS_CPP)) C++ files, $(words $(SRCS_C)) C files"
@@ -268,11 +258,9 @@ stats:
 	@echo "Catch2 sources: $(words $(CATCH2_SRCS)) files"
 	@echo "Total object files to build: $(words $(OBJS_98) $(OBJS_98_STUBS) $(TEST_OBJS_14) $(CATCH2_OBJS_14))"
 
-# Clean only test-related files (keep production objects)
 clean-tests:
 	@$(RM) $(OBJ14_DIR) $(LIB_DIR) $(TEST_BIN) $(TEST_BIN_STUBS) $(OBJ98_STUBS_DIR)
 
-# Clean only Catch2 library (force rebuild of Catch2)
 clean-catch2:
 	@$(RM) $(OBJ14_DIR)/catch2 $(CATCH2_LIB_PATH)
 
@@ -285,3 +273,4 @@ re-tests: clean-tests test
 -include $(DEPS_98_STUBS)
 -include $(TEST_DEPS_14)
 -include $(CATCH2_DEPS_14)
+

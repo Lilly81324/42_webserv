@@ -15,53 +15,87 @@ jobs:
         with:
           github-token: ${{ secrets.GL_TOKEN || github.token }}
           script: |
-            const login = core.getInput('owner') || context.repo.owner;   // org or user
-                const number = parseInt(core.getInput('project_number') || '1', 10);
+            const core = require('@actions/core');
+            const pr = context.payload.pull_request;
+            const repo = context.repo;
 
-                const query = `
-                    query($login:String!, $number:Int!){
-                    repositoryOwner(login:$login){
+            // --- CONFIG ---
+            // Set these to your actual org/user and project number
+            const ORG = repo.owner; // Use repo owner for org/user
+            const PROJECT_NUMBER = 1; // <-- Update if your project number is different
+            const STATUS_FIELD_NAME = 'Status';
+            const PR_OPTION_NAME    = 'Pull Requests';
+            const AUTO_LABEL        = 'automerge';
+            // --------------
+
+            // 1) Resolve project + Status field and "Pull Requests" option
+            const projQ = `
+                query($org:String!, $number:Int!){
+                organization(login:$org){
+                    projectV2(number:$number){
+                    id
+                    fields(first:100){
+                        nodes{
                         __typename
-                        ... on Organization {
-                        projectV2(number:$number){
-                            id
-                            fields(first:100){
-                            nodes {
-                                __typename
-                                ... on ProjectV2SingleSelectField {
-                                id
-                                name
-                                options { id name }
-                                }
-                            }
-                            }
-                        }
-                        }
-                        ... on User {
-                        projectV2(number:$number){
-                            id
-                            fields(first:100){
-                            nodes {
-                                __typename
-                                ... on ProjectV2SingleSelectField {
-                                id
-                                name
-                                options { id name }
-                                }
-                            }
-                            }
-                        }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
                         }
                     }
-                    }`;
-
-                const res = await github.graphql(query, { login, number });
-
-                const ownerNode = res.repositoryOwner;
-                if (!ownerNode || !ownerNode.projectV2) {
-                    throw new Error(`ProjectV2 #${number} not found under owner '${login}' (type=${ownerNode && ownerNode.__typename})`);
+                    }
                 }
+                user(login:$org){
+                    projectV2(number:$number){
+                    id
+                    fields(first:100){
+                        nodes{
+                        __typename
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                        }
+                    }
+                    }
+                }
+                }`;
+            const data = await github.graphql(projQ, { org: ORG, number: PROJECT_NUMBER });
+            let project = null;
+            if (data.organization && data.organization.projectV2) {
+                project = data.organization.projectV2;
+            } else if (data.user && data.user.projectV2) {
+                project = data.user.projectV2;
+            } else {
+                throw new Error(`Project #${PROJECT_NUMBER} not found for ${ORG}`);
+            }
+            const statusField = project.fields.nodes.find(f => f && f.__typename === 'ProjectV2SingleSelectField' && f.name === STATUS_FIELD_NAME);
+            if (!statusField) throw new Error(`Field "${STATUS_FIELD_NAME}" not found`);
+            const prOpt = statusField.options.find(o => o.name === PR_OPTION_NAME);
+            if (!prOpt) throw new Error(`Option "${PR_OPTION_NAME}" not found in field "${STATUS_FIELD_NAME}"`);
 
-                const projectId = ownerNode.projectV2.id;
-                core.info(`ProjectV2 id: ${projectId}`);
-                core.setOutput('projectId', projectId);
+            // 2) Add PR as an item (idempotent-ish: adding twice creates only one)
+            const addRes = await github.graphql(`
+                mutation($projectId:ID!, $contentId:ID!){
+                addProjectV2ItemById(input:{ projectId:$projectId, contentId:$contentId }) {
+                    item { id }
+                }
+                }`, { projectId: project.id, contentId: pr.node_id });
+            const itemId = addRes.addProjectV2ItemById.item.id;
+
+            // 3) Set PR item Status = "Pull Requests"
+            await github.graphql(`
+                mutation($input: UpdateProjectV2ItemFieldValueInput!){
+                updateProjectV2ItemFieldValue(input:$input){ projectV2Item{ id } }
+                }`, {
+                input: {
+                projectId: project.id,
+                itemId,
+                fieldId: statusField.id,
+                value: { singleSelectOptionId: prOpt.id }
+                }
+            });
+
+            // 4) Add "automerge" label to the PR
+            await github.rest.issues.addLabels({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: pr.number,
+                labels: [AUTO_LABEL]
+            });
+
+            core.info(`PR #${pr.number} added to project, set to "${PR_OPTION_NAME}", and labeled "${AUTO_LABEL}".`);

@@ -32,9 +32,10 @@ AR				:= ar rcs
 # Enable parallel compilation by default
 MAKEFLAGS		+= -j$(shell nproc)
 
-CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP -g
+CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP
 CXXFLAGS_14		:= -Wall -Wextra -Werror -std=c++14 -MMD -MP
-CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP -g
+CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP
+TESTFLAGS		:= --reporter console --durations yes
 
 INCS			:= -I$(INC_DIR)
 TEST_INCS		:= $(INCS) -I$(TESTS_INC_DIR) -I$(CATCH2_DIR)
@@ -114,7 +115,7 @@ test: $(TEST_BIN)
 # Fast test target (builds and runs tests in one command)
 test-fast: $(TEST_BIN)
 	@echo "Running tests..."
-	@./$(TEST_BIN)
+	@./$(TEST_BIN) $(TESTFLAGS)
 else
 test:
 	@echo "Tests disabled in evaluation mode. Use 'make EVAL=0 test' to enable."
@@ -214,7 +215,7 @@ endif
 run-tests:
 	@if [ -f $(TEST_BIN) ]; then \
 		echo "Running tests..."; \
-		./$(TEST_BIN); \
+		./$(TEST_BIN) $(TESTFLAGS) ; \
 	else \
 		echo "Test binary not found. Run 'make test' first."; \
 		exit 1; \

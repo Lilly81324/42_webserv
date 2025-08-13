@@ -36,9 +36,10 @@ AR              := ar rcs
 # Enable parallel compilation by default
 MAKEFLAGS       += -j$(shell nproc)
 
-CXXFLAGS_98     := -Wall -Wextra -Werror -std=c++98 -MMD -MP -g
-CXXFLAGS_14     := -Wall -Wextra -Werror -std=c++14 -MMD -MP -g
-CFLAGS_C        := -Wall -Wextra -Werror -std=c99   -MMD -MP -g
+CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP
+CXXFLAGS_14		:= -Wall -Wextra -Werror -std=c++14 -MMD -MP
+CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP
+TESTFLAGS		:= --reporter console --durations yes
 
 # Includes
 INCS            := -I$(INC_DIR)
@@ -133,34 +134,8 @@ test: $(TEST_BIN)
 # Fast test target (builds and runs tests in one command)
 test-fast: $(TEST_BIN)
 	@echo "Running tests..."
-	@./$(TEST_BIN)
-
-# NEW: Stubbed tests (server compiled against stubs)
-test-stubs: $(TEST_BIN_STUBS)
-
-# Run the stubbed tests without rebuilding
-run-tests-stubs:
-	@if [ -f $(TEST_BIN_STUBS) ]; then \
-		echo "Running stubbed tests..."; \
-		./$(TEST_BIN_STUBS); \
-	else \
-		echo "Stubbed test binary not found. Run 'make test-stubs' first."; \
-		exit 1; \
-	fi
-
-# Run tests without rebuilding (standard)
-run-tests:
-	@if [ -f $(TEST_BIN) ]; then \
-		echo "Running tests..."; \
-		./$(TEST_BIN); \
-	else \
-		echo "Test binary not found. Run 'make test' first."; \
-		exit 1; \
-	fi
+	@./$(TEST_BIN) $(TESTFLAGS)
 else
-catch2-lib:
-	@echo "Catch2 library disabled in evaluation mode."
-
 test:
 	@echo "Tests disabled in evaluation mode. Use 'make EVAL=0 test' to enable."
 
@@ -274,6 +249,16 @@ $(TEST_BIN_STUBS): $(OBJS_98_STUBS) $(TEST_OBJS_14) $(CATCH2_LIB_PATH)
 endif
 
 # ------------------------------ Utility targets ------------------------------ #
+
+# Run tests without rebuilding
+run-tests:
+	@if [ -f $(TEST_BIN) ]; then \
+		echo "Running tests..."; \
+		./$(TEST_BIN) $(TESTFLAGS) ; \
+	else \
+		echo "Test binary not found. Run 'make test' first."; \
+		exit 1; \
+	fi
 
 # Show compilation statistics
 stats:

@@ -19,11 +19,6 @@ CookieJar::~CookieJar()
 	this->cookies.clear();
 }
 
-/**
- * ?
- * PLACEHOLDER / MISSING FUNCTION
- * NEEDS TO BE IMPLEMENTED LATER
- */
 void CookieJar::setCookieHeaders(\
 	Headers &h, string key, string value, string path, \
 	int maxAge, bool httpOnly, bool secure, string sameSite)
@@ -37,10 +32,6 @@ void CookieJar::setCookieHeaders(\
 	this->set(key, value);
 }
 
-/**
- * Merges Header data into CookieJar data
- * @param target: Target Header to use as source
- */
 void	CookieJar::parseFrom(const Headers &target)
 {
 	map<string, string, CiLess>::const_iterator it;
@@ -51,55 +42,31 @@ void	CookieJar::parseFrom(const Headers &target)
 		this->set(it->first, it->second);
 }
 
-/**
- * Sets value of given key or adds a new pair
- * @param key: Key by which to identify the field
- * @param value: New value to set the keys value to
- */
 void CookieJar::set(string key, string value)
 {
 	this->cookies[key] = value;
 }
 
-/**
- * Removes key from CookieJar
- * @param key: Key to remove
- */
 void	CookieJar::erase(const string &key)
 {
 	this->cookies.erase(key);
 }
 
-/**
- * Deletes all entries in CookieJar
- */
 void	CookieJar::clear(void)
 {
 	this->cookies.clear();
 }
 
-/**
- * @returns Constant Iterator to beginning of CookieJar
- */
 map<string, string, CiLess>::const_iterator CookieJar::getBegin(void) const
 {
 	return (this->cookies.begin());
 }
 
-/**
- * @returns Constant Iterator to end of CookieJar
- */
 map<string, string, CiLess>::const_iterator CookieJar::getEnd(void) const
 {
 	return (this->cookies.end());
 }
 
-/**
- * Returns the value for the given key and checks if it exists
- * @param key: Key by which to identify the value from the cookies
- * @param exists: Gets set to 1 if key exists, or 0 if not
- * @returns Value at the given key or "" if non-existant
- */
 bool CookieJar::keyExists(string key) const
 {
 	if (!this->cookies.count(key))
@@ -107,10 +74,6 @@ bool CookieJar::keyExists(string key) const
 	return (true);
 }
 
-/**
- * Displays the CookieJar on output
- * @param out: Output stream to show on
- */
 void	CookieJar::show(ostream &out) const
 {
 	map<string, string, CiLess>::const_iterator it;
@@ -123,9 +86,6 @@ void	CookieJar::show(ostream &out) const
 	}
 }
 
-/**
- * @returns Amount of entries in CookieJar
- */
 int	CookieJar::getLength(void) const
 {
 	int count = 0;
@@ -136,21 +96,11 @@ int	CookieJar::getLength(void) const
 	return (count);
 }
 
-/**
- * @returns Boolean wether cookies is empty or not
- */
 bool	CookieJar::isEmpty(void) const
 {
 	return (this->cookies.empty());
 }
 
-/**
- * Returns the value for the given key
- * @param key: Key by which to identify the value from the cookies
- * @returns Value at the given key or "" if non-existant
- * @note For checking if key exists, use get(string, int)
- * @note Cannot be a const function, due to how cookies indexing works
- */
 string CookieJar::get(string key)
 {
 	if (!this->keyExists(key))
@@ -158,9 +108,6 @@ string CookieJar::get(string key)
 	return (this->cookies.find(key)->second);
 }
 
-/**
- * Displays CookieJar on output
- */
 ostream &operator<<(ostream &out, const CookieJar &target)
 {
 	target.show(out);

@@ -160,3 +160,16 @@ jobs:
                     core.warning(`Comment on #${num} failed: ${e.message}`);
                 }
                 }
+                // 6) Remove the item from the project
+                try {
+                await github.graphql(`
+                    mutation($projectId: ID!, $itemId: ID!) {
+                    deleteProjectV2Item(input: { projectId: $projectId, itemId: $itemId }) {
+                        deletedItemId
+                    }
+                    }
+                `, { projectId: PROJECT_ID, itemId });
+                core.info(`Removed issue #${num} from project.`);
+                } catch (e) {
+                core.warning(`Failed to remove issue #${num} from project: ${e.message}`);
+                }

@@ -104,7 +104,7 @@ void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique
 		const int idx = int(it - srvConfig.servers.begin());
 		const int port = it->listen_port;
 		
-		if(port <= 0 || port >= 65535) continue;
+		if(port <= 0 || port > 65535) continue;
 		
 		const std::string host = it->listen_host.empty() ? std::string("0.0.0.0") : it->listen_host;
 		const std::pair<std::string, int> key(host, port);

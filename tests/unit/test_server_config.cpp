@@ -36,3 +36,28 @@ TEST_CASE("ServerConfig parses multiple servers", "[ServerConfig]")
 	REQUIRE(cfg.servers()[0].listen_port == 8080);
 	REQUIRE(cfg.servers()[1].listen_port == 8081);
 }
+
+TEST_CASE("ServerConfig throws on missing listen directive", "[ServerConfig][invalid]") {
+    ServerConfig cfg;
+    REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_missing_listen.conf"), std::runtime_error);
+}
+
+TEST_CASE("ServerConfig throws on duplicate listen directive", "[ServerConfig][invalid]") {
+    ServerConfig cfg;
+    REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_duplicate_listen.conf"), std::runtime_error);
+}
+
+TEST_CASE("ServerConfig throws on unsupported HTTP method", "[ServerConfig][invalid]") {
+    ServerConfig cfg;
+    REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_method.conf"), std::runtime_error);
+}
+
+TEST_CASE("ServerConfig throws on invalid autoindex value", "[ServerConfig][invalid]") {
+    ServerConfig cfg;
+    REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_autoindex.conf"), std::runtime_error);
+}
+
+TEST_CASE("ServerConfig throws on invalid error code", "[ServerConfig][invalid]") {
+    ServerConfig cfg;
+    REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_error_page.conf"), std::runtime_error);
+}

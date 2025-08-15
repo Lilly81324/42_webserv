@@ -20,11 +20,19 @@ jobs:
                     script: |
                         const pr = context.payload.pull_request;
                         const repo = context.repo;
-                        // Only delete head branch (if not from fork)
-                        if (!pr.head.repo.fork) {
-                            try {
-                                await github.rest.git.deleteRef({ ...repo, ref: `heads/${pr.head.ref}` });
-                            } catch (e) {
-                                core.warning(`Delete ref skipped: ${e.message}`);
-                            }
-                        }
+                                    // Only delete head branch (if not from fork)
+                                    if (!pr.head.repo.fork) {
+                                        try {
+                                            // Delete branch on GitHub (remote)
+                                            await github.rest.git.deleteRef({ ...repo, ref: `heads/${pr.head.ref}` });
+                                            // Also delete branch from local origin if runner has push access
+                                            const execSync = require('child_process').execSync;
+                                            try {
+                                                execSync(`git push origin --delete ${pr.head.ref}`, { stdio: 'inherit' });
+                                            } catch (e) {
+                                                core.warning(`Remote origin branch delete failed: ${e.message}`);
+                                            }
+                                        } catch (e) {
+                                            core.warning(`Delete ref skipped: ${e.message}`);
+                                        }
+                                    }

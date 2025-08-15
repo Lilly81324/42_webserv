@@ -8,39 +8,33 @@ Date: 8/10/2025
 #ifndef EVENTLOOP_H
 #define EVENTLOOP_H
 
-#include <map>
 #include <vector>
-#include <poll.h>   // struct pollfd, POLLIN, POLLOUT, etc.
+#include <poll.h>
 
-class IFdHandler {
+
+class EventLoop
+{
 public:
-    virtual ~IFdHandler() {}
-    virtual void on_readable(int fd) = 0;
-    virtual void on_writable(int fd) = 0;
-    virtual void on_error(int fd) = 0;
-};
+	EventLoop();
+	~EventLoop();
 
-class EventLoop {
-public:
-    EventLoop();
-    ~EventLoop();
+	// Register / modify / remove a file descriptor
+	bool addFD(int fd, short events); // events: POLLIN|POLLOUT
+	bool mod(int fd, short events);
+	void removeFD(int fd);
 
-    // Register / modify / remove a file descriptor
-    bool add(int fd, short events, IFdHandler* h); // events: POLLIN|POLLOUT
-    bool mod(int fd, short events);
-    void remove(int fd);
+	// Main event loop
+	void run(int timeout_ms);
+	void stop();
 
-    // Run the loop; call stop() to exit
-    void run(int timeout_ms);
-    void stop();
+	// Polls and returns a vector of (fd, revents) pairs for ready FDs
+	std::vector< std::pair<int, short> > handleEvents(int timeout_ms);
 
 private:
-    std::vector<struct pollfd> _pfds;
-    std::map<int, IFdHandler*> _handlers;
-    bool _stop;
+	std::vector<struct pollfd> _pfds;
+	bool _stop;
 
-    int index_of_fd(int fd) const; // linear search (small sets are fine)
+	int index_of_fd(int fd) const;
 };
 
 #endif // EVENTLOOP_H
-

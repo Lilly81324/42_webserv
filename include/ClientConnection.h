@@ -161,6 +161,11 @@ class ClientConnection
 		 * @warning The ClientConnection object should be destroyed/removed after
 		 *          calling this method, as indicated by the implementation comment.
 		 */
+		
+		int  getFD() const { return fd.get(); }
+		bool isClosed() const { return !fd; }
+		bool wantsWrite() const { return state == WRITE;}
+		
 		void close();
 };
 

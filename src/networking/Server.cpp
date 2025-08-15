@@ -42,7 +42,7 @@ void Server::registerListeners()
 	{
 		if (*it && (*it)->getFD() >= 0)
 		{
-			loop.addFD((*it)->getFD(), 1); // 1 == READ
+			loop.addFD((*it)->getFD(), POLLIN, new AcceptorHandler(loop, *this, *it));
 		}
 	}
 }
@@ -302,4 +302,10 @@ void Server::start()
 	for (std::vector<Listener*>::iterator dit = tmp.begin(); dit != tmp.end(); ++dit) {
 		delete *dit;
 	}
+}
+
+
+void Server::run(int poll_timeout_ms) {
+	if (listeners.empty()) start();
+	loop.run(poll_timeout_ms);
 }

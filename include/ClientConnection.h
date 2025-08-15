@@ -8,31 +8,160 @@ Date: 8/10/2025
 #ifndef CLIENTCONNECTION_H
 #define CLIENTCONNECTION_H
 
-#include "EventLoop.h"
+#include <vector>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <cstring>
 #include <string>
+#include <sys/socket.h>
 
-class Server; // fwd
+#include "UniqueFD.h"
 
-class ClientConnection : public IFdHandler {
-public:
-    ClientConnection(int fd, EventLoop& loop, Server& server);
-    ~ClientConnection();
+enum State
+{
+	READ_HEADERS,
+	WRITE,
+	CLOSE,
+};
 
-    void on_readable(int fd);
-    void on_writable(int fd);
-    void on_error(int fd);
+/**
+ * @class ClientConnection
+ * @brief Manages a single client connection, handling socket I/O and state transitions.
+ *
+ * The ClientConnection class encapsulates the logic for reading from and writing to a client socket,
+ * buffering incoming and outgoing data, and managing the connection's state throughout its lifecycle.
+ * Currently implements a simple HTTP server that responds with a "hello" message to any complete request.
+ *
+ * @note This class is not copyable or movable.
+ *
+ * Members:
+ * - State state: Current state of the connection (READ_HEADERS, WRITE, or CLOSE).
+ * - UniqueFD fd: File descriptor wrapper for the client socket.
+ * - std::vector<char> inBuffer: Buffer for incoming data from the client.
+ * - std::vector<char> outBuffer: Buffer for outgoing data to the client.
+ * - size_t parseOffset: Offset in the input buffer for incremental parsing (avoids rescanning).
+ * - size_t outOffset: Offset in the output buffer for partial writes.
+ *
+ * Constants:
+ * - static const size_t READ_CHUNK: Size of each read operation from the socket (8192 bytes).
+ * - static const size_t MAX_INBUFFER: Maximum allowed size for the input buffer (1MB).
+ *
+ * Public Methods:
+ * - explicit ClientConnection(int fd): Constructs a connection with the given socket file descriptor.
+ * - ~ClientConnection(): Destructor.
+ * - State getState(): Returns the current state of the connection.
+ * - void onReadable(): Handles socket readability events by reading data and processing it.
+ * - void onWritable(): Handles socket writability events by sending buffered data.
+ * - void changeState(State): Changes the connection's state.
+ * - void processIncoming(): Processes incoming data, looking for complete HTTP headers.
+ * - void close(): Closes the client connection and transitions to CLOSE state.
+ *
+ * Private Methods:
+ * - void readFromSocket(): Reads data from socket into inBuffer, respects MAX_INBUFFER limit.
+ *
+ * @warning After calling close(), the ClientConnection should be destroyed/removed.
+ */
+class ClientConnection
+{
+	private:
+		enum State state;
+		UniqueFD fd;
+		std::vector<char> inBuffer;
+		std::vector<char> outBuffer;
+		size_t parseOffset;
+		size_t outOffset;
 
-    int fd() const { return _fd; }
+		/**
+		 * @brief Reads data from the client socket into inBuffer.
+		 *
+		 * This method performs non-blocking reads from the socket in READ_CHUNK
+		 * sized pieces. It enforces the MAX_INBUFFER limit to prevent memory
+		 * exhaustion attacks.
+		 *
+		 * Behavior:
+		 * - Only reads when state is READ_HEADERS
+		 * - Continues reading until socket would block (EAGAIN/EWOULDBLOCK)
+		 * - Closes connection if buffer exceeds MAX_INBUFFER
+		 * - Closes connection on read errors or EOF (n == 0)
+		 * - Respects remaining buffer space to avoid overflow
+		 */
+		void readFromSocket();
 
-private:
-    int         _fd;
-    EventLoop&  _loop;
-    Server&     _server;
-    std::string _in;
-    std::string _out;
-    bool        _keepAlive;   // <-- NEW
+		/* @brief Processes incoming data from the client connection.
+		*
+		* This method examines the input buffer for complete HTTP headers by searching
+		* for the "\r\n\r\n" sequence. It uses parseOffset for incremental parsing to
+		* avoid rescanning the entire buffer on each call.
+		*
+		* Current behavior (placeholder implementation):
+		* - Only processes data when state is READ_HEADERS
+		* - Searches for complete HTTP headers using helper function headersComplete()
+		* - When headers are complete, generates a simple "hello" HTTP response
+		* - Transitions to WRITE state to send the response
+		*
+		* @note This is a placeholder implementation that will be extended to proper
+		*       HTTP request parsing later.
+		*/
+		void processIncoming();
+		static const size_t READ_CHUNK = 8192;
+		/* Place a limit on Infiles to avoid Issues*/
+		static const size_t MAX_INBUFFER = 1 << 20;
 
-    void close_and_cleanup();
+	public:
+		explicit ClientConnection(int fd) : state(READ_HEADERS), fd(fd), parseOffset(0), outOffset(0) {}
+		~ClientConnection() {};
+		/**
+		 * @brief Retrieves the current state of the client connection.
+		 *
+		 * @return The current State of the client connection.
+		 */
+		State getState() { return this->state; }
+		/**
+		 * @brief Handles the event when the client connection becomes readable.
+		 *
+		 * This method reads data from the client socket into the input buffer and then
+		 * processes the incoming data to check for complete HTTP headers. It continues
+		 * reading until the socket would block or an error occurs.
+		 *
+		 * The method:
+		 * 1. Calls readFromSocket() to read available data
+		 * 2. Calls processIncoming() to check for complete HTTP requests
+		 */
+		void onReadable();
+		/**
+		 * @brief Handles the event when the client connection becomes writable.
+		 *
+		 * This method sends buffered data from outBuffer to the client socket.
+		 * It uses MSG_NOSIGNAL to avoid SIGPIPE and handles partial writes by
+		 * updating outOffset. Once all data is sent, it closes the connection.
+		 *
+		 * The method:
+		 * 1. Only operates when state is WRITE
+		 * 2. Sends data starting from outOffset
+		 * 3. Handles EAGAIN/EWOULDBLOCK by returning (to retry later)
+		 * 4. Closes connection on errors or when all data is sent
+		 */
+		void onWritable();
+		/**
+		 * @brief Changes the current state of the client connection.
+		 *
+		 * This is a simple setter that updates the internal state variable.
+		 * No validation or side effects are performed.
+		 *
+		 * @param state The new state to transition to (READ_HEADERS, WRITE, or CLOSE).
+		 */
+		void changeState(State);
+		/**
+		 * @brief Closes the client connection and releases any associated resources.
+		 *
+		 * This method safely closes the file descriptor using fd.reset() and
+		 * transitions the connection state to CLOSE. It's safe to call multiple times.
+		 *
+		 * @warning The ClientConnection object should be destroyed/removed after
+		 *          calling this method, as indicated by the implementation comment.
+		 */
+		void close();
 };
 
 #endif // CLIENTCONNECTION_H

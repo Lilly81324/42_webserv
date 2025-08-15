@@ -79,3 +79,14 @@ void EventLoop::run(int timeout_ms) {
 }
 
 void EventLoop::stop() { _stop = true; }
+
+void EventLoop::addFD(int fd, int event)
+{
+	(void)fd;
+	(void)event;
+}
+
+void EventLoop::removeFD(int fd)
+{
+	(void)fd;
+}

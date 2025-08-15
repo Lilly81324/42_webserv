@@ -1,6 +1,8 @@
 name: Delete Old Workflow Runs
 on:
   workflow_dispatch: # you trigger manually
+  schedule:
+       - cron: "0 0 * * *"
 
 permissions:
   actions: write

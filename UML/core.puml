@@ -84,6 +84,7 @@ class PathUtil
 class ETagUtil
 class RandomUtil
 
+ServerPipeline <-- SessionManager
 SessionManager ..> RandomUtil
 SessionManager ..> TimeUtil
 RateLimiter ..> TimeUtil

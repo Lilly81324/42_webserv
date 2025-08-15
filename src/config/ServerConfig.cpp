@@ -100,41 +100,41 @@ static std::string upper(const std::string &s)
 	return r;
 }
 
-static size_t parseSizeBytes(const std::string &s)
-{
-	if (s.empty())
-		throw std::runtime_error("empty size");
-	std::string num;
-	char suf = 0;
-	for (size_t i = 0; i < s.size(); ++i)
-	{
-		if (std::isdigit(s[i]))
-			num += s[i];
-		else
-		{
-			suf = static_cast<char>(std::tolower(s[i]));
-			if (i != s.size() - 1)
-				throw std::runtime_error("invalid size '" + s + "'");
-		}
-	}
-	if (num.empty())
-		throw std::runtime_error("invalid size '" + s + "'");
-	std::istringstream is(num);
-	unsigned long base = 0;
-	is >> base;
-	if (!is)
-		throw std::runtime_error("invalid number '" + s + "'");
-	if (suf == 'k')
-		base *= 1024ul;
-	else if (suf == 'm')
-		base *= 1024ul * 1024ul;
-	else if (suf == 'b' || suf == 0)
-	{ /* bytes */
-	}
-	else
-		throw std::runtime_error("invalid size suffix in '" + s + "'");
-	return static_cast<size_t>(base);
-}
+// static size_t parseSizeBytes(const std::string &s)
+// {
+// 	if (s.empty())
+// 		throw std::runtime_error("empty size");
+// 	std::string num;
+// 	char suf = 0;
+// 	for (size_t i = 0; i < s.size(); ++i)
+// 	{
+// 		if (std::isdigit(s[i]))
+// 			num += s[i];
+// 		else
+// 		{
+// 			suf = static_cast<char>(std::tolower(s[i]));
+// 			if (i != s.size() - 1)
+// 				throw std::runtime_error("invalid size '" + s + "'");
+// 		}
+// 	}
+// 	if (num.empty())
+// 		throw std::runtime_error("invalid size '" + s + "'");
+// 	std::istringstream is(num);
+// 	unsigned long base = 0;
+// 	is >> base;
+// 	if (!is)
+// 		throw std::runtime_error("invalid number '" + s + "'");
+// 	if (suf == 'k')
+// 		base *= 1024ul;
+// 	else if (suf == 'm')
+// 		base *= 1024ul * 1024ul;
+// 	else if (suf == 'b' || suf == 0)
+// 	{ /* bytes */
+// 	}
+// 	else
+// 		throw std::runtime_error("invalid size suffix in '" + s + "'");
+// 	return static_cast<size_t>(base);
+// }
 
 static std::runtime_error parseErr(const Token &t, const std::string &msg)
 {
@@ -417,4 +417,9 @@ void ServerConfig::parseFile(const std::string &path)
 const std::vector<VirtualServer> &ServerConfig::servers() const
 {
 	return _servers;
+}
+
+void ServerConfig::push_back(VirtualServer vs)
+{
+	this->_servers.push_back(vs);
 }

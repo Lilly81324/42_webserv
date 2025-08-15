@@ -23,16 +23,6 @@ void ClientConnection::close()
 	this->state = CLOSE;
 }
 
-static inline void appendString(std::vector<char> &v, const char *s, size_t n)
-{
-	v.insert(v.end(), s, s + n);
-}
-
-static inline void appendString(std::vector<char> &v, const std::string &s)
-{
-	appendString(v, s.data(), s.size());
-}
-
 /**
  * @brief PLEASE DELETE ME I AM A PLACEHOLDER
  */

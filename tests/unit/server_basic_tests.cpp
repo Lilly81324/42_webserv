@@ -142,7 +142,7 @@ TEST_CASE("Server is actually listening (connect succeeds)", "[server][integrati
 
 TEST_CASE("Server handles empty configuration", "[server][config]")
 {
-	ServerConfig cfg; // No virtual servers
+	ServerConfig cfg; // No virtual
 	Server s(cfg);
 	REQUIRE_NOTHROW(s.start());
 	REQUIRE(s.listenerCount() == 0);

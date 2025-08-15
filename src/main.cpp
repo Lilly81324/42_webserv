@@ -1,3 +1,4 @@
+#include <string>
 #include <iostream>
 #include "ServerConfig.h"
 #include "Server.h"
@@ -17,3 +18,4 @@ int main(int argc, char const *argv[])
 	cout << "OK this is a program" << endl;
 	return 0;
 }
+

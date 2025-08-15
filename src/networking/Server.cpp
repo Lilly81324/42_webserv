@@ -4,7 +4,9 @@
 author: undefined
 date: 8/10/2025
 ------------------------------------------ */
+/* --- src/networking/Server.cpp --- */
 
+/* --- src/networking/Server.cpp --- */
 #include "Server.h"
 
 #include <netdb.h>
@@ -98,17 +100,16 @@ void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique
 	unique_pairs.clear();
 	vsIndiciesByPair.clear();
 	std::set<std::pair<std::string, int> > uniq;
-	for (std::vector<VirtualServer>::const_iterator it = srvConfig.servers.begin();
-		 it != srvConfig.servers.end(); ++it)
+	const std::vector<VirtualServer>& servers = srvConfig.servers;
+	for (std::vector<VirtualServer>::const_iterator it = servers.begin();
+		 it != servers.end(); ++it)
 	{
-		const int idx = int(it - srvConfig.servers.begin());
+		const int idx = int(it - servers.begin());
 		const int port = it->listen_port;
-		
 		if(port <= 0 || port > 65535) continue;
-		
 		const std::string host = it->listen_host.empty() ? std::string("0.0.0.0") : it->listen_host;
 		const std::pair<std::string, int> key(host, port);
-		if (uniq.insert(key).second) 
+		if (uniq.insert(key).second)
 			unique_pairs.push_back(key);
 		vsIndiciesByPair[key].push_back(idx);
 	}

@@ -36,9 +36,9 @@ AR              := ar rcs
 # Enable parallel compilation by default
 MAKEFLAGS       += -j$(shell nproc)
 
-CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP
-CXXFLAGS_14		:= -std=c++14 -MMD -MP
-CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP
+CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP -g
+CXXFLAGS_14		:= -std=c++14 -MMD -MP -g
+CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP -g
 TESTFLAGS		:= --reporter console --durations yes
 
 # Includes

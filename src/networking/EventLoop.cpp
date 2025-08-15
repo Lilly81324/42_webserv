@@ -10,10 +10,11 @@ date: 8/10/2025
 #include <cstring>
 #include <algorithm>
 
+
 EventLoop::EventLoop() : _stop(false) {}
 EventLoop::~EventLoop() {}
 
-int EventLoop::index_of_fd(int fd) const {
+int EventLoop::indexOfFD(int fd) const {
     for (size_t i = 0; i < _pfds.size(); ++i)
         if (_pfds[i].fd == fd) return static_cast<int>(i);
     return -1;
@@ -21,21 +22,21 @@ int EventLoop::index_of_fd(int fd) const {
 
 bool EventLoop::addFD(int fd, short events) {
     if (fd < 0) return false;
-    if (index_of_fd(fd) != -1) return false;
+    if (indexOfFD(fd) != -1) return false;
     struct pollfd p; p.fd = fd; p.events = events; p.revents = 0;
     _pfds.push_back(p);
     return true;
 }
 
-bool EventLoop::mod(int fd, short events) {
-    int idx = index_of_fd(fd);
+bool EventLoop::modFD(int fd, short events) {
+    int idx = indexOfFD(fd);
     if (idx < 0) return false;
     _pfds[idx].events = events;
     return true;
 }
 
 void EventLoop::removeFD(int fd) {
-    int idx = index_of_fd(fd);
+    int idx = indexOfFD(fd);
     if (idx >= 0) {
         _pfds[idx] = _pfds.back();
         _pfds.pop_back();

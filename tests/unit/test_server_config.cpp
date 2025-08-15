@@ -61,3 +61,25 @@ TEST_CASE("ServerConfig throws on invalid error code", "[ServerConfig][invalid]"
     ServerConfig cfg;
     REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_error_page.conf"), std::runtime_error);
 }
+
+TEST_CASE("ServerConfig throws if config file does not exist", "[ServerConfig][invalid]") {
+	ServerConfig cfg;
+	REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/does_not_exist.conf"), std::runtime_error);
+}
+
+TEST_CASE("ServerConfig throws on unknown directive", "[ServerConfig][invalid]") {
+	std::ofstream f("tests/unit/config/invalid_unknown_directive.conf");
+	f << "server {\nlisten 8080;\nfoo bar;\n}" << std::endl;
+	f.close();
+	ServerConfig cfg;
+	REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_unknown_directive.conf"), std::runtime_error);
+}
+
+TEST_CASE("ServerConfig parses valid error_page config", "[ServerConfig]") {
+	ServerConfig cfg;
+	REQUIRE_NOTHROW(cfg.parseFile("tests/unit/config/valid_error_page.conf"));
+	REQUIRE(cfg.servers().size() == 1);
+	const VirtualServer &vs = cfg.servers()[0];
+	REQUIRE(vs.error_pages.count(404));
+	REQUIRE(vs.error_pages.at(404) == "/404.html");
+}

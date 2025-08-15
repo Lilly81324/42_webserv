@@ -44,3 +44,33 @@ TEST_CASE("VirtualServer handles many locations", "[VirtualServer]") {
     }
     REQUIRE(vs.locations.size() == 100);
 }
+
+TEST_CASE("VirtualServer negative and zero port are invalid", "[VirtualServer][invalid]") {
+	VirtualServer vs;
+	vs.listen_port = 0;
+	REQUIRE(vs.listen_port == 0);
+	vs.listen_port = -42;
+	REQUIRE(vs.listen_port < 1);
+}
+
+TEST_CASE("VirtualServer can store error pages and upstreams", "[VirtualServer]") {
+	VirtualServer vs;
+	vs.error_pages[404] = "/404.html";
+	vs.error_pages[500] = "/500.html";
+	REQUIRE(vs.error_pages[404] == "/404.html");
+	REQUIRE(vs.error_pages[500] == "/500.html");
+	UpstreamPool pool;
+	pool.strategy = "roundrobin";
+	vs.upstreams["api"] = pool;
+	REQUIRE(vs.upstreams.count("api"));
+}
+
+TEST_CASE("VirtualServer default RateLimitConfig and Location fields", "[VirtualServer]") {
+	VirtualServer vs;
+	REQUIRE(vs.rate_limit.enabled == false);
+	Location loc;
+	REQUIRE(loc.autoindex == false);
+	REQUIRE(loc.allowed_methods.empty());
+	REQUIRE(loc.upload_dir.empty());
+	REQUIRE(loc.cgi_by_ext.empty());
+}

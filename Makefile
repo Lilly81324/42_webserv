@@ -37,7 +37,7 @@ AR              := ar rcs
 MAKEFLAGS       += -j$(shell nproc)
 
 CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP
-CXXFLAGS_14		:= -Wall -Wextra -Werror -std=c++14 -MMD -MP
+CXXFLAGS_14		:= -std=c++14 -MMD -MP
 CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP
 TESTFLAGS		:= --reporter console --durations yes
 

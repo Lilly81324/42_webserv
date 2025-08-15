@@ -20,16 +20,16 @@ Date: 8/10/2025
 
 class Token
 {
-public:
-	std::string text;
-	size_t line;
-	size_t col;
+	public:
+		std::string text;
+		size_t line;
+		size_t col;
 };
 
 class Lexer
 {
-public:
-	std::vector<Token> lex(const std::string &src);
+	public:
+		std::vector<Token> lex(const std::string &src);
 };
 
 

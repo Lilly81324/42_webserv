@@ -284,73 +284,73 @@ class Server
 };
 
 class ClientHandler : public EventLoop::Handler {
-public:
-    ClientHandler(EventLoop& loop, ClientConnection* c)
-    : _loop(loop), _c(c) {}
+	public:
+		ClientHandler(EventLoop& loop, ClientConnection* c)
+		: eventLoop(loop), clientConnection(c) {}
 
-    virtual ~ClientHandler() { delete _c; }
+		virtual ~ClientHandler() { delete clientConnection; }
 
-    virtual void onEvent(int fd, short revents) {
-        // error/hangup → close
-        if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            _c->close();
-            _loop.removeFD(fd); // deletes this
-            return;
-        }
-        if (revents & POLLIN) {
-            _c->onReadable();
-            if (_c->isClosed()) { _loop.removeFD(fd); return; }
-            if (_c->wantsWrite()) _loop.modFD(fd, POLLOUT);
-        }
-        if (revents & POLLOUT) {
-            _c->onWritable();
-            if (_c->isClosed()) { _loop.removeFD(fd); return; }
-            if (!_c->wantsWrite()) _loop.modFD(fd, POLLIN);
-        }
-    }
-private:
-    EventLoop& _loop;
-    ClientConnection* _c; // owned
+		virtual void onEvent(int fd, short revents) {
+			// error/hangup → close
+			if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				clientConnection->close();
+				eventLoop.removeFD(fd); // deletes this
+				return;
+			}
+			if (revents & POLLIN) {
+				clientConnection->onReadable();
+				if (clientConnection->isClosed()) { eventLoop.removeFD(fd); return; }
+				if (clientConnection->wantsWrite()) eventLoop.modFD(fd, POLLOUT);
+			}
+			if (revents & POLLOUT) {
+				clientConnection->onWritable();
+				if (clientConnection->isClosed()) { eventLoop.removeFD(fd); return; }
+				if (!clientConnection->wantsWrite()) eventLoop.modFD(fd, POLLIN);
+			}
+		}
+	private:
+		EventLoop& eventLoop;
+		ClientConnection* clientConnection; // owned
 };
 
-// Not owning Listener; uses Server helpers to set flags
+
 class AcceptorHandler : public EventLoop::Handler {
-public:
-    AcceptorHandler(EventLoop& loop, Server& srv, Listener* L)
-    : _loop(loop), _srv(srv), _L(L) {}
+	public:
+		AcceptorHandler(EventLoop& loop, Server& srv, Listener* L)
+		: eventLoop(loop), _srv(srv), listener(L) {}
 
-    virtual void onEvent(int fd, short revents) {
-        if (!_L || _L->getFD() != fd) return;
+		virtual void onEvent(int fd, short revents) {
+			if (!listener || listener->getFD() != fd) return;
 
-        if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            _loop.removeFD(fd); // stop accepting on this listener
-            return;
-        }
+			if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				eventLoop.removeFD(fd); // stop accepting on this listener
+				return;
+			}
 
-        if (revents & POLLIN) {
-            for (;;) {
-                struct sockaddr_storage ss;
-                socklen_t sl = sizeof(ss);
-                int cfd = ::accept(fd, (struct sockaddr*)&ss, &sl);
-                if (cfd == -1) {
-                    if (errno == EINTR) continue;
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-                    break; // other errors: give up this turn
-                }
-                // configure client
-                try { _srv.setNonBlocking(cfd); _srv.setCloseOnExec(cfd); }
-                catch (...) { ::close(cfd); continue; }
+			if (revents & POLLIN) {
+				for (;;) {
+					struct sockaddr_storage ss;
+					socklen_t sl = sizeof(ss);
+					int cfd = ::accept(fd, (struct sockaddr*)&ss, &sl);
+					if (cfd == -1) {
+						if (errno == EINTR) continue;
+						if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+						break; // other errors: give up this turn
+					}
+					// configure client
+					try { _srv.setNonBlocking(cfd); _srv.setCloseOnExec(cfd); }
+					catch (...) { ::close(cfd); continue; }
 
-                // register client handler
-                ClientConnection* c = new ClientConnection(cfd);
-                _loop.addFD(cfd, POLLIN, new ClientHandler(_loop, c));
-            }
-        }
-    }
-private:
-    EventLoop& _loop;
-    Server& _srv;
-    Listener* _L; // not owned
+					// register client handler
+					ClientConnection* c = new ClientConnection(cfd);
+					eventLoop.addFD(cfd, POLLIN, new ClientHandler(eventLoop, c));
+				}
+			}
+		}
+	private:
+		EventLoop& eventLoop;
+		Server& _srv;
+		Listener* listener; // not owned
 };
 
 

@@ -103,7 +103,7 @@ class ClientConnection
 		* @note This is a placeholder implementation that will be extended to proper
 		*       HTTP request parsing later.
 		*/
-		void processIncoming();
+		bool processIncoming();
 		static const size_t READ_CHUNK = 8192;
 		/* Place a limit on Infiles to avoid Issues*/
 		static const size_t MAX_INBUFFER = 1 << 20;

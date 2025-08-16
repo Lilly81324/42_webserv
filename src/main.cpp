@@ -21,7 +21,7 @@ int main(int argc, char **argv)
 	VirtualServer vs;
 	vs.listen_host = "127.0.0.1";
 	vs.listen_port = port;
-	cfg.servers.push_back(vs);
+	cfg.push_back(vs);
 
 	Server server(cfg);
 	// server.setPipeline(&pipeline);

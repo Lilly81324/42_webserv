@@ -36,9 +36,9 @@ AR              := ar rcs
 # Enable parallel compilation by default
 MAKEFLAGS       += -j$(shell nproc)
 
-CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP
-CXXFLAGS_14		:= -std=c++14 -MMD -MP
-CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP
+CXXFLAGS_98		:= -Wall -Wextra -Werror -std=c++98 -MMD -MP -g
+CXXFLAGS_14		:= -std=c++14 -MMD -MP -g
+CFLAGS_C		:= -Wall -Wextra -Werror -std=c99   -MMD -MP -g
 TESTFLAGS		:= --reporter console --durations yes
 
 # Includes
@@ -60,12 +60,12 @@ SRCS_CPP_NOMAIN := $(filter-out $(MAIN_SRC),$(SRCS_CPP))
 
 # Test sources (auto-discovered)
 ifndef DISABLE_TESTS
-    TEST_SRCS_CPP   := $(shell find $(TEST_DIR) -type f -name "*.cpp")
+    TEST_SRCS_CPP	:= $(shell find $(TEST_DIR) -type f -name "*.cpp")
     # Catch2 sources (auto-discovered) - exclude tests and examples
-    CATCH2_SRCS     := $(shell find $(CATCH2_DIR)/catch2 -type f -name "*.cpp" -not -path "*/tests/*" -not -path "*/examples/*")
+    CATCH2_SRCS		:= $(shell find $(CATCH2_DIR)/catch2 -type f -name "*.cpp" -not -path "*/tests/*" -not -path "*/examples/*")
 else
-    TEST_SRCS_CPP   :=
-    CATCH2_SRCS     :=
+    TEST_SRCS_CPP	:=
+    CATCH2_SRCS		:=
 endif
 
 # Objects
@@ -198,7 +198,7 @@ $(OBJ98_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_98) $(INCS) -c $< -o $@
 
-# C objects
+# C objects 
 $(OBJ98_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_C) $(INCS) -c $< -o $@
@@ -206,6 +206,7 @@ $(OBJ98_DIR)/%.o: $(SRC_DIR)/%.c
 # ------------------------------ Test executable (standard) ----------------------------- #
 
 ifndef DISABLE_TESTS
+# Build Catch2 as a static library (built once, reused many times)
 $(CATCH2_LIB_PATH): $(CATCH2_OBJS_14)
 	@mkdir -p $(LIB_DIR)
 	@echo "Creating Catch2 library..."

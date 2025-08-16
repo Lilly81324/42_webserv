@@ -12,15 +12,15 @@ Date: 8/10/2025
 #include <poll.h>
 
 
-class EventLoop
-{
+
+class EventLoop {
 public:
 	EventLoop();
 	~EventLoop();
 
 	// Register / modify / remove a file descriptor
 	bool addFD(int fd, short events); // events: POLLIN|POLLOUT
-	bool mod(int fd, short events);
+	bool modFD(int fd, short events);
 	void removeFD(int fd);
 
 	// Main event loop
@@ -34,7 +34,7 @@ private:
 	std::vector<struct pollfd> _pfds;
 	bool _stop;
 
-	int index_of_fd(int fd) const;
+	int indexOfFD(int fd) const;
 };
 
 #endif // EVENTLOOP_H

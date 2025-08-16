@@ -100,7 +100,7 @@ void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique
 	unique_pairs.clear();
 	vsIndiciesByPair.clear();
 	std::set<std::pair<std::string, int> > uniq;
-	const std::vector<VirtualServer>& servers = srvConfig.servers();
+	const std::vector<VirtualServer>& servers = srvConfig.servers;
 	for (std::vector<VirtualServer>::const_iterator it = servers.begin();
 		 it != servers.end(); ++it)
 	{

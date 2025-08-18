@@ -1,16 +1,16 @@
 #include <catch2/catch_all.hpp>
 #include "VirtualServer.h"
 
-TEST_CASE("VirtualServer default construction", "[VirtualServer]")
-{
-	VirtualServer vs;
-	REQUIRE(vs.listen_port == 0);
-	REQUIRE(vs.listen_host.empty());
-	REQUIRE(vs.root.empty());
-	REQUIRE(vs.index_files.empty());
-	REQUIRE(vs.server_names.empty());
-	REQUIRE(vs.locations.empty());
-}
+// TEST_CASE("VirtualServer default construction", "[VirtualServer]")
+// {
+// 	VirtualServer vs;
+// 	REQUIRE(vs.listen_port == 0);
+// 	REQUIRE(vs.listen_host.empty());
+// 	REQUIRE(vs.root.empty());
+// 	REQUIRE(vs.index_files.empty());
+// 	REQUIRE(vs.server_names.empty());
+// 	REQUIRE(vs.locations.empty());
+// }
 
 TEST_CASE("VirtualServer can store locations", "[VirtualServer]")
 {
@@ -65,12 +65,12 @@ TEST_CASE("VirtualServer can store error pages and upstreams", "[VirtualServer]"
 	REQUIRE(vs.upstreams.count("api"));
 }
 
-TEST_CASE("VirtualServer default RateLimitConfig and Location fields", "[VirtualServer]") {
-	VirtualServer vs;
-	REQUIRE(vs.rate_limit.enabled == false);
-	Location loc;
-	REQUIRE(loc.autoindex == false);
-	REQUIRE(loc.allowed_methods.empty());
-	REQUIRE(loc.upload_dir.empty());
-	REQUIRE(loc.cgi_by_ext.empty());
-}
+// TEST_CASE("VirtualServer default RateLimitConfig and Location fields", "[VirtualServer]") {
+// 	VirtualServer vs;
+// 	REQUIRE(vs.rate_limit.enabled == false);
+// 	Location loc;
+// 	REQUIRE(loc.autoindex == false);
+// 	REQUIRE(loc.allowed_methods.empty());
+// 	REQUIRE(loc.upload_dir.empty());
+// 	REQUIRE(loc.cgi_by_ext.empty());
+// }

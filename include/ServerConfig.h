@@ -10,43 +10,43 @@ Date: 8/10/2025
 
 #include <string>
 #include <vector>
-#include <set>
 #include <map>
 
-#include "VirtualServer.h"
-
-
-/* ============= Tokenizer Declarations ============ */
-
-class Token
-{
-	public:
-		std::string text;
-		size_t line;
-		size_t col;
-};
-
-class Lexer
-{
-	public:
-		std::vector<Token> lex(const std::string &src);
-};
+#include "VirtualServer.h"   // brings in VirtualServer and CgiSpec
 
 class ServerConfig
 {
-	public:
-		ServerConfig();
-		~ServerConfig();
-		bool canOpen(const char *path) const;
-		void parseFile(const std::string &path);
-		const std::vector<VirtualServer> &servers() const;
-		void push_back(VirtualServer vs);
+public:
+    ServerConfig();
+    ~ServerConfig();
 
-	private:
-		std::vector<VirtualServer> _servers;
-		SessionConfig session;
-		MimeConfig mime;
-		CgiDefaultsConfig cgi;
-	};
+    bool canOpen(const char *path) const;
+    void parseFile(const std::string &path);
+
+    const std::vector<VirtualServer>& servers() const { return _servers; }
+    void push_back(const VirtualServer &vs);
+
+private:
+    static std::string                 readWholeFile(const std::string &path);
+    static std::vector<std::string>    tokenize(const std::string &data);
+    void                               parseTokens(const std::vector<std::string> &tok);
+    void                               checkDuplicateListen_() const;
+
+private:
+    // Core data used by the runtime / tests
+    std::vector<VirtualServer> _servers;
+
+public:
+    // Extra fields to align with your diagram (not required by tests yet)
+    bool                        session_enabled;
+    std::string                 session_cookie_name;
+    int                         session_max_age;
+    bool                        session_secure;
+    bool                        session_http_only;
+    std::string                 session_same_site;
+    std::map<std::string,std::string> mime_mapping;
+    std::map<std::string,CgiSpec>     cgi_defaults;
+};
 
 #endif // SERVERCONFIG_H
+

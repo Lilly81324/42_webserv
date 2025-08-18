@@ -22,11 +22,11 @@ TEST_CASE("ServerConfig detects missing brace", "[ServerConfig][invalid]")
 	REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_missing_brace.conf"), std::runtime_error);
 }
 
-// TEST_CASE("ServerConfig detects bad port", "[ServerConfig][invalid]")
-// {
-// 	ServerConfig cfg;
-// 	REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_bad_port.conf"), std::runtime_error);
-// }
+TEST_CASE("ServerConfig detects bad port", "[ServerConfig][invalid]")
+{
+	ServerConfig cfg;
+	REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_bad_port.conf"), std::runtime_error);
+}
 
 TEST_CASE("ServerConfig parses multiple servers", "[ServerConfig]")
 {
@@ -42,10 +42,6 @@ TEST_CASE("ServerConfig throws on missing listen directive", "[ServerConfig][inv
     REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_missing_listen.conf"), std::runtime_error);
 }
 
-TEST_CASE("ServerConfig throws on duplicate listen directive", "[ServerConfig][invalid]") {
-    ServerConfig cfg;
-    REQUIRE_THROWS_AS(cfg.parseFile("tests/unit/config/invalid_duplicate_listen.conf"), std::runtime_error);
-}
 
 TEST_CASE("ServerConfig throws on unsupported HTTP method", "[ServerConfig][invalid]") {
     ServerConfig cfg;

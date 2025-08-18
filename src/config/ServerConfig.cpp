@@ -1,14 +1,13 @@
+#include "ServerConfig.h"
 
 #include <fstream>
-#include <cctype>
-#include "ServerConfig.h"
 #include <sstream>
 #include <stdexcept>
+#include <cctype>
+#include <cstdlib>
 #include <set>
-#include <cstdlib>   // strtol
 
-
-// ---------------- small helpers ----------------
+// ---------- tiny helpers (only those we use) ----------
 static bool parseUnsigned(const std::string &s, int &out) {
     if (s.empty()) return false;
     long v = 0;
@@ -30,7 +29,7 @@ static void validateErrorStatusOrThrow(const std::string &raw) {
     }
 }
 
-// ---------------- ServerConfig impl ----------------
+// ---------- ServerConfig impl ----------
 
 ServerConfig::ServerConfig()
 : _servers()
@@ -57,7 +56,9 @@ bool ServerConfig::canOpen(const char *path) const {
 
 std::string ServerConfig::readWholeFile(const std::string &path) {
     std::ifstream f(path.c_str(), std::ios::in | std::ios::binary);
-    if (!f) throw std::runtime_error("cannot open config: " + path);
+    if (!f) {
+        throw std::runtime_error("cannot open config: " + path);
+    }
     std::ostringstream oss;
     oss << f.rdbuf();
     return oss.str();
@@ -70,20 +71,20 @@ std::vector<std::string> ServerConfig::tokenize(const std::string &data) {
     for (std::string::size_type i = 0; i < data.size();) {
         char ch = data[i];
 
-        // comments
+        // comments start with '#': skip until newline
         if (ch == '#') {
             while (i < data.size() && data[i] != '\n') ++i;
             continue;
         }
 
-        // whitespace
+        // whitespace splits tokens
         if (std::isspace(static_cast<unsigned char>(ch))) {
             if (!cur.empty()) { out.push_back(cur); cur.clear(); }
             ++i;
             continue;
         }
 
-        // single-char tokens
+        // single-character tokens
         if (ch == '{' || ch == '}' || ch == ';') {
             if (!cur.empty()) { out.push_back(cur); cur.clear(); }
             out.push_back(std::string(1, ch));
@@ -91,7 +92,7 @@ std::vector<std::string> ServerConfig::tokenize(const std::string &data) {
             continue;
         }
 
-        // word
+        // otherwise collect into current word
         cur.push_back(ch);
         ++i;
     }
@@ -103,8 +104,8 @@ std::vector<std::string> ServerConfig::tokenize(const std::string &data) {
 void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
     _servers.clear();
 
-    std::size_t i = 0;
     const std::size_t N = tok.size();
+    std::size_t i = 0;
 
     while (i < N) {
         const std::string &t = tok[i];
@@ -112,19 +113,11 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
         if (t == "server") {
             if (i + 1 >= N || tok[i + 1] != "{")
                 throw std::runtime_error("expected '{' after 'server'");
-            i += 2; // consume "server" "{"
+            i += 2; // skip "server" "{"
 
-            VirtualServer vs;
-            // Safe explicit defaults
-            vs.listen_host.clear();
-            vs.listen_port = 0;
-            vs.server_names.clear();
-            vs.root.clear();
-            vs.index_files.clear();
-            vs.error_pages.clear();
-            vs.locations.clear();
+            VirtualServer vs; // ctor sets safe defaults
 
-            bool saw_listen = false;
+            bool seen_listen = false;
 
             while (i < N && tok[i] != "}") {
                 const std::string &kw = tok[i];
@@ -133,20 +126,23 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                 if (kw == "listen") {
                     if (i + 1 >= N)
                         throw std::runtime_error("listen expects 'PORT' or 'HOST:PORT'");
+
                     std::string a = tok[i + 1];
                     std::string b;
                     std::size_t adv = 2;
-                    // Two-token form: "listen HOST PORT ;"
+
+                    // Two-token form? "listen HOST PORT ;"
                     if (i + 2 < N && tok[i + 2] != ";" && tok[i + 2] != "{" && tok[i + 2] != "}") {
                         b = tok[i + 2];
                         adv = 3;
                     }
-                    if (i + adv < N && tok[i + adv] == ";")
-                        ++adv;
+                    if (i + adv < N && tok[i + adv] == ";") ++adv;
+
                     std::string host;
                     int port = -1;
+
                     if (b.empty()) {
-                        // One token: either "PORT" or "HOST:PORT"
+                        // one token form: "PORT" or "HOST:PORT"
                         std::string::size_type cpos = a.find(':');
                         if (cpos == std::string::npos) {
                             char *endp = 0;
@@ -165,7 +161,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                             port = static_cast<int>(p);
                         }
                     } else {
-                        // Two-token: HOST PORT
+                        // two-token form: HOST PORT
                         host = a;
                         char *endp = 0;
                         long p = ::strtol(b.c_str(), &endp, 10);
@@ -173,12 +169,14 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                             throw std::runtime_error("invalid listen port");
                         port = static_cast<int>(p);
                     }
+
                     vs.listen_host = host;
                     vs.listen_port = port;
-                    saw_listen = true;
+                    seen_listen = true;
                     i += adv;
                     continue;
                 }
+
                 // server_name name1 name2 ... ;
                 if (kw == "server_name") {
                     std::size_t j = i + 1;
@@ -192,6 +190,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                     i = j + 1;
                     continue;
                 }
+
                 // root /path ;
                 if (kw == "root") {
                     if (i + 1 >= N)
@@ -203,6 +202,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                         i += 2;
                     continue;
                 }
+
                 // index file1 file2 ... ;
                 if (kw == "index") {
                     std::size_t j = i + 1;
@@ -221,17 +221,21 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                 if (kw == "error_page") {
                     if (i + 2 >= N)
                         throw std::runtime_error("error_page expects: <status> <path>");
+
                     const std::string &statusTok = tok[i + 1];
-                    validateErrorStatusOrThrow(statusTok); // pre-validation for tests
+                    validateErrorStatusOrThrow(statusTok);
+
                     char *endp = 0;
                     long st = ::strtol(statusTok.c_str(), &endp, 10);
                     if (!statusTok.size() || (endp && *endp))
                         throw std::runtime_error("invalid error code");
+
                     int status = static_cast<int>(st);
                     const std::string &epath = tok[i + 2];
+
                     std::size_t adv = 3;
-                    if (i + 3 < N && tok[i + 3] == ";")
-                        ++adv;
+                    if (i + 3 < N && tok[i + 3] == ";") ++adv;
+
                     vs.error_pages[status] = epath;
                     i += adv;
                     continue;
@@ -245,19 +249,14 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                     if (tok[i + 2] != "{")
                         throw std::runtime_error("expected '{' after location path");
                     i += 3;
-                    Location loc;
+
+                    Location loc; // constructor sets defaults
                     loc.path_prefix = locPath;
-                    loc.regex = false;
-                    loc.root.clear();
-                    loc.autoindex = false;
-                    loc.index_files.clear();
-                    loc.allowed_methods.clear();
-                    loc.upload_dir.clear();
-                    loc.is_proxy = false;
-                    loc.proxy_name.clear();
-                    loc.cgi_by_ext.clear();
+
                     while (i < N && tok[i] != "}") {
                         const std::string &lkw = tok[i];
+
+                        // location root
                         if (lkw == "root") {
                             if (i + 1 >= N)
                                 throw std::runtime_error("location root expects a path");
@@ -268,13 +267,13 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                                 i += 2;
                             continue;
                         }
+
+                        // location index file1 file2 ... ;
                         if (lkw == "index") {
                             std::size_t j = i + 1;
                             if (j >= N)
                                 throw std::runtime_error("location index expects at least one file");
                             for (; j < N && tok[j] != ";"; ++j) {
-                                if (tok[j] == "{" || tok[j] == "}")
-                                    throw std::runtime_error("unexpected brace inside location index");
                                 loc.index_files.push_back(tok[j]);
                             }
                             if (j >= N || tok[j] != ";")
@@ -282,12 +281,14 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                             i = j + 1;
                             continue;
                         }
+
+                        // location autoindex on|off ;
                         if (lkw == "autoindex") {
                             if (i + 1 >= N)
                                 throw std::runtime_error("autoindex expects 'on' or 'off'");
                             const std::string &v = tok[i + 1];
-                            if (v == "on")        loc.autoindex = true;
-                            else if (v == "off")  loc.autoindex = false;
+                            if (v == "on")       loc.autoindex = true;
+                            else if (v == "off") loc.autoindex = false;
                             else
                                 throw std::runtime_error("invalid autoindex value (use 'on' or 'off')");
                             if (i + 2 < N && tok[i + 2] == ";")
@@ -297,44 +298,41 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
                             continue;
                         }
 
-                        // methods / allowed_methods: only GET, POST, DELETE are accepted
-                        if (lkw == "methods" || lkw == "allowed_methods") {
+                        // location methods GET POST DELETE ;
+                        if (lkw == "methods") {
                             std::size_t j = i + 1;
                             if (j >= N)
-                                throw std::runtime_error("methods expects a non-empty list");
+                                throw std::runtime_error("methods expects at least one method");
                             for (; j < N && tok[j] != ";"; ++j) {
-                                const std::string &raw = tok[j];
-                                std::string m = raw;
-                                for (std::string::size_type k = 0; k < m.size(); ++k)
-                                    m[k] = static_cast<char>(std::toupper(
-                                        static_cast<unsigned char>(m[k])));
-                                if (m == "GET" || m == "POST" || m == "DELETE") {
-                                    loc.allowed_methods.push_back(m);
-                                } else {
+                                const std::string m = tok[j];
+                                if (!(m == "GET" || m == "POST" || m == "DELETE")) {
                                     std::ostringstream oss;
-                                    oss << "unsupported HTTP method: '" << raw << "'";
+                                    oss << "unsupported HTTP method: " << m;
                                     throw std::runtime_error(oss.str());
                                 }
+                                loc.allowed_methods.push_back(m);
                             }
                             if (j >= N || tok[j] != ";")
-                                throw std::runtime_error("expected ';' after methods");
+                                throw std::runtime_error("expected ';'");
                             i = j + 1;
                             continue;
                         }
+
+                        // Unknown directive inside location
                         std::string msg = "unknown directive in location: ";
                         msg += lkw;
                         throw std::runtime_error(msg);
                     }
+
                     if (i >= N || tok[i] != "}")
                         throw std::runtime_error("missing '}' to close location block");
+
                     ++i; // consume '}'
                     vs.locations.push_back(loc);
                     continue;
                 }
-                if (kw == ";") { 
-                    ++i;
-                    continue;
-                }
+
+                // Unknown directive inside server
                 std::string msg = "unknown directive in server block: ";
                 msg += kw;
                 throw std::runtime_error(msg);
@@ -342,35 +340,32 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok) {
 
             if (i >= N || tok[i] != "}")
                 throw std::runtime_error("missing '}' to close server block");
+
+            // validate required directives in server
+            if (!seen_listen || vs.listen_port <= 0)
+                throw std::runtime_error("server missing valid listen directive");
+
             ++i; // consume server '}'
-            // Each server must have a valid listen
-            if (!saw_listen || vs.listen_port <= 0 || vs.listen_port > 65535)
-                throw std::runtime_error("server block missing valid listen directive");
             _servers.push_back(vs);
             continue;
         }
 
-        if (t == ";") { 
-            ++i;
-            continue;
-        }
+        if (t == ";") { ++i; continue; } // stray semicolon tolerated
+
+        // Unknown top-level directive
         std::string msg = "unknown top-level directive: ";
         msg += t;
         throw std::runtime_error(msg);
     }
 }
 
-
 void ServerConfig::checkDuplicateListen_() const {
     std::set< std::pair<std::string,int> > seen;
     for (std::vector<VirtualServer>::size_type i = 0; i < _servers.size(); ++i) {
         const VirtualServer &vs = _servers[i];
         const int port = vs.listen_port;
-        if (port <= 0 || port > 65535)
-            continue;
-        const std::string host = vs.listen_host.empty()
-                               ? std::string("0.0.0.0")
-                               : vs.listen_host;
+        if (port <= 0 || port > 65535) continue;
+        const std::string host = vs.listen_host.empty() ? std::string("0.0.0.0") : vs.listen_host;
         const std::pair<std::string,int> key(host, port);
         if (!seen.insert(key).second) {
             std::ostringstream oss;
@@ -382,13 +377,13 @@ void ServerConfig::checkDuplicateListen_() const {
 
 void ServerConfig::parseFile(const std::string &path) {
     const std::string data = readWholeFile(path);
-    const std::vector<std::string> tok = tokenize(data);
-    if (tok.empty()) {
-        _servers.clear();
-        return;
-    }
-    // Parse into structures (includes validation for error_page and autoindex)
+    parseString(data);
+}
+
+void ServerConfig::parseString(const std::string &text) {
+    const std::vector<std::string> tok = tokenize(text);
+    if (tok.empty()) { _servers.clear(); return; }
     parseTokens(tok);
-    // Cross-checks that depend on the whole file
     checkDuplicateListen_();
 }
+

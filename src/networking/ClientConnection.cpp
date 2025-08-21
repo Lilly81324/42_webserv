@@ -7,6 +7,7 @@ date: 8/10/2025
 
 #include "ClientConnection.h"
 #include "HttpRequest.h"
+#include "HttpResponse.h"
 #include "Router.h"
 #include "Server.h"
 #include <netinet/in.h>
@@ -59,18 +60,32 @@ static std::string makeHelloResponse()
 	return resp;
 }
 
+static std::string makeErrorResponse()
+{
+	const char *body = "Internal Server Error\n";
+	std::string resp;
+	resp.reserve(128);
+	resp += "HTTP/1.1 500 Internal Server Error\r\n";
+	resp += "Content-Length: 22\r\n";
+	resp += "Connection: close\r\n";
+	resp += "Content-Type: text/plain\r\n";
+	resp += "\r\n";
+	resp += body;
+	return resp;
+}
+
 /**
  *  Just a placeholder until he have a proper Parser
  *  Look for \r\n\r\n using parseOffset to avoid rescanning.
  */
-static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset , HttpRequest & request)
+static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset, HttpRequest &request)
 {
 	(void)parseOffset;
 	if (!request.parse(buf.data(), buf.size()))
 		return (false);
 	if (request.getState() <= HEADER || request.getState() == ERROR)
 		return (false);
-	
+
 	const Headers &header = request.getHeaders();
 	(void)header;
 	return true;
@@ -85,32 +100,40 @@ bool ClientConnection::processIncoming()
 {
 	if (this->state != READ_HEADERS)
 		return false;
-	HttpRequest request;
+	HttpRequest req;
 
-	if (headersComplete(inBuffer, parseOffset, request))
+	if (headersComplete(inBuffer, parseOffset, req))
 	{
 		// TODO: parse method/target/Host from inBuffer. For now, placeholders:
 
 		const int local_port = get_local_port(fd.get());
-		int vs_idx = -1;
+		vs_idx = -1;
 		if (server && local_port > 0)
 		{
 			vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
 		}
-		RouteDecision plan; // defaults HK_ERROR/500
+		// RouteDecision plan; // defaults HK_ERROR/500
 		if (server && vs_idx >= 0)
 		{
-			Router::makeDecisionForVS(server->getConfig(), vs_idx, "GET", "/", plan);
-		}
-		else
-		{
-			plan.kind = RouteDecision::HK_ERROR;
-			plan.status = 500;
+			HttpResponse res;
+			// Router::makeDecisionForVS(server->getConfig(), vs_idx, "GET", "/", plan);
+			if (!server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res))
+			{
+				std::string resp = makeErrorResponse();
+				outBuffer.assign(resp.begin(), resp.end());
+				changeState(WRITE);
+				return false;
+			}
 		}
 		std::string resp = makeHelloResponse();
 		outBuffer.assign(resp.begin(), resp.end());
 		changeState(WRITE);
 		return true;
+		// else
+		// {
+		// 	plan.kind = RouteDecision::HK_ERROR;
+		// 	plan.status = 500;
+		// }
 	}
 	return false;
 }

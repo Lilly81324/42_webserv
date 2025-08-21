@@ -14,3 +14,11 @@ ProxyHandler::ProxyHandler() {
 ProxyHandler::~ProxyHandler() {
     // Destructor
 }
+
+bool ProxyHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext & ctx)
+{
+	(void) req;
+	(void) res;
+	(void) ctx;
+	return true;
+}

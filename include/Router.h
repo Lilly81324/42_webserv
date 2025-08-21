@@ -11,7 +11,7 @@ Date: 8/10/2025
 #include <string>
 
 class ServerConfig;
-class RouteDecision;
+struct RouteDecision;
 class Router
 {
 public:

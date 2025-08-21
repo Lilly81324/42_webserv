@@ -2,15 +2,23 @@
 #ifndef HANDLER_H
 #define HANDLER_H
 
-class HttpRequest;
-class HttpResponse;
+#include "HttpRequest.h"
+#include "HttpResponse.h"
+#include "RequestContext.h"
 
 class Handler
 {
 
-	public:
-		virtual ~Handler();
-		virtual void handle(HttpRequest &req, HttpRequest &res) = 0;
+public:
+	Handler() {};
+	virtual ~Handler(){};
+	virtual bool handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
+	{
+		(void)req;
+		(void)res;
+		(void)ctx;
+		return true;
+	};
 };
 
 #endif

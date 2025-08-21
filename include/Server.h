@@ -18,11 +18,11 @@ Date: 8/10/2025
 
 #include "Listener.h"
 #include "ClientConnection.h"
+#include "ServerPipeline.h"
 #include <vector>
 #include <string>
 #include <poll.h>
 #include <map>
-
 
 
 
@@ -69,7 +69,7 @@ class Server
 		std::vector<Listener*> listeners;
 		std::map<int, std::map<std::string, int> > host_map_by_port; // port -> (host -> vs_index)
 		std::map<int, int> default_vs_by_port;						 // port -> default vs_index
-
+		ServerPipeline	*serverpipeline;
 		/**
 		 * @brief Creates a raw listening socket for the specified host and port.
 		 *
@@ -278,6 +278,7 @@ class Server
 		int resolveVirtualServerByPort(int localPort, const std::string& hostHdr) const;
 
 		const ServerConfig&	getConfig()const;
+		ServerPipeline* getPipeline() const{ return serverpipeline;};
 
 		#ifdef UNIT_TEST
 		public:

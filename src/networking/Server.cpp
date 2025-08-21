@@ -28,11 +28,13 @@ static void throwErr(const char *what)
 Server::Server(ServerConfig &srvConfig) : srvConfig(srvConfig)
 {
 	this->loop = EventLoop();
+	serverpipeline = new ServerPipeline();
 }
 
 Server::~Server()
 {
 	stop();
+	delete serverpipeline;
 }
 
 void Server::registerListeners()

@@ -8,13 +8,16 @@ Date: 8/16/2025
 #ifndef PUTPATCHHANDLER_H
 #define PUTPATCHHANDLER_H
 
-class PutPatchHandler {
-public:
-    PutPatchHandler();
-    ~PutPatchHandler();
+#include "Handler.h"
 
-private:
+class PutPatchHandler : public Handler
+{
+	public:
+		PutPatchHandler();
+		~PutPatchHandler();
+		bool handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx);
 
+	private:
 };
 
 #endif // PUTPATCHHANDLER_H

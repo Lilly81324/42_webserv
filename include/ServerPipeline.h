@@ -8,13 +8,17 @@ Date: 8/10/2025
 #ifndef SERVERPIPELINE_H
 #define SERVERPIPELINE_H
 
+#include <string>
+
+
+class ServerConfig;
+class HttpRequest;
+class HttpResponse;
 class ServerPipeline {
-public:
-    ServerPipeline();
-    ~ServerPipeline();
+	public:
+		bool processRequest(const ServerConfig& cfg, int vs_indx, HttpRequest & req, HttpResponse& res);
 
-private:
-
+	private:
 };
 
 #endif // SERVERPIPELINE_H

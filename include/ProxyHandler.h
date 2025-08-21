@@ -8,12 +8,15 @@ Date: 8/16/2025
 #ifndef PROXYHANDLER_H
 #define PROXYHANDLER_H
 
-class ProxyHandler {
-public:
-    ProxyHandler();
-    ~ProxyHandler();
 
-private:
+#include "Handler.h"
+class ProxyHandler: public Handler {
+	public:
+		ProxyHandler();
+		~ProxyHandler();
+		bool handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx);
+
+	private:
 
 };
 

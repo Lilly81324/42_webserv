@@ -63,10 +63,11 @@ void Server::unregisterListeners()
 
 void Server::closeAll()
 {
+	// Delete all Listener objects and clear the vector
 	for (std::vector<Listener *>::iterator it = listeners.begin();
 		 it != listeners.end(); ++it)
 	{
-		delete *it; 
+		delete *it;
 	}
 	listeners.clear();
 }
@@ -93,6 +94,7 @@ void Server::stop()
 {
 	unregisterListeners();
 	closeAll();
+	loop.stop();
 }
 
 void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique_pairs,

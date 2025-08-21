@@ -79,16 +79,23 @@ static std::string makeErrorResponse()
  *  Just a placeholder until he have a proper Parser
  *  Look for \r\n\r\n using parseOffset to avoid rescanning.
  */
-static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset, HttpRequest &request)
+static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset,size_t &bytesErased, HttpRequest &request)
 {
-	(void)parseOffset;
-	if (!request.parse(buf.data(), buf.size()))
+	if (!request.parse(buf.data(), buf.size())){
+		parseOffset = request.getTotalBytesHandled() - bytesErased;
+		bytesErased+=parseOffset;
 		return (false);
+	}
 	if (request.getState() <= HEADER || request.getState() == ERROR)
+	{
+		parseOffset = request.getTotalBytesHandled() - bytesErased;
+		bytesErased+=parseOffset;
 		return (false);
+	}
 
-	if(request.getHeaders().keyExists(HDR_CONNECTION))
-	{	if( request.keepAlive() || request.getHeaders().get(HDR_CONNECTION) == "keep-alive")
+	if (request.getHeaders().keyExists(HDR_CONNECTION))
+	{
+		if (request.keepAlive() || request.getHeaders().get(HDR_CONNECTION) == "keep-alive")
 			request.setKeepAlive(true);
 		else if (request.getHeaders().get(HDR_CONNECTION) == "closed")
 			request.setKeepAlive(false);
@@ -105,9 +112,8 @@ bool ClientConnection::processIncoming()
 {
 	if (this->state != READ_HEADERS)
 		return false;
-	HttpRequest req;
 
-	if (headersComplete(inBuffer, parseOffset, req))
+	if (headersComplete(inBuffer, parseOffset,bytesErased, req))
 	{
 		// TODO: parse method/target/Host from inBuffer. For now, placeholders:
 
@@ -120,7 +126,6 @@ bool ClientConnection::processIncoming()
 		// RouteDecision plan; // defaults HK_ERROR/500
 		if (server && vs_idx >= 0)
 		{
-			HttpResponse res;
 			// Router::makeDecisionForVS(server->getConfig(), vs_idx, "GET", "/", plan);
 			if (!server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res))
 			{
@@ -186,7 +191,7 @@ void ClientConnection::readFromSocket()
 
 	while (true)
 	{
-		if (inBuffer.size() >= MAX_INBUFFER)
+		if (inBuffer.size() >= MAX_INBUFFER || req.getTotalBytesRead() >= MAX_INBUFFER)
 		{
 			close();
 			return;
@@ -203,6 +208,7 @@ void ClientConnection::readFromSocket()
 			inBuffer.insert(inBuffer.end(), buffer, buffer + toCopy);
 			if (processIncoming())
 				return;
+			inBuffer.erase(inBuffer.begin(), inBuffer.begin() + parseOffset);
 			continue;
 		}
 
@@ -210,6 +216,7 @@ void ClientConnection::readFromSocket()
 		{
 			if (processIncoming())
 				return;
+			inBuffer.erase(inBuffer.begin(), inBuffer.begin() + parseOffset);
 			close();
 			return;
 		}

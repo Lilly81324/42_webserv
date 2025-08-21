@@ -208,7 +208,12 @@ void ClientConnection::readFromSocket()
 			inBuffer.insert(inBuffer.end(), buffer, buffer + toCopy);
 			if (processIncoming())
 				return;
-			inBuffer.erase(inBuffer.begin(), inBuffer.begin() + parseOffset);
+			// Defensive: ensure parseOffset does not exceed buffer size. If it does,
+			// clamp to avoid undefined behaviour (possible heap corruption).
+			size_t eraseCount = (parseOffset <= inBuffer.size()) ? parseOffset : inBuffer.size();
+			if (eraseCount > 0)
+				inBuffer.erase(inBuffer.begin(), inBuffer.begin() + eraseCount);
+			parseOffset = 0;
 			continue;
 		}
 
@@ -216,7 +221,11 @@ void ClientConnection::readFromSocket()
 		{
 			if (processIncoming())
 				return;
-			inBuffer.erase(inBuffer.begin(), inBuffer.begin() + parseOffset);
+			// Defensive erase as above
+			size_t eraseCount = (parseOffset <= inBuffer.size()) ? parseOffset : inBuffer.size();
+			if (eraseCount > 0)
+				inBuffer.erase(inBuffer.begin(), inBuffer.begin() + eraseCount);
+			parseOffset = 0;
 			close();
 			return;
 		}

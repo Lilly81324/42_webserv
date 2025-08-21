@@ -33,7 +33,7 @@ Server::Server(ServerConfig &srvConfig) : srvConfig(srvConfig)
 
 Server::~Server()
 {
-	stop();
+	// stop();
 	delete serverpipeline;
 }
 

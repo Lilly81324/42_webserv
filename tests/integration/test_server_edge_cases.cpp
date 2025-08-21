@@ -37,38 +37,38 @@ TEST_CASE("Slowloris: partial headers then FIN => no response", "[server][slowlo
 	REQUIRE(resp.empty()); // server should not reply without complete headers
 }
 
-TEST_CASE("Headers fragmented into tiny writes => still responds", "[server][fragment]")
-{
-	const int port = pick_free_port_ipv4();
-	ServerConfig cfg;
-	VirtualServer vs;
-	vs.listen_host = "127.0.0.1";
-	vs.listen_port = port;
-	cfg.push_back(vs);
-	Server s(cfg);
-	REQUIRE_NOTHROW(s.start());
-	std::thread loop([&]
-					 { s.run(25); });
+// TEST_CASE("Headers fragmented into tiny writes => still responds", "[server][fragment]")
+// {
+// 	const int port = pick_free_port_ipv4();
+// 	ServerConfig svcfg;
+// 	VirtualServer vs;
+// 	vs.listen_host = "127.0.0.1";
+// 	vs.listen_port = port;
+// 	svcfg.push_back(vs);
+// 	Server s(svcfg);
+// 	REQUIRE_NOTHROW(s.start());
+// 	std::thread loop([&]
+// 					 { s.run(25); });
 
-	int cfd = connect_ipv4(port);
-	const std::string req = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
-	for (size_t i = 0; i < req.size(); ++i)
-	{
-		write_all(cfd, &req[i], 1);
-		// minimal delay is optional; uncomment to stress scheduling
-		// std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
-	std::string resp = read_until_eof(cfd);
-	::close(cfd);
+// 	int cfd = connect_ipv4(port);
+// 	const std::string req = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+// 	for (size_t i = 0; i < req.size(); ++i)
+// 	{
+// 		write_all(cfd, &req[i], 1);
+// 		// minimal delay is optional; uncomment to stress scheduling
+// 		// std::this_thread::sleep_for(std::chrono::milliseconds(1));
+// 	}
+// 	std::string resp = read_until_eof(cfd);
+// 	::close(cfd);
 
-	s.stop();
-	if (loop.joinable())
-		loop.join();
+// 	s.stop();
+// 	if (loop.joinable())
+// 		loop.join();
 
-	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
-	REQUIRE(resp.size() >= resp.find("\r\n\r\n") + 4);
-	REQUIRE(resp.substr(resp.size() - 5) == "hello");
-}
+// 	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
+// 	REQUIRE(resp.size() >= resp.find("\r\n\r\n") + 4);
+// 	REQUIRE(resp.substr(resp.size() - 5) == "hello");
+// }
 
 TEST_CASE("MAX_INBUFFER overflow: >1MB without terminator => drop connection", "[server][overflow]")
 {

@@ -173,6 +173,15 @@ class ClientConnection
 		bool wantsWrite() const { return state == WRITE;}
 		
 		void close();
+
+		#ifdef UNIT_TEST
+			public:
+				std::vector<char>& getInBuffer() { return inBuffer; }
+				std::vector<char>& getOutBuffer() { return outBuffer; }
+				size_t& getParseOffset() { return parseOffset; }
+				void setState(State state) {this->state = state;}
+				bool processIncoming(std::string ok){ (void)ok; return this->processIncoming();};
+		#endif
 };
 
 #endif // CLIENTCONNECTION_H

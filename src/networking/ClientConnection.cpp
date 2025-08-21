@@ -87,7 +87,7 @@ static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset, H
 		return (false);
 
 	const Headers &header = request.getHeaders();
-	(void)header;
+	if(header.keyExists("Connection"))
 	return true;
 }
 

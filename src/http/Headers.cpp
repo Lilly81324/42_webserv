@@ -109,11 +109,12 @@ std::string Headers::serialize(void) const
 	return (out);
 }
 
-std::string Headers::get(std::string key)
+std::string Headers::get(std::string key) const
 {
 	if (!this->keyExists(key))
 		return ("");
-	return (this->map[key]);
+	std::map<std::string,std::string , CiLess>::const_iterator it= this->map.find(key);
+	return (it->second);
 }
 
 int	Headers::getLength(void) const

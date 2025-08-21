@@ -97,7 +97,7 @@ class Headers
 		 * @note For checking if key exists, use get(std::string, int)
 		 * @note Cannot be a const function, due to how map indexing works
 		 */
-		std::string get(std::string key);
+		 std::string get(std::string key) const;
 		/**
 		 * @returns Amount of entries in Header
 		 */

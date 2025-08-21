@@ -92,6 +92,7 @@ class HttpRequest
 		size_t	totalBytesRead;
 		size_t	totalBytesHandled;
 		size_t	bytesHandledLast;
+		bool conType;
 		enum HttpRequestState state;
 
 		/**
@@ -293,6 +294,8 @@ class HttpRequest
 		 * @returns this represents the amount of bytes that can safely be removed from the calling buffer
 		 */
 		size_t getBytesHandledLast(void) const;
+
+		void setKeepAlive(bool state);
 };
 
 /**

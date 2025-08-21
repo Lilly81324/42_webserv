@@ -88,6 +88,7 @@ HttpRequest::HttpRequest()
 	this->totalBytesRead = 0;
 	this->totalBytesHandled = 0;
 	this->bytesHandledLast = 0;
+	this->conType = true;
 }
 
 HttpRequest::~HttpRequest()
@@ -96,7 +97,7 @@ HttpRequest::~HttpRequest()
 
 bool	HttpRequest::keepAlive(void) const
 {
-	return (true);
+	return (this->conType);
 }
 
 bool	HttpRequest::headerAsSize(string k, size_t &v) const
@@ -365,3 +366,7 @@ std::ostream &operator<<(std::ostream &out, const HttpRequest &target)
 	return (out);
 }
 
+void HttpRequest::setKeepAlive(bool state)
+{
+	this->conType = state;
+}

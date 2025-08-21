@@ -13,6 +13,7 @@ date: 8/10/2025
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <cstring>
+#include "HEADER_ENTRIES.h"
 
 static int get_local_port(int fd)
 {
@@ -86,8 +87,12 @@ static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset, H
 	if (request.getState() <= HEADER || request.getState() == ERROR)
 		return (false);
 
-	const Headers &header = request.getHeaders();
-	if(header.keyExists("Connection"))
+	if(request.getHeaders().keyExists(HDR_CONNECTION))
+	{	if( request.keepAlive() || request.getHeaders().get(HDR_CONNECTION) == "keep-alive")
+			request.setKeepAlive(true);
+		else if (request.getHeaders().get(HDR_CONNECTION) == "closed")
+			request.setKeepAlive(false);
+	}
 	return true;
 }
 

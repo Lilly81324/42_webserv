@@ -91,6 +91,48 @@ class ClientConnection
 		 * - Closes connection on read errors or EOF (n == 0)
 		 * - Respects remaining buffer space to avoid overflow
 		 */
+
+
+		// ---- I/O limits ----
+    	static const size_t READ_CHUNK   = 8192;
+    	// Protect against slowloris / memory blowups:
+    	static const size_t MAX_INBUFFER = (1u << 20); // 1 MiB
+
+		// ---- timeouts (milliseconds) ----
+		// You can tweak these without touching code elsewhere.
+		static const int HDR_TIMEOUT_MS   = 10000; // headers read deadline
+		static const int BODY_TIMEOUT_MS  = 20000; // (reserved for future body reads)
+		static const int WRITE_TIMEOUT_MS = 10000; // response flush deadline
+
+		// ---- backpressure watermarks (bytes) ----
+		static const size_t HIGH_WATER = 256u * 1024u; // pause reads if above
+		static const size_t LOW_WATER  =  64u * 1024u; // resume reads if below
+
+		// ---- timing / backpressure bookkeeping ----
+		// Use unsigned long long to stay C++98-friendly.
+		unsigned long long deadline_ms; // absolute deadline for current phase
+		bool               readPaused;  // if true, we should not register POLLIN
+
+		// ---- helpers (implemented in .cpp) ----
+		// static unsigned long long nowMs();
+
+		// inline void resetDeadlineForHeaders() { 
+		// 	deadline_ms = nowMs() + (unsigned long long)HDR_TIMEOUT_MS;
+		// }
+		// inline void resetDeadlineForBody()    { 
+		// 	deadline_ms = nowMs() + (unsigned long long)BODY_TIMEOUT_MS; 
+		// }
+		// inline void resetDeadlineForWrite()   { 
+		// 	deadline_ms = nowMs() + (unsigned long long)WRITE_TIMEOUT_MS;
+		// }
+		// inline void bumpDeadline(int ms)      { 
+		// 	deadline_ms = nowMs() + (unsigned long long)ms;
+		// }
+		// inline bool expired() const           { 
+		// 	return nowMs() > deadline_ms;
+		// }
+
+
 		void readFromSocket();
 
 		/* @brief Processes incoming data from the client connection.
@@ -109,13 +151,15 @@ class ClientConnection
 		*       HTTP request parsing later.
 		*/
 		bool processIncoming();
-		static const size_t READ_CHUNK = 8192;
-		/* Place a limit on Infiles to avoid Issues*/
-		static const size_t MAX_INBUFFER = 1 << 20;
+		
 
 	public:
-		explicit ClientConnection(int fd) : state(READ_HEADERS), fd(fd), parseOffset(0), outOffset(0) {}		
-		explicit ClientConnection(int fd,const Server* srv) : state(READ_HEADERS), fd(fd), parseOffset(0), outOffset(0), server(srv) {}
+		explicit ClientConnection(int fd) : state(READ_HEADERS), fd(fd), parseOffset(0), outOffset(0) {
+			// resetDeadlineForHeaders();
+		}		
+		explicit ClientConnection(int fd,const Server* srv) : state(READ_HEADERS), fd(fd), parseOffset(0), outOffset(0), server(srv) {
+			// resetDeadlineForHeaders();
+		}
 		~ClientConnection() {};
 		/**
 		 * @brief Retrieves the current state of the client connection.
@@ -168,9 +212,15 @@ class ClientConnection
 		 *          calling this method, as indicated by the implementation comment.
 		 */
 		
-		int  getFD() const { return fd.get(); }
-		bool isClosed() const { return !fd; }
-		bool wantsWrite() const { return state == WRITE;}
+		int  getFD() const { 
+			return fd.get();
+		}
+		bool isClosed() const { 
+			return !fd;
+		}
+		bool wantsWrite() const {
+			return state == WRITE;
+		}
 		
 		void close();
 

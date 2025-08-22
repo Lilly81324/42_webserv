@@ -13,6 +13,13 @@ permissions:
 jobs:
   move-to-done:
     runs-on: ubuntu-latest
+    env:
+      ORG: 'onlyHydra'
+      PROJECT_ID: 'PVT_kwHOBFQM7s4A_i9k'
+      PROJECT_NUMBER: '1'
+      STATUS_FIELD_NAME: 'Status'
+      INREVIEW_OPTION_NAME: 'In Review'
+      DONE_OPTION_NAME: 'Done'
     steps:
       - uses: actions/github-script@v7
         with:
@@ -20,14 +27,12 @@ jobs:
           github-token: ${{ secrets.GL_TOKEN || github.token }}
           script: |
             const repo = context.repo;
-
-            // --- CONFIG (reuse values from other workflows) ---
-            const ORG = 'onlyHydra';
-            const PROJECT_NUMBER = 1;            // projectV2 number
-            const STATUS_FIELD_NAME = 'Status';
-            const INREVIEW_OPTION_NAME = 'In Review';
-            const DONE_OPTION_NAME = 'Done';
-            // --------------------------------------------------
+            // Read configuration from env (can be overridden in workflow)
+            const ORG = process.env.ORG;
+            const PROJECT_NUMBER = parseInt(process.env.PROJECT_NUMBER, 10);
+            const STATUS_FIELD_NAME = process.env.STATUS_FIELD_NAME;
+            const INREVIEW_OPTION_NAME = process.env.INREVIEW_OPTION_NAME;
+            const DONE_OPTION_NAME = process.env.DONE_OPTION_NAME;
 
             // Only continue on APPROVED review or merged PR
             const isReview = context.eventName === 'pull_request_review' && context.payload.action === 'submitted';
@@ -46,31 +51,61 @@ jobs:
             if (!pr) { core.info('No PR payload; exiting.'); return; }
 
             // Helpers: fetch project fields and options
+            // If PROJECT_ID is provided, use it directly (node lookup). Otherwise try org/user/repo.
+            const PROJECT_ID = process.env.PROJECT_ID || null;
+
+            // Resolve the ProjectV2 by ID, or by trying organization, user, then repository scope.
             async function getProjectAndStatus() {
-              const q = `
-                query($org:String!, $number:Int!){
-                  organization(login:$org){
-                    projectV2(number:$number){
-                      id
-                      title
-                      fields(first:100){
-                        nodes{
-                          __typename
-                          ... on ProjectV2SingleSelectField { id name options { id name } }
-                        }
-                      }
-                    }
+              if (PROJECT_ID) {
+                try {
+                  const q = `query($id:ID!){ node(id:$id){ ... on ProjectV2 { id title fields(first:100){ nodes{ __typename ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`;
+                  const r = await github.graphql(q, { id: PROJECT_ID });
+                  const proj = r.node;
+                  if (proj) {
+                    core.info(`Found ProjectV2 by ID ${PROJECT_ID}`);
+                    return extractFields(proj);
                   }
-                }`;
-              const r = await github.graphql(q, { org: ORG, number: PROJECT_NUMBER });
-              const project = r.organization.projectV2;
-              if (!project) throw new Error('Project not found');
+                } catch (e) {
+                  core.info(`Project ID lookup failed: ${e.message}`);
+                }
+              }
+              // Try user-scoped project
+              try {
+                const qUser = `query($user:String!, $number:Int!){ user(login:$user){ projectV2(number:$number){ id title fields(first:100){ nodes{ __typename ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`;
+                const rUser = await github.graphql(qUser, { user: ORG, number: PROJECT_NUMBER });
+                const projUser = rUser.user && rUser.user.projectV2;
+                if (projUser) {
+                  core.info(`Found ProjectV2 number ${PROJECT_NUMBER} in user ${ORG}`);
+                  return extractFields(projUser);
+                }
+              } catch (e) {
+                core.info(`User lookup failed: ${e.message}`);
+              }
+
+              // Try repository-scoped project (owner and repo from context)
+              try {
+                const qRepo = `query($owner:String!, $repo:String!, $number:Int!){ repository(owner:$owner, name:$repo){ projectV2(number:$number){ id title fields(first:100){ nodes{ __typename ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }`;
+                const rRepo = await github.graphql(qRepo, { owner: repo.owner, repo: repo.repo, number: PROJECT_NUMBER });
+                const projRepo = rRepo.repository && rRepo.repository.projectV2;
+                if (projRepo) {
+                  core.info(`Found ProjectV2 number ${PROJECT_NUMBER} in repository ${repo.owner}/${repo.repo}`);
+                  return extractFields(projRepo);
+                }
+              } catch (e) {
+                core.info(`Repository lookup failed: ${e.message}`);
+              }
+
+              throw new Error(`Could not resolve ProjectV2 number ${PROJECT_NUMBER} in organization/user/repository scope for '${ORG}' or '${repo.owner}/${repo.repo}'.`);
+            }
+
+            function extractFields(proj) {
+              const project = proj;
               const statusField = project.fields.nodes.find(f => f && f.__typename === 'ProjectV2SingleSelectField' && f.name === STATUS_FIELD_NAME);
-              if (!statusField) throw new Error(`Field "${STATUS_FIELD_NAME}" not found`);
+              if (!statusField) throw new Error(`Field "${STATUS_FIELD_NAME}" not found on project "${project.title}"`);
               const inReviewOpt = statusField.options.find(o => o.name === INREVIEW_OPTION_NAME);
               const doneOpt = statusField.options.find(o => o.name === DONE_OPTION_NAME);
-              if (!inReviewOpt) throw new Error(`Option "${INREVIEW_OPTION_NAME}" not found`);
-              if (!doneOpt) throw new Error(`Option "${DONE_OPTION_NAME}" not found`);
+              if (!inReviewOpt) throw new Error(`Option "${INREVIEW_OPTION_NAME}" not found on field "${STATUS_FIELD_NAME}"`);
+              if (!doneOpt) throw new Error(`Option "${DONE_OPTION_NAME}" not found on field "${STATUS_FIELD_NAME}"`);
               return { project, statusField, inReviewOpt, doneOpt };
             }
 
@@ -122,11 +157,6 @@ jobs:
             }
 
             // Update an item's Status value to Done
-            async function setDone(projectId, itemId, doneOptionId) {
-              await github.graphql(`
-                mutation($input: UpdateProjectV2ItemFieldValueInput!) {
-                  updateProjectV2ItemFieldValue(input: $input) { projectV2Item { id } }
-                }
             async function setDone(projectId, itemId, statusFieldId, doneOptionId) {
               await github.graphql(`
                 mutation($input: UpdateProjectV2ItemFieldValueInput!) {

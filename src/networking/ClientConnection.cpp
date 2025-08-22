@@ -79,17 +79,15 @@ static std::string makeErrorResponse()
  *  Just a placeholder until he have a proper Parser
  *  Look for \r\n\r\n using parseOffset to avoid rescanning.
  */
-static bool headersComplete(const std::vector<char> &buf, size_t &parseOffset,size_t &bytesErased, HttpRequest &request)
+static bool headersComplete(const std::vector<char> &buf, HttpRequest &request)
 {
-	if (!request.parse(buf.data(), buf.size())){
-		parseOffset = request.getTotalBytesHandled() - bytesErased;
-		bytesErased+=parseOffset;
+	if (!request.parse(buf.data(), buf.size()))
+
 		return (false);
-	}
+
 	if (request.getState() <= HEADER || request.getState() == ERROR)
 	{
-		parseOffset = request.getTotalBytesHandled() - bytesErased;
-		bytesErased+=parseOffset;
+
 		return (false);
 	}
 
@@ -113,7 +111,7 @@ bool ClientConnection::processIncoming()
 	if (this->state != READ_HEADERS)
 		return false;
 
-	if (headersComplete(inBuffer, parseOffset,bytesErased, req))
+	if (headersComplete(inBuffer, req))
 	{
 		// TODO: parse method/target/Host from inBuffer. For now, placeholders:
 
@@ -139,11 +137,6 @@ bool ClientConnection::processIncoming()
 		outBuffer.assign(resp.begin(), resp.end());
 		changeState(WRITE);
 		return true;
-		// else
-		// {
-		// 	plan.kind = RouteDecision::HK_ERROR;
-		// 	plan.status = 500;
-		// }
 	}
 	return false;
 }
@@ -161,7 +154,6 @@ void ClientConnection::onWritable()
 
 	const char *base = outBuffer.data();
 	size_t total = outBuffer.size();
-
 	while (outOffset < total)
 	{
 		const char *p = base + outOffset;
@@ -191,15 +183,15 @@ void ClientConnection::readFromSocket()
 
 	while (true)
 	{
-		if (inBuffer.size() >= MAX_INBUFFER || req.getTotalBytesRead() >= MAX_INBUFFER)
+
+		if (req.getTotalBytesRead() >= MAX_INBUFFER)
 		{
 			close();
 			return;
 		}
-
 		char buffer[READ_CHUNK];
 		ssize_t n = ::recv(fd.get(), buffer, sizeof(buffer), 0);
-
+		buffer[n] = '\0';
 		if (n > 0)
 		{
 			size_t spaceLeft = MAX_INBUFFER - inBuffer.size();
@@ -208,12 +200,7 @@ void ClientConnection::readFromSocket()
 			inBuffer.insert(inBuffer.end(), buffer, buffer + toCopy);
 			if (processIncoming())
 				return;
-			// Defensive: ensure parseOffset does not exceed buffer size. If it does,
-			// clamp to avoid undefined behaviour (possible heap corruption).
-			size_t eraseCount = (parseOffset <= inBuffer.size()) ? parseOffset : inBuffer.size();
-			if (eraseCount > 0)
-				inBuffer.erase(inBuffer.begin(), inBuffer.begin() + eraseCount);
-			parseOffset = 0;
+			inBuffer.clear();
 			continue;
 		}
 
@@ -221,11 +208,7 @@ void ClientConnection::readFromSocket()
 		{
 			if (processIncoming())
 				return;
-			// Defensive erase as above
-			size_t eraseCount = (parseOffset <= inBuffer.size()) ? parseOffset : inBuffer.size();
-			if (eraseCount > 0)
-				inBuffer.erase(inBuffer.begin(), inBuffer.begin() + eraseCount);
-			parseOffset = 0;
+			inBuffer.clear();
 			close();
 			return;
 		}

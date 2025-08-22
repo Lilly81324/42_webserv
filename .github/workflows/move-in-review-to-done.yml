@@ -127,7 +127,12 @@ jobs:
                 mutation($input: UpdateProjectV2ItemFieldValueInput!) {
                   updateProjectV2ItemFieldValue(input: $input) { projectV2Item { id } }
                 }
-              `, { input: { projectId, itemId, fieldId: statusField.id, value: { singleSelectOptionId: doneOptionId } } });
+            async function setDone(projectId, itemId, statusFieldId, doneOptionId) {
+              await github.graphql(`
+                mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                  updateProjectV2ItemFieldValue(input: $input) { projectV2Item { id } }
+                }
+              `, { input: { projectId, itemId, fieldId: statusFieldId, value: { singleSelectOptionId: doneOptionId } } });
             }
 
             // 1) Resolve project and options

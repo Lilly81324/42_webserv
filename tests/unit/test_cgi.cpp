@@ -1,17 +1,17 @@
+// tests/unit/test_cgi.cpp
 #include <catch2/catch_all.hpp>
 
-#define private public           // expose private for test
+#define private public           // expose private helpers if needed
 #include "CgiHandler.h"
 #undef private
 
 #include "CgiRegistry.h"
 #include "HttpRequest.h"
-#include "HttpResponse.h"
 #include "VirtualServer.h"
-#include "HEADER_ENTRIES.h"
 
-// Small helpers
-static std::map<std::string,std::string> envVecToMap(const std::vector<std::string>& v) {
+// ---------- tiny helper to inspect env as a map ----------
+static std::map<std::string,std::string>
+envVecToMap(const std::vector<std::string>& v) {
     std::map<std::string,std::string> m;
     for (size_t i = 0; i < v.size(); ++i) {
         std::string::size_type eq = v[i].find('=');
@@ -21,8 +21,8 @@ static std::map<std::string,std::string> envVecToMap(const std::vector<std::stri
     return m;
 }
 
+// ---------- CgiRegistry ----------
 TEST_CASE("CgiRegistry: location overrides global and ext normalization", "[cgi][registry]") {
-    // global and per-location maps
     std::map<std::string, CgiSpec> globalMap;
     std::map<std::string, CgiSpec> locMap;
 
@@ -40,30 +40,30 @@ TEST_CASE("CgiRegistry: location overrides global and ext normalization", "[cgi]
     {
         const CgiSpec* s = reg.findByExtension(".php");
         REQUIRE(s != NULL);
-        REQUIRE(s->bin == "/opt/custom/php-cgi");
-        REQUIRE(s->timeout_ms == 2500);
+        CHECK(s->bin == "/opt/custom/php-cgi");
+        CHECK(s->timeout_ms == 2500);
     }
     // normalization: "py" (no dot) should still match ".py"
     {
         const CgiSpec* s = reg.findByExtension("py");
         REQUIRE(s != NULL);
-        REQUIRE(s->bin == "/usr/bin/python3");
+        CHECK(s->bin == "/usr/bin/python3");
     }
     // location-only ext
     {
         const CgiSpec* s = reg.findByExtension(".pl");
         REQUIRE(s != NULL);
-        REQUIRE(s->bin == "/usr/bin/perl");
+        CHECK(s->bin == "/usr/bin/perl");
     }
     // unknown
     {
         const CgiSpec* s = reg.findByExtension(".rb");
-        REQUIRE(s == NULL);
+        CHECK(s == NULL);
     }
 }
 
+// ---------- CgiHandler::buildEnv (with Host/XFF/CT/CL) ----------
 TEST_CASE("CgiHandler::buildEnv builds a correct CGI environment", "[cgi][env]") {
-    // Prepare a realistic POST request with headers and a short body.
     const std::string raw =
         "POST /cgi-bin/hello.php?name=Bob&x=1 HTTP/1.1\r\n"
         "Host: www.example.com:8080\r\n"
@@ -76,14 +76,12 @@ TEST_CASE("CgiHandler::buildEnv builds a correct CGI environment", "[cgi][env]")
     HttpRequest req;
     REQUIRE(req.parse(raw.c_str(), raw.size()) == true);
 
-    // Minimal VS context for env derivation
     VirtualServer vs;
-    vs.listen_host = "0.0.0.0";
-    vs.listen_port = 8080;
+    vs.listen_host  = "0.0.0.0";
+    vs.listen_port  = 8080;
+    vs.root         = "/var/www/html";
     vs.server_names.push_back("www.example.com");
-    vs.root = "/var/www/html";
 
-    // Build environment via CgiHandler private helper (exposed for test)
     CgiHandler h;
     std::vector<std::string> envv;
     int rc = h.buildEnv(req, vs, envv);
@@ -110,27 +108,32 @@ TEST_CASE("CgiHandler::buildEnv builds a correct CGI environment", "[cgi][env]")
     CHECK(env.find("CONTENT_LENGTH") != env.end());
     CHECK(env.find("CONTENT_LENGTH")->second == "5");
 
-    // Server identity: derive from Host header if present (host + explicit port)
+    // Host header → SERVER_NAME, port from VS
     CHECK(env.find("SERVER_NAME") != env.end());
     CHECK(env.find("SERVER_NAME")->second == "www.example.com");
 
     CHECK(env.find("SERVER_PORT") != env.end());
     CHECK(env.find("SERVER_PORT")->second == "8080");
 
-    // Remote address (prefer X-Forwarded-For if present)
+    // Remote address (X-Forwarded-For preferred)
     CHECK(env.find("REMOTE_ADDR") != env.end());
     CHECK(env.find("REMOTE_ADDR")->second == "203.0.113.9");
 
-    // Script naming
+    // Pathing
     CHECK(env.find("SCRIPT_NAME") != env.end());
     CHECK(env.find("SCRIPT_NAME")->second == "/cgi-bin/hello.php");
 
     CHECK(env.find("SCRIPT_FILENAME") != env.end());
     CHECK(env.find("SCRIPT_FILENAME")->second == "/var/www/html/cgi-bin/hello.php");
+
+    // Optional php-cgi quirk: accept either absent or "200" value
+    std::map<std::string,std::string>::const_iterator it = env.find("REDIRECT_STATUS");
+    if (it != env.end())
+        CHECK(it->second == "200");
 }
 
+// ---------- CgiHandler::buildEnv (defaults) ----------
 TEST_CASE("CgiHandler::buildEnv defaults without Host/XFF", "[cgi][env][defaults]") {
-    // No Host / no XFF, GET without body
     const std::string raw =
         "GET /cgi/echo.py HTTP/1.0\r\n"
         "\r\n";
@@ -141,8 +144,8 @@ TEST_CASE("CgiHandler::buildEnv defaults without Host/XFF", "[cgi][env][defaults
     VirtualServer vs;
     vs.listen_host = "127.0.0.1";
     vs.listen_port = 8079;
+    vs.root        = "/srv/www";
     vs.server_names.clear();
-    vs.root = "/srv/www";
 
     CgiHandler h;
     std::vector<std::string> envv;
@@ -156,17 +159,39 @@ TEST_CASE("CgiHandler::buildEnv defaults without Host/XFF", "[cgi][env][defaults
     CHECK(env.find("SERVER_PORT") != env.end());
     CHECK(env.find("SERVER_PORT")->second == "8079");
 
-    // No body → CONTENT_LENGTH may be absent or "0" depending on your policy.
-    // We only assert that if present, it's "0".
-    std::map<std::string,std::string>::const_iterator it = env.find("CONTENT_LENGTH");
-    if (it != env.end())
-        CHECK(it->second == "0");
-
-    // Query string empty for no "?..."
+    // Query string empty when none given
     CHECK(env.find("QUERY_STRING") != env.end());
     CHECK(env.find("QUERY_STRING")->second == "");
 
     // Script filename rooted under VS root
     CHECK(env.find("SCRIPT_FILENAME") != env.end());
     CHECK(env.find("SCRIPT_FILENAME")->second == "/srv/www/cgi/echo.py");
+
+    // CONTENT_LENGTH may be absent or "0" for GET without body — accept either
+    std::map<std::string,std::string>::const_iterator it = env.find("CONTENT_LENGTH");
+    if (it != env.end()) CHECK(it->second == "0");
+}
+
+// ---------- DOCUMENT_ROOT and SCRIPT_FILENAME pathing ----------
+TEST_CASE("CgiHandler::buildEnv sets DOCUMENT_ROOT and SCRIPT_FILENAME", "[cgi][env][paths]") {
+    const std::string raw = "GET /cgi/foo.php HTTP/1.1\r\n\r\n";
+
+    HttpRequest req;
+    REQUIRE(req.parse(raw.c_str(), raw.size()) == true);
+
+    VirtualServer vs;
+    vs.listen_host = "0.0.0.0";
+    vs.listen_port = 8080;
+    vs.root        = "/opt/site";
+
+    CgiHandler h;
+    std::vector<std::string> envv;
+    REQUIRE(h.buildEnv(req, vs, envv) > 0);
+    const std::map<std::string,std::string> env = envVecToMap(envv);
+
+    CHECK(env.find("DOCUMENT_ROOT") != env.end());
+    CHECK(env.find("DOCUMENT_ROOT")->second == "/opt/site");
+
+    CHECK(env.find("SCRIPT_FILENAME") != env.end());
+    CHECK(env.find("SCRIPT_FILENAME")->second == "/opt/site/cgi/foo.php");
 }

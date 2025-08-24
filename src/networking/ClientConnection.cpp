@@ -8,6 +8,7 @@ date: 8/10/2025
 #include "ClientConnection.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
+#include "CgiProcess.h" 
 #include "Router.h"
 #include "Server.h"
 #include <netinet/in.h>
@@ -15,6 +16,14 @@ date: 8/10/2025
 #include <cstring>
 #include "HEADER_ENTRIES.h"
 #include <sys/time.h>
+
+
+#include "CgiProcess.h"   // make sure this is reachable here
+#include <vector>
+#include <string>
+
+
+
 
 static int get_local_port(int fd)
 {
@@ -62,9 +71,62 @@ void ClientConnection::close()
 	this->state = CLOSE;
 }
 
-/**
- * @brief PLEASE DELETE ME I AM A PLACEHOLDER
- */
+bool ClientConnection::beginCgi(const CgiSpec& spec,
+                                const std::string& script_path,
+                                const std::vector<std::string>& envv)
+{
+    // Build argv: [bin, script_path, NULL]
+    std::vector<char*> argvv;
+    argvv.push_back(const_cast<char*>(spec.bin.c_str()));
+    argvv.push_back(const_cast<char*>(script_path.c_str()));
+    argvv.push_back(0);
+
+    // Build envp: duplicate vector of "KEY=VALUE" (NULL-terminated)
+    std::vector<char*> envp;
+    envp.reserve(envv.size() + 1);
+    for (size_t i = 0; i < envv.size(); ++i)
+        envp.push_back(const_cast<char*>(envv[i].c_str()));
+    envp.push_back(0);
+
+    // Spawn the CGI process (non-blocking pipes inside CgiProcess::spawn).
+    if (!proc.spawn(spec.bin, script_path, &argvv[0], &envp[0], spec.timeout_ms)) {
+        // Immediate 500 response on failure (keep it consistent with your placeholder)
+        const char *body = "Internal Server Error\n";
+        std::string resp;
+        resp.reserve(128);
+        resp += "HTTP/1.1 500 Internal Server Error\r\n";
+        resp += "Content-Length: 22\r\n";
+        resp += "Connection: close\r\n";
+        resp += "Content-Type: text/plain\r\n";
+        resp += "\r\n";
+        resp += body;
+
+        outBuffer.assign(resp.begin(), resp.end());
+        outOffset = 0;
+        writeLingerArmed = false;
+        changeState(WRITE);
+        resetDeadlineForWrite();
+        return false; // not running CGI
+    }
+
+    // Success: capture FDs and initialize CGI timers/state
+    cgi_active       = true;
+    cgi_in_fd        = proc.inFD();
+    cgi_out_fd       = proc.outFD();
+    cgi_body_off     = 0;
+    cgi_buf.clear();
+    cgi_headers_done = false;
+    cgi_status       = 200;
+    cgi_content_len  = -1;
+    cgi_deadline     = nowMs() + (unsigned long long)spec.timeout_ms;
+
+    // NOTE: We aren’t yet registering these FDs in the loop here — next step is to
+    // integrate with your EventLoop (addFD/modFD for cgi_in_fd POLLOUT and cgi_out_fd POLLIN).
+    // For now, just indicate CGI was started.
+    return true;
+}
+
+
 static std::string makeHelloResponse()
 {
 	const char *body = "hello";

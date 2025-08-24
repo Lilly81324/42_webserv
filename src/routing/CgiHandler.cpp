@@ -14,10 +14,60 @@ date: 8/10/2025
 #include "HttpResponse.h"
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
+#include "ClientConnection.h" 
 
 #include <sstream>
 #include <vector>
 #include <string>
+
+
+#include <sstream>
+#include <cstdlib>
+
+// keep it TU-local
+// Returns true once headers are fully parsed (buf becomes just the body)
+bool parseCgiHeaders(std::string& buf, HttpResponse& res, int& status, long& content_len) {
+    std::string::size_type p = buf.find("\r\n\r\n");
+    if (p == std::string::npos) return false;
+
+    std::string head = buf.substr(0, p);
+    std::string body = buf.substr(p + 4);
+    content_len = -1;
+    status = 200;
+
+    std::istringstream is(head);
+    std::string line;
+    while (std::getline(is, line)) {
+        if (!line.empty() && line[line.size() - 1] == '\r')
+            line.erase(line.size() - 1);
+
+        std::string::size_type c = line.find(':');
+        if (c == std::string::npos) continue;
+
+        std::string k = line.substr(0, c);
+        std::string v = line.substr(c + 1);
+
+        // trim leading spaces
+        while (!v.empty() && (v[0] == ' ' || v[0] == '\t'))
+            v.erase(0, 1);
+
+        if (k == "Status") {
+            int s = std::atoi(v.c_str());
+            if (s >= 100 && s <= 599) status = s;
+        } else if (k == "Content-Length") {
+            long L = std::atol(v.c_str());
+            if (L >= 0) content_len = L;
+            (void)res.headers.set("Content-Length", v);
+        } else {
+            (void)res.headers.set(k, v);
+        }
+    }
+
+    // hand remaining body back to caller
+    buf.swap(body);
+    return true;
+}
+
 
 // Small helpers
 static std::string hostWithoutPort(const std::string& hostHdr) {
@@ -30,14 +80,14 @@ static std::string hostWithoutPort(const std::string& hostHdr) {
     return (c == std::string::npos) ? hostHdr : hostHdr.substr(0, c);
 }
 
-static std::string joinFs(const std::string& root, const std::string& reqPath) {
-    if (root.empty()) return reqPath;
-    if (reqPath.empty()) return root;
-    const bool rootSlash = !root.empty() && root[root.size()-1] == '/';
-    const bool pathSlash = !reqPath.empty() && reqPath[0] == '/';
-    if (rootSlash && pathSlash) return root + reqPath.substr(1);
-    if (rootSlash || pathSlash) return root + reqPath;
-    return root + "/" + reqPath;
+static std::string joinFs(const std::string& a, const std::string& b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    const bool aSlash = a[a.size()-1] == '/';
+    const bool bSlash = b[0] == '/';
+    if (aSlash && bSlash) return a + b.substr(1);
+    if (!aSlash && !bSlash) return a + "/" + b;
+    return a + b;
 }
 
 CgiHandler::CgiHandler(): Handler() {}
@@ -45,28 +95,37 @@ CgiHandler::~CgiHandler() {}
 
 bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
-    // 1) Choose spec from location -> global defaults
+     (void)res;
+    // 0) Resolve CGI spec (location overrides global)
     CgiRegistry reg;
-    const std::map<std::string, CgiSpec>* locMap = (ctx.loc ? &ctx.loc->cgi_by_ext : 0);
-    const std::map<std::string, CgiSpec>* defMap = (ctx.cfg ? &ctx.cfg->cgi_defaults : 0);
+    const std::map<std::string, CgiSpec>* locMap = ctx.loc ? &ctx.loc->cgi_by_ext : 0;
+    const std::map<std::string, CgiSpec>* defMap = ctx.cfg ? &ctx.cfg->cgi_defaults : 0;
     reg.setSources(locMap, defMap);
 
     const CgiSpec* spec = reg.findByExtension(ctx.cgi_ext);
     if (!spec) {
-        // No mapping for this extension: not handled here.
-        (void)res;
+        // not for us – let Router try other handlers
         return false;
     }
 
-    // 2) Build env
+    // 1) Build env
     std::vector<std::string> envv;
     buildEnv(req, *ctx.vs, envv);
 
-    // 3) (Next step) pipe()/fork()/dup2()/execve(spec->bin, ...) with envv
-    // For now return false so caller can map to 500/501 until exec is wired.
-    (void)spec;
-    return false;
+    // 2) Compute script path (prefer location root, else server root)
+    const std::string& root = (ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root;
+    std::string script_path = joinFs(root, req.getPath());
+
+    
+    if (!ctx.connection) return false;
+    if (!ctx.connection->beginCgi(*spec, script_path, envv)) {
+        return true; // it already wrote a 500 to outBuffer
+    }
+    return true; // async: event loop will complete response
+
+
 }
+
 
 int CgiHandler::buildEnv(const HttpRequest& req,
                          const VirtualServer& vs,

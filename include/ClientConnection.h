@@ -212,8 +212,13 @@ class ClientConnection
 		
 		void close();
 
-		bool beginCgi(const CgiSpec& spec, const std::string& script_path,
+		bool beginCgi(const CgiSpec& spec,
+              const std::string& script_path,
               const std::vector<std::string>& envv);
+
+		// Called by the EventLoop when a registered CGI fd is readable/writable.
+		void onCgiReadable(int fd);
+		void onCgiWritable(int fd);
 
 		#ifdef UNIT_TEST
 			public:

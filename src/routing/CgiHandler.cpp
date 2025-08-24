@@ -147,7 +147,7 @@ int CgiHandler::buildEnv(const HttpRequest& req,
     return static_cast<int>(envv.size()); // tests expect >0
 }
 
-static std::string joinFs(const std::string& a, const std::string& b) {
+/* static std::string joinFs(const std::string& a, const std::string& b) {
     if (a.empty()) return b;
     if (b.empty()) return a;
     const bool aSlash = a[a.size()-1] == '/';
@@ -155,7 +155,7 @@ static std::string joinFs(const std::string& a, const std::string& b) {
     if (aSlash && bSlash) return a + b.substr(1);
     if (!aSlash && !bSlash) return a + "/" + b;
     return a + b;
-}
+} */
 
 CgiHandler::CgiHandler(): Handler() {}
 CgiHandler::~CgiHandler() {}
@@ -164,62 +164,65 @@ CgiHandler::~CgiHandler() {}
 
 bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
-    // 0) Resolve spec (location overrides global)
+    // 0) Resolve CGI spec (per-location overrides global)
     CgiRegistry reg;
     const std::map<std::string, CgiSpec>* locMap = ctx.loc ? &ctx.loc->cgi_by_ext : 0;
     const std::map<std::string, CgiSpec>* defMap = ctx.cfg ? &ctx.cfg->cgi_defaults : 0;
     reg.setSources(locMap, defMap);
 
     const CgiSpec* spec = reg.findByExtension(ctx.cgi_ext);
-    if (!spec) return false; // not CGI, let other handlers try
+    if (!spec)
+        return false; // not handled here; let other handlers try
 
-    // 1) Build env
+    // 1) Build the CGI environment
     std::vector<std::string> envv;
-    buildEnv(req, *ctx.vs, envv);
+    buildEnv(req, *ctx.vs, envv); // returns >0 on success in your implementation
 
-    // 2) Compute script path (prefer location root, else server root)
-    const std::string& root = (ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root;
-    const std::string scriptPath = joinFs(root, req.getPath());
+    // 2) Compute script filename (prefer location.root, else server root)
+    const std::string& baseRoot = (ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root;
 
-    // 3) Spawn (using the new overload)
+    std::string root = baseRoot;
+    if (!root.empty() && root[root.size() - 1] == '/')
+        root.erase(root.size() - 1);
+
+    std::string path = req.getPath();           // absolute, e.g. "/cgi-bin/hello.php"
+    if (path.empty() || path[0] != '/')
+        path = "/" + path;
+
+    const std::string scriptPath = root + path; // e.g. "/var/www/html" + "/cgi-bin/hello.php"
+
+    // 3) Spawn the CGI (argv = [bin, script], envp from envv)
     CgiProcess proc;
     if (!proc.spawn(*spec, scriptPath, envv)) {
-        // Minimal 500 (your HttpResponse has public fields; fill headers/body directly)
-        // --- spawn failed path ---
+        // Minimal 500 response
         const char* body = "CGI spawn failed\n";
-        const size_t blen = ::strlen(body);
+        const size_t blen = std::char_traits<char>::length(body);
 
         res.http_version = "HTTP/1.1";
         res.headers.set("Content-Type", "text/plain");
-
-        std::ostringstream cl;
-        cl << blen;
+        std::ostringstream cl; cl << blen;
         res.headers.set("Content-Length", cl.str());
-
         res.body.assign(body, body + blen);
         res.bodyLength = res.body.size();
         return true;
     }
 
-    // We don’t wire the child’s pipes here (to keep a single-poll design).
-    // Terminate immediately so we don’t leak the child in this placeholder flow.
+    // Not yet wired into the event loop: terminate to avoid leaking the child
     proc.terminate();
 
-    // 4) Placeholder 501, until you connect proc.{in,out}FD to the EventLoop
+    // Placeholder response until async pipe wiring is implemented
     const char* body = "CGI spawned (placeholder). EventLoop wiring pending.\n";
-    const size_t blen = ::strlen(body);
+    const size_t blen = std::char_traits<char>::length(body);
 
     res.http_version = "HTTP/1.1";
     res.headers.set("Content-Type", "text/plain");
-
-    std::ostringstream cl;
-    cl << blen;
+    std::ostringstream cl; cl << blen;
     res.headers.set("Content-Length", cl.str());
-
     res.body.assign(body, body + blen);
     res.bodyLength = res.body.size();
     return true;
 }
+
 
 
 

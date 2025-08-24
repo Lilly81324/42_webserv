@@ -11,7 +11,7 @@ Date: 8/10/2025
 
 #include <map>
 #include <string>
-#include "VirtualServer.h" // CgiSpec
+#include "VirtualServer.h" 
 
 class CgiRegistry {
 public:

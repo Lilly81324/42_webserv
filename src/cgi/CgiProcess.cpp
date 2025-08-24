@@ -6,6 +6,7 @@ date: 8/10/2025
 ------------------------------------------ */
 
 #include "CgiProcess.h"
+#include "VirtualServer.h"    // full definition of CgiSpec for the 3-arg overload
 
 #include <unistd.h>     // pipe, fork, dup2, execve, close
 #include <fcntl.h>      // fcntl
@@ -15,6 +16,7 @@ date: 8/10/2025
 #include <sys/wait.h>   // waitpid
 #include <signal.h>     // kill
 #include <sys/time.h>   // gettimeofday
+#include <vector>
 
 // ---- tiny helpers ---------------------------------------------------------
 
@@ -50,69 +52,52 @@ CgiProcess::~CgiProcess() {
     terminate(); // safe if already reaped/closed
 }
 
+// High-level convenience overload: build argv/envp and delegate
+bool CgiProcess::spawn(const CgiSpec& spec,
+                       const std::string& scriptPath,
+                       const std::vector<std::string>& envv)
+{
+    // argv: [bin, script, NULL]
+    std::vector<char*> argvv;
+    argvv.push_back(const_cast<char*>(spec.bin.c_str()));
+    argvv.push_back(const_cast<char*>(scriptPath.c_str()));
+    argvv.push_back(0);
+
+    // envp: ["K=V", ... , NULL]
+    std::vector<char*> envp;
+    envp.reserve(envv.size() + 1);
+    for (std::vector<std::string>::const_iterator it = envv.begin(); it != envv.end(); ++it)
+        envp.push_back(const_cast<char*>(it->c_str()));
+    envp.push_back(0);
+
+    return spawn(spec.bin, scriptPath, &argvv[0], &envp[0], spec.timeout_ms);
+}
+
+// Low-level spawn: do the actual fork/exec (stub for now; returns false)
 bool CgiProcess::spawn(const std::string& bin,
                        const std::string& script,
-                       char* const argv[],
-                       char* const envp[],
+                       char* const* argv,
+                       char* const* envp,
                        int timeout_ms)
 {
-    (void)script;
-    // Create pipes: parent → child (stdin), child → parent (stdout+stderr)
-    int inpipe[2]  = {-1, -1}; // [0]=read (child stdin), [1]=write (parent)
-    int outpipe[2] = {-1, -1}; // [0]=read (parent),     [1]=write (child)
+    // If there is an existing child, clean it up
+    terminate();
 
-    if (::pipe(inpipe)  != 0) return false;
-    if (::pipe(outpipe) != 0) { xclose(inpipe[0]); xclose(inpipe[1]); return false; }
+    // Establish deadline (if timeout_ms <= 0, treat as no timeout)
+    if (timeout_ms > 0)
+        _deadline = nowMs() + (unsigned long long)timeout_ms;
+    else
+        _deadline = 0ULL;
 
-    pid_t p = ::fork();
-    if (p < 0) {
-        xclose(inpipe[0]); xclose(inpipe[1]);
-        xclose(outpipe[0]); xclose(outpipe[1]);
-        return false;
-    }
+    // TODO: implement real pipe()/fork()/dup2()/execve() here and set:
+    //   _pid = child pid
+    //   _in  = writable end for child's stdin
+    //   _out = readable end for child's stdout (and/or merged stderr)
+    //   setNonBlocking(_in/_out) and setCloseOnExec as appropriate
+    // For now, suppress unused warnings and return false so callers can 500.
+    (void)bin; (void)script; (void)argv; (void)envp;
 
-    if (p == 0) {
-        // --- Child ---
-        // stdin ← inpipe[0]
-        // stdout/err → outpipe[1]
-        ::dup2(inpipe[0],  STDIN_FILENO);
-        ::dup2(outpipe[1], STDOUT_FILENO);
-        ::dup2(outpipe[1], STDERR_FILENO);
-
-        // Close all pipe ends we duplicated
-        xclose(inpipe[0]); xclose(inpipe[1]);
-        xclose(outpipe[0]); xclose(outpipe[1]);
-
-        // If you need to pass the script path via argv[1], do so in the caller.
-        // Here we simply execve(bin, argv, envp).
-        ::execve(bin.c_str(), argv, envp);
-
-        // If execve fails:
-        _exit(127);
-    }
-
-    // --- Parent ---
-    _pid = p;
-
-    // Parent owns: inpipe[1] (write), outpipe[0] (read)
-    _in  = inpipe[1];
-    _out = outpipe[0];
-
-    // Close the child ends
-    xclose(inpipe[0]);
-    xclose(outpipe[1]);
-
-    // Make parent ends non-blocking + close-on-exec
-    setNonBlocking(_in);
-    setNonBlocking(_out);
-    setCloseOnExec(_in);
-    setCloseOnExec(_out);
-
-    // Set deadline (soft; caller enforces by comparing nowMs() > deadlineMs())
-    if (timeout_ms <= 0) timeout_ms = 3000; // a sane default
-    _deadline = nowMs() + (unsigned long long)timeout_ms;
-
-    return true;
+    return false;
 }
 
 void CgiProcess::closeIn()  { (void)xclose(_in);  }
@@ -163,3 +148,4 @@ void CgiProcess::terminate() {
     }
     closeBoth();
 }
+

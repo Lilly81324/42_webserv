@@ -23,9 +23,10 @@ private:
     // Build "KEY=VALUE" strings for execve() env
 	// Returns the number of "KEY=VALUE" entries added to envv (>=0).
 	// Always fills sensible defaults; does not indicate success/failure.
-    int buildEnv(const HttpRequest& req,
-                 const VirtualServer& vs,
-                 std::vector<std::string>& envv) const;
+    int buildEnv(const HttpRequest&,
+             const VirtualServer&,
+             std::vector<std::string>&) const;
+
 };
 
 #endif // CGIHANDLER_H

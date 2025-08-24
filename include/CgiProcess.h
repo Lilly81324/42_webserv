@@ -7,39 +7,29 @@ Date: 8/10/2025
 
 #ifndef CGIPROCESS_H
 #define CGIPROCESS_H
-
+#include "VirtualServer.h"
 #include <string>
 #include <vector>
 #include <sys/types.h> // pid_t
 
-/**
- * @brief Thin wrapper around a CGI child process with stdin/stdout pipes.
- *
- * Usage:
- *   CgiProcess p;
- *   if (!p.spawn(bin, script, argv, envp, timeout_ms)) { ...error... }
- *   // write request body to p.inFD(), read CGI output from p.outFD()
- *   // poll/select around those FDs in nonblocking mode
- *   // when done: p.terminate() (safe even if already exited)
- */
+struct CgiSpec;  
+
+
 class CgiProcess {
 public:
     CgiProcess();
     ~CgiProcess();
 
-    /**
-     * @param bin        path to interpreter/binary (e.g. /usr/bin/php-cgi)
-     * @param script     script path (pass empty if your CGI uses SCRIPT_FILENAME only)
-     * @param argv       null-terminated argv for execve (argv[0] should be bin)
-     * @param envp       null-terminated envp for execve (CGI variables)
-     * @param timeout_ms soft timeout tracked as a deadline (not enforced automatically)
-     * @return true on success (child running), false on error
-     */
     bool spawn(const std::string& bin,
                const std::string& script,
-               char* const argv[],
-               char* const envp[],
+               char* const* argv,
+               char* const* envp,
                int timeout_ms);
+
+    // Convenience overload
+    bool spawn(const CgiSpec& spec,
+               const std::string& scriptPath,
+               const std::vector<std::string>& envv);
 
     // FDs for parent side: write body to inFD(), read response from outFD()
     int  inFD()  const { return _in;  }  // parent writes → child's stdin

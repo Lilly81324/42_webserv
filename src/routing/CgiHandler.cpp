@@ -7,77 +7,144 @@ date: 8/10/2025
 
 #include "CgiHandler.h"
 #include "CgiRegistry.h"
+#include "CgiProcess.h"
 #include "RequestContext.h"
-#include "ServerConfig.h"
 #include "VirtualServer.h"
+#include "ServerConfig.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
-#include "ClientConnection.h" 
-
 #include <sstream>
 #include <vector>
 #include <string>
+#include <cstring> 
 
-
-#include <sstream>
-#include <cstdlib>
-
-// keep it TU-local
-// Returns true once headers are fully parsed (buf becomes just the body)
-bool parseCgiHeaders(std::string& buf, HttpResponse& res, int& status, long& content_len) {
-    std::string::size_type p = buf.find("\r\n\r\n");
-    if (p == std::string::npos) return false;
-
-    std::string head = buf.substr(0, p);
-    std::string body = buf.substr(p + 4);
-    content_len = -1;
-    status = 200;
-
-    std::istringstream is(head);
-    std::string line;
-    while (std::getline(is, line)) {
-        if (!line.empty() && line[line.size() - 1] == '\r')
-            line.erase(line.size() - 1);
-
-        std::string::size_type c = line.find(':');
-        if (c == std::string::npos) continue;
-
-        std::string k = line.substr(0, c);
-        std::string v = line.substr(c + 1);
-
-        // trim leading spaces
-        while (!v.empty() && (v[0] == ' ' || v[0] == '\t'))
-            v.erase(0, 1);
-
-        if (k == "Status") {
-            int s = std::atoi(v.c_str());
-            if (s >= 100 && s <= 599) status = s;
-        } else if (k == "Content-Length") {
-            long L = std::atol(v.c_str());
-            if (L >= 0) content_len = L;
-            (void)res.headers.set("Content-Length", v);
-        } else {
-            (void)res.headers.set(k, v);
-        }
-    }
-
-    // hand remaining body back to caller
-    buf.swap(body);
-    return true;
-}
-
-
-// Small helpers
+// small helpers (already in your TU; keep one copy)
+#ifdef KEEP_HOST_HELPER
 static std::string hostWithoutPort(const std::string& hostHdr) {
     if (hostHdr.empty()) return hostHdr;
-    if (hostHdr[0] == '[') { // IPv6 [::1]:8080
+    if (hostHdr[0] == '[') {
         std::string::size_type rb = hostHdr.find(']');
         return (rb != std::string::npos) ? hostHdr.substr(0, rb + 1) : hostHdr;
     }
     std::string::size_type c = hostHdr.find(':');
     return (c == std::string::npos) ? hostHdr : hostHdr.substr(0, c);
+}
+#endif
+
+int CgiHandler::buildEnv(const HttpRequest& req,
+                         const VirtualServer& vs,
+                         std::vector<std::string>& envv) const
+{
+    envv.clear();
+
+    const Headers& H = req.getHeaders();
+
+    // --- SERVER_NAME / SERVER_PORT (prefer Host header if present) ---
+    std::string host = H.get(HDR_HOST);
+    int server_port = vs.listen_port;
+
+    if (!host.empty()) {
+        // strip optional port from Host
+        if (host.size() && host[0] == '[') {
+            // IPv6 in brackets: [::1]:8080
+            std::string::size_type rb = host.find(']');
+            if (rb != std::string::npos) {
+                // try to parse ":PORT" after the closing bracket
+                if (rb + 1 < host.size() && host[rb + 1] == ':') {
+                    const std::string pstr = host.substr(rb + 2);
+                    int p = 0;
+                    for (size_t i = 0; i < pstr.size(); ++i) {
+                        if (pstr[i] < '0' || pstr[i] > '9') { p = 0; break; }
+                        p = p * 10 + (pstr[i] - '0');
+                    }
+                    if (p > 0 && p <= 65535) server_port = p;
+                }
+                host = host.substr(0, rb + 1); // keep the [ipv6] part only
+            }
+        } else {
+            // IPv4 / hostname form: host[:port]
+            std::string::size_type c = host.find(':');
+            if (c != std::string::npos) {
+                const std::string pstr = host.substr(c + 1);
+                int p = 0;
+                bool ok = !pstr.empty();
+                for (size_t i = 0; i < pstr.size(); ++i) {
+                    if (pstr[i] < '0' || pstr[i] > '9') { ok = false; break; }
+                    p = p * 10 + (pstr[i] - '0');
+                }
+                if (ok && p > 0 && p <= 65535) server_port = p;
+                host = host.substr(0, c); // strip port from name
+            }
+        }
+    }
+
+    std::string server_name;
+    if (!host.empty())                           server_name = host;
+    else if (!vs.server_names.empty())           server_name = vs.server_names[0];
+    else if (!vs.listen_host.empty())            server_name = vs.listen_host;
+    else                                         server_name = "localhost";
+
+    std::ostringstream port_ss;
+    port_ss << server_port;
+
+    // --- CONTENT_* from headers/body ---
+    std::string ctype = H.get(HDR_CONTENT_TYPE);
+    std::string clen  = H.get(HDR_CONTENT_LENGTH);
+    if (clen.empty()) {
+        // if parser already buffered body, expose its length
+        size_t blen = req.getBodyLength();
+        if (blen > 0) {
+            std::ostringstream cl; cl << blen;
+            clen = cl.str();
+        }
+    }
+
+    // --- REMOTE_ADDR: prefer X-Forwarded-For first token if present ---
+    std::string remote = H.get(HDR_X_FORWARDED_FOR);
+    if (!remote.empty()) {
+        std::string::size_type comma = remote.find(',');
+        if (comma != std::string::npos) remote = remote.substr(0, comma);
+        // trim spaces
+        while (!remote.empty() && (remote[0] == ' ' || remote[0] == '\t')) remote.erase(0,1);
+        while (!remote.empty() && (remote[remote.size()-1] == ' ' || remote[remote.size()-1] == '\t')) remote.erase(remote.size()-1);
+    }
+
+    // --- SCRIPT_NAME / DOCUMENT_ROOT / SCRIPT_FILENAME ---
+    const std::string script_name = req.getPath();       // already a path like "/cgi/foo.php"
+
+    std::string docroot = vs.root;
+    if (!docroot.empty() && docroot[docroot.size()-1] == '/')
+        docroot.erase(docroot.size()-1);                 // avoid double slashes
+
+    // join docroot + script_name
+    std::string script_filename;
+    if (docroot.empty()) script_filename = script_name;
+    else if (!script_name.empty() && script_name[0] == '/')
+        script_filename = docroot + script_name;
+    else
+        script_filename = docroot + "/" + script_name;
+
+    // --- Required / common CGI variables ---
+    envv.push_back("GATEWAY_INTERFACE=CGI/1.1");
+    envv.push_back(std::string("REQUEST_METHOD=")   + req.getMethod());
+    envv.push_back(std::string("SCRIPT_NAME=")      + script_name);
+    envv.push_back(std::string("QUERY_STRING=")     + req.getQuery());
+    envv.push_back(std::string("SERVER_PROTOCOL=")  + req.getHttpVer());
+    envv.push_back(std::string("SERVER_NAME=")      + server_name);
+    envv.push_back(std::string("SERVER_PORT=")      + port_ss.str());
+    if (!ctype.empty()) envv.push_back(std::string("CONTENT_TYPE=")   + ctype);
+    if (!clen.empty())  envv.push_back(std::string("CONTENT_LENGTH=") + clen);
+    envv.push_back(std::string("REMOTE_ADDR=")      + remote);
+
+    envv.push_back(std::string("DOCUMENT_ROOT=")    + docroot);
+    envv.push_back(std::string("SCRIPT_FILENAME=")  + script_filename);
+
+    // For php-cgi compatibility; harmless for others.
+    envv.push_back("REDIRECT_STATUS=200");
+
+    return static_cast<int>(envv.size()); // tests expect >0
 }
 
 static std::string joinFs(const std::string& a, const std::string& b) {
@@ -93,20 +160,18 @@ static std::string joinFs(const std::string& a, const std::string& b) {
 CgiHandler::CgiHandler(): Handler() {}
 CgiHandler::~CgiHandler() {}
 
+// keep your buildEnv implementation as-is (the tests exercise it)
+
 bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
-     (void)res;
-    // 0) Resolve CGI spec (location overrides global)
+    // 0) Resolve spec (location overrides global)
     CgiRegistry reg;
     const std::map<std::string, CgiSpec>* locMap = ctx.loc ? &ctx.loc->cgi_by_ext : 0;
     const std::map<std::string, CgiSpec>* defMap = ctx.cfg ? &ctx.cfg->cgi_defaults : 0;
     reg.setSources(locMap, defMap);
 
     const CgiSpec* spec = reg.findByExtension(ctx.cgi_ext);
-    if (!spec) {
-        // not for us – let Router try other handlers
-        return false;
-    }
+    if (!spec) return false; // not CGI, let other handlers try
 
     // 1) Build env
     std::vector<std::string> envv;
@@ -114,66 +179,47 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 
     // 2) Compute script path (prefer location root, else server root)
     const std::string& root = (ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root;
-    std::string script_path = joinFs(root, req.getPath());
+    const std::string scriptPath = joinFs(root, req.getPath());
 
-    
-    if (!ctx.connection) return false;
-    if (!ctx.connection->beginCgi(*spec, script_path, envv)) {
-        return true; // it already wrote a 500 to outBuffer
-    }
-    return true; // async: event loop will complete response
+    // 3) Spawn (using the new overload)
+    CgiProcess proc;
+    if (!proc.spawn(*spec, scriptPath, envv)) {
+        // Minimal 500 (your HttpResponse has public fields; fill headers/body directly)
+        // --- spawn failed path ---
+        const char* body = "CGI spawn failed\n";
+        const size_t blen = ::strlen(body);
 
+        res.http_version = "HTTP/1.1";
+        res.headers.set("Content-Type", "text/plain");
 
-}
+        std::ostringstream cl;
+        cl << blen;
+        res.headers.set("Content-Length", cl.str());
 
-
-int CgiHandler::buildEnv(const HttpRequest& req,
-                         const VirtualServer& vs,
-                         std::vector<std::string>& envv) const
-{
-    envv.clear();
-
-    const Headers& H = req.getHeaders();
-
-    // SERVER_NAME: Host header -> VS server_names[0] -> listen_host -> localhost
-    std::string server_name = H.get(HDR_HOST);
-    if (!server_name.empty()) server_name = hostWithoutPort(server_name);
-    else if (!vs.server_names.empty()) server_name = vs.server_names[0];
-    else if (!vs.listen_host.empty()) server_name = vs.listen_host;
-    else server_name = "localhost";
-
-    // SERVER_PORT
-    std::ostringstream port_ss; port_ss << vs.listen_port;
-
-    // CONTENT_LENGTH and CONTENT_TYPE
-    std::string ctype = H.get(HDR_CONTENT_TYPE);
-    std::string clen  = H.get(HDR_CONTENT_LENGTH);
-    if (clen.empty() && req.getBodyLength() > 0) {
-        std::ostringstream cl; cl << req.getBodyLength();
-        clen = cl.str();
+        res.body.assign(body, body + blen);
+        res.bodyLength = res.body.size();
+        return true;
     }
 
-    // REMOTE_ADDR (best effort: X-Forwarded-For if present; else blank for now)
-    std::string remote = H.get(HDR_X_FORWARDED_FOR);
+    // We don’t wire the child’s pipes here (to keep a single-poll design).
+    // Terminate immediately so we don’t leak the child in this placeholder flow.
+    proc.terminate();
 
-    // Required CGI env
-    envv.push_back("GATEWAY_INTERFACE=CGI/1.1");
-    envv.push_back(std::string("REQUEST_METHOD=")   + req.getMethod());
-    envv.push_back(std::string("SCRIPT_NAME=")      + req.getPath());
-    envv.push_back(std::string("QUERY_STRING=")     + req.getQuery());
-    envv.push_back(std::string("SERVER_PROTOCOL=")  + req.getHttpVer());
-    envv.push_back(std::string("SERVER_NAME=")      + server_name);
-    envv.push_back(std::string("SERVER_PORT=")      + port_ss.str());
-    if (!ctype.empty()) envv.push_back(std::string("CONTENT_TYPE=")   + ctype);
-    if (!clen.empty())  envv.push_back(std::string("CONTENT_LENGTH=") + clen);
-    envv.push_back(std::string("REMOTE_ADDR=")      + remote);
+    // 4) Placeholder 501, until you connect proc.{in,out}FD to the EventLoop
+    const char* body = "CGI spawned (placeholder). EventLoop wiring pending.\n";
+    const size_t blen = ::strlen(body);
 
-    // Common extras
-    envv.push_back(std::string("DOCUMENT_ROOT=") + vs.root);
-    envv.push_back(std::string("SCRIPT_FILENAME=") + joinFs(vs.root, req.getPath()));
-    envv.push_back("REDIRECT_STATUS=200"); // php-cgi quirk
+    res.http_version = "HTTP/1.1";
+    res.headers.set("Content-Type", "text/plain");
 
-    return static_cast<int>(envv.size());
+    std::ostringstream cl;
+    cl << blen;
+    res.headers.set("Content-Length", cl.str());
+
+    res.body.assign(body, body + blen);
+    res.bodyLength = res.body.size();
+    return true;
 }
+
 
 

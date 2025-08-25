@@ -50,3 +50,41 @@ const Location *RouteResolver::matchLocation(const VirtualServer &vs,
 	}
 	return best; // may be NULL
 }
+
+const Location *RouteResolver::matchLocation(const VirtualServer &vs,
+											 const std::string &path,
+											 std::string &matched_prefix)
+{
+	matched_prefix.clear();
+	const Location *best = 0;
+	std::string::size_type best_len = 0;
+
+	for (std::vector<Location>::const_iterator it = vs.locations.begin();
+		 it != vs.locations.end(); ++it)
+	{
+		const Location &L = *it;
+
+		if (L.regex)
+		{
+			continue;
+		}
+
+		const std::string &pfx = L.path_prefix;
+		if (pfx.empty())
+			continue;
+
+		if (pfx == path)
+		{
+			matched_prefix = pfx;
+			return &L;
+		}
+
+		if (starts_with(path, pfx) && pfx.size() > best_len)
+		{
+			best = &L;
+			best_len = pfx.size();
+			matched_prefix = pfx;
+		}
+	}
+	return best;
+}

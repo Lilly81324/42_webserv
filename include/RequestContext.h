@@ -21,6 +21,10 @@ struct RequestContext
 	std::string cgi_ext;	   // e.g. ".php" if CGI chosen
 	std::string upstream_name; // name of upstream if proxy
 
+	// Routing helpers (populated by Router/ServerPipeline)
+	std::string rel_path;       // path relative to location prefix
+	std::string effective_root; // filesystem root to resolve files
+
 	// Optional connection info you may add later:
 	// std::string remote_ip;
 	// int remote_port;

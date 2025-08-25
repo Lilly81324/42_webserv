@@ -5,12 +5,32 @@
 #include <map>
 #include <string>
 
+/**
+ * @brief Extracts the path component from a given URI, excluding any query parameters.
+ *
+ * This function takes a URI string and returns the substring up to (but not including)
+ * the first occurrence of the '?' character, which denotes the start of query parameters.
+ * If the URI does not contain a '?', the entire URI is returned.
+ *
+ * @param uri The input URI string.
+ * @return The path component of the URI, excluding query parameters.
+ */
 static std::string path_from_uri(const std::string &uri)
 {
 	std::string::size_type q = uri.find('?');
 	return (q == std::string::npos) ? uri : uri.substr(0, q);
 }
 
+/**
+ * @brief Extracts the file extension from a given file path.
+ *
+ * This function returns the file extension (including the dot) from the provided path string.
+ * If the path does not contain a dot, or if the last dot appears before the last slash (i.e., it is part of a directory name),
+ * an empty string is returned.
+ *
+ * @param path The file path as a std::string.
+ * @return std::string The file extension (including the dot), or an empty string if no valid extension is found.
+ */
 static std::string ext_of(const std::string &path)
 {
 	std::string::size_type slash = path.rfind('/');
@@ -22,6 +42,19 @@ static std::string ext_of(const std::string &path)
 	return path.substr(dot);
 }
 
+/**
+ * @brief Normalizes a filesystem path by resolving "." and ".." components and collapsing redundant slashes.
+ *
+ * This function takes an input path string and returns a normalized version:
+ * - Removes redundant slashes (e.g., "//" becomes "/").
+ * - Resolves "." to the current directory (removes it).
+ * - Resolves ".." to the parent directory (removes the previous component).
+ * - If ".." is used at the root or more times than there are components, returns an empty string to indicate an illegal path.
+ * - Always returns an absolute path starting with '/'.
+ *
+ * @param in The input path string to normalize.
+ * @return std::string The normalized absolute path, or an empty string if the path is invalid.
+ */
 static std::string normalize_path(const std::string &in)
 {
 	std::string out;

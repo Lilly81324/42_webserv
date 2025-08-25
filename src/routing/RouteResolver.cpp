@@ -1,7 +1,16 @@
 #include "RouteResolver.h"
 #include <cstddef> // size_t
 
-// Tiny helper (C++98)
+/**
+ * @brief Checks if a string starts with the specified prefix.
+ *
+ * This function compares the beginning of the string @p s with the string @p prefix.
+ * It returns true if @p s starts with @p prefix, and false otherwise.
+ *
+ * @param s The string to check.
+ * @param prefix The prefix to look for at the start of @p s.
+ * @return true if @p s starts with @p prefix, false otherwise.
+ */
 static bool starts_with(const std::string &s, const std::string &prefix)
 {
 	if (prefix.size() > s.size())

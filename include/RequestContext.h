@@ -21,6 +21,10 @@ struct RequestContext
 	std::string cgi_ext;	   // e.g. ".php" if CGI chosen
 	std::string upstream_name; // name of upstream if proxy
 
+	// If body of request was stored in a temporary file
+	bool		temp_file_used;
+	std::string	temp_filename;
+
 	// Optional connection info you may add later:
 	// std::string remote_ip;
 	// int remote_port;

@@ -119,10 +119,10 @@ int	HttpRequest::handleLineStart(const std::string &in)
 
 	pos = in.find(' ', i);
 	if (pos == (size_t)-1)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	this->method = in.substr(i, pos);
 	if (!isMethodValid(this->method))
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 
 	i = ++pos;
 	pos = in.find('?', i);
@@ -130,36 +130,36 @@ int	HttpRequest::handleLineStart(const std::string &in)
 	{
 		this->path = in.substr(i, pos - i);
 		if (!isPathValid(this->path))
-			return (ERR_HTTP_BAD_REQUEST);
+			return (HTTP_BAD_REQUEST);
 		i = ++pos;
 		pos = in.find(' ', i);
 		if (pos == (size_t)-1)
-			return (ERR_HTTP_BAD_REQUEST);
+			return (HTTP_BAD_REQUEST);
 		this->query = in.substr(i, pos - i);
 		if (!isQueryValid(this->query))
-			return (ERR_HTTP_BAD_REQUEST);
+			return (HTTP_BAD_REQUEST);
 	}
 	else
 	{
 		pos = in.find(' ', i);
 		if (pos == (size_t)-1)
-			return (ERR_HTTP_BAD_REQUEST);
+			return (HTTP_BAD_REQUEST);
 		this->path = in.substr(i, pos - i);
 		if (!isPathValid(this->path))
-			return (ERR_HTTP_BAD_REQUEST);
+			return (HTTP_BAD_REQUEST);
 	}
 
 	i = ++pos;
 	pos = in.find("\r\n", i);
 	if (pos == (size_t)-1)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	this->http_version = in.substr(i, pos - i);
 	if (!isHttpVerValid(this->http_version))
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 
 	i = pos + 2;
 	if (in[i])
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	this->state = HEADER;
 	return (0);
 }
@@ -183,29 +183,29 @@ int	HttpRequest::handleLineHeader(const std::string &in)
 	}
 	pos = in.find(':', i);
 	if (pos == (size_t)-1)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	key = in.substr(i, pos);
 	if (!isKeyValid(key))
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	i = pos + 1;
 	while (in[i] == ' ')
 		i++;
 	pos = in.find("\r\n", i);
 	if (pos == (size_t)-1)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	value = in.substr(i, pos - i);
 	if (!isValueValid(value))
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	i = pos + 2;
 	if (in[i])
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	if (!this->headers.set(key, value))
-		return (ERR_HTTP_HEADER_LIMIT);
+		return (HTTP_HEADER_TOO_BIG);
 	if (key == "Content-Length")
 	{
 		contLength = Atoi::atoiHttpReq(value.c_str(), atoiError);
 		if (atoiError)
-			return (ERR_HTTP_BAD_REQUEST);
+			return (HTTP_BAD_REQUEST);
 		this->bodyLength = contLength;
 	}
 	return (0);
@@ -214,15 +214,15 @@ int	HttpRequest::handleLineHeader(const std::string &in)
 int	HttpRequest::handleLineBody(const std::string &in)
 {
 	if (this->method != "POST" && this->method != "PUT" && this->method != "PATCH")
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	if (!this->headers.keyExists("Content-Length"))
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	if (in.size() + this->body.size() > this->bodyLength)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	for (int i = 0; in[i]; i++)
 		this->body.push_back(in[i]);
 	if (this->body.size() > this->bodyLength)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	if (this->body.size() == this->bodyLength)
 		this->state = OVER;
 	return (0);
@@ -232,14 +232,14 @@ int	HttpRequest::handleLine(const std::string &in)
 {
 	this->bytesHandledLast += in.size();
 	if (this->state == OVER || this->state == ERROR)
-		return (ERR_HTTP_BAD_REQUEST);
+		return (HTTP_BAD_REQUEST);
 	if (this->state == START)
 		return (handleLineStart(in));
 	if (this->state == HEADER)
 		return (handleLineHeader(in));
 	if (this->state == BODY)
 		return (handleLineBody(in));
-	return (ERR_HTTP_BAD_REQUEST);
+	return (HTTP_BAD_REQUEST);
 }
 
 int	HttpRequest::handleInput(bool &activity)

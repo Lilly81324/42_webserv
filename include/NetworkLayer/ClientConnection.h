@@ -90,6 +90,13 @@ class ClientConnection
 		// helpers
 		static u_int64_t nowMs();
 
+		// read-from-socket helpers (extracted from readFromSocket for clarity)
+		bool handleRecvPositive(ssize_t n, char *buffer);
+		bool handleRecvZero();
+		bool handleRecvError(ssize_t n);
+		void createBodyTempFileIfNeeded();
+		void writeParsedBytesToBodyFile();
+
 		inline void resetDeadlineForHeaders() { phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS); }
 		inline void resetDeadlineForBody() { phaseDeadline.reset(nowMs(), BODY_TIMEOUT_MS); }
 		inline void resetDeadlineForWrite() { phaseDeadline.reset(nowMs(), WRITE_TIMEOUT_MS); }

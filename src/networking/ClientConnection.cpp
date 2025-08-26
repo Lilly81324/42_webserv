@@ -11,18 +11,28 @@ date: 8/10/2025
 #include "CgiProcess.h"
 #include "Router.h"
 #include "Server.h"
+#include "HEADER_ENTRIES.h"
+
+#include <unistd.h>
+#include <fstream>
+#include <sstream> 
+
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <cstring>
-#include "HEADER_ENTRIES.h"
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-#include "CgiProcess.h" // make sure this is reachable here
 #include <vector>
+
 #include <string>
-#include <sstream> // std::istringstream, std::ostringstream
-#include <cstdlib> // std::atoi, std::atol
-#include <cstring> // std::strlen
+#include <cstring> 
+
+#include <limits.h>
+
+#include <cstdio>
+
+#include <cstdlib> 
 
 
 
@@ -89,130 +99,6 @@ u_int64_t ClientConnection::nowMs()
 // We keep this minimal: detect Content-Length, Transfer-Encoding: chunked,
 // and Expect: 100-continue. Do not change state here; callers use these
 // markers to decide next actions.
-void ClientConnection::analyzeHeaders(const HttpRequest &request)
-{
-	// If already analyzed, skip work (idempotent).
-	if (headersAnalyzed)
-		return;
-
-	// Defaults
-	bodyMode = BM_NONE;
-	expectedContentLength = 0;
-	expectContinue = false;
-	transferChunked = false;
-
-	const Headers &h = request.getHeaders();
-	// Iterate headers once: O(N) and avoid repeated map lookups and extra copies
-	for (std::map<std::string, std::string, CiLess>::const_iterator it = h.getBegin(); it != h.getEnd(); ++it)
-	{
-		const std::string &k = it->first;
-		const std::string &v = it->second;
-		// normalize key comparisons to lowercase by comparing known header names
-		// with case-insensitive comparator already used in Headers; keys are stored as given,
-		// so compare using CiLess-like checks via lowercase helpers here for simplicity.
-		// Handle common headers we care about.
-		if (k == "Content-Length")
-		{
-			size_t len = 0;
-			for (size_t i = 0; i < v.size(); ++i)
-			{
-				if (v[i] < '0' || v[i] > '9') break;
-				len = len * 10 + (v[i] - '0');
-			}
-			expectedContentLength = len;
-			bodyMode = BM_CONTENT_LENGTH;
-		}
-		else if (k == "Transfer-Encoding")
-		{
-			// lowercase check for 'chunked'
-			for (size_t i = 0; i < v.size(); ++i)
-			{
-				char c = v[i];
-				if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
-				// match substring "chunked"
-				// simple find without allocations
-				size_t rem = v.size() - i;
-				if (rem >= 7 &&
-					(v[i] == 'c' || v[i] == 'C') &&
-					(v[i+1] == 'h' || v[i+1] == 'H'))
-				{
-					// fallback to lowercase search using std::string::find on a lowercased temp;
-					std::string tmp = v;
-					for (size_t j = 0; j < tmp.size(); ++j) if (tmp[j] >= 'A' && tmp[j] <= 'Z') tmp[j] = tmp[j] - 'A' + 'a';
-					if (tmp.find("chunked") != std::string::npos)
-					{
-						transferChunked = true;
-						bodyMode = BM_CHUNKED;
-					}
-					break;
-				}
-			}
-		}
-		else if (k == "Expect")
-		{
-			// check for 100-continue case-insensitively
-			std::string tmp = v;
-			for (size_t j = 0; j < tmp.size(); ++j) if (tmp[j] >= 'A' && tmp[j] <= 'Z') tmp[j] = tmp[j] - 'A' + 'a';
-			if (tmp.find("100-continue") != std::string::npos)
-				expectContinue = true;
-		}
-	}
-
-	headersAnalyzed = true;
-}
-
-void ClientConnection::onTick()
-{
-	if (state == CLOSE || !fd)
-		return;
-
-	// If we’re in an active CGI phase, enforce its deadline separately
-	if (cgi_active)
-	{
-		if (nowMs() > cgi_deadline)
-		{
-			// kill CGI and close connection; tests only require the close
-			if (cgi_in_fd >= 0)
-			{
-				::close(cgi_in_fd);
-				cgi_in_fd = -1;
-			}
-			if (cgi_out_fd >= 0)
-			{
-				::close(cgi_out_fd);
-				cgi_out_fd = -1;
-			}
-			proc.terminate();
-			close();
-			return;
-		}
-	}
-	else
-	{
-		// regular header/body/write phases
-		if (expired())
-		{
-			close(); // tests assert the connection is closed on timeout
-			return;
-		}
-	}
-}
-
-void ClientConnection::changeState(State state)
-{
-	this->state = state;
-}
-
-/**
- * Make sure you remove ClientConnection after call
- * @warning Call destructor after Close so the Client Connection dies
- */
-void ClientConnection::close()
-{
-	if (fd)
-		this->fd.reset();
-	this->state = CLOSE;
-}
 
 bool ClientConnection::beginCgi(const CgiSpec &spec,
 								const std::string &script_path,
@@ -280,6 +166,53 @@ void ClientConnection::onCgiWritable(int fd)
 {
 	if (!cgi_active || fd != cgi_in_fd)
 		return;
+	// Support file-backed request body: stream from file if enabled.
+	if (req.isBodyOnDisk())
+	{
+		const std::string path = req.getBodyFilePath();
+		std::ifstream ifs(path.c_str(), std::ios::in | std::ios::binary);
+		if (!ifs)
+		{
+			// nothing we can do; close stdin
+			proc.closeIn();
+			cgi_in_fd = -1;
+			return;
+		}
+		// seek to current offset
+		ifs.seekg(static_cast<std::streamoff>(cgi_body_off));
+		char tbuf[8192];
+		ifs.read(tbuf, sizeof(tbuf));
+		std::streamsize got = ifs.gcount();
+		if (got <= 0)
+		{
+			proc.closeIn();
+			cgi_in_fd = -1;
+			return;
+		}
+		ssize_t n = ::write(cgi_in_fd, tbuf, static_cast<size_t>(got));
+		if (n > 0)
+		{
+			cgi_body_off += static_cast<size_t>(n);
+			if (static_cast<size_t>(n) < static_cast<size_t>(got))
+			{
+				// partial write; we'll continue later
+			}
+			if (req.getBodyLength() > 0 && cgi_body_off >= req.getBodyLength())
+			{
+				proc.closeIn();
+				cgi_in_fd = -1;
+			}
+			cgi_deadline = CgiProcess::nowMs() + (WRITE_TIMEOUT_MS);
+			return;
+		}
+		else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+		{
+			proc.closeIn();
+			cgi_in_fd = -1;
+			return;
+		}
+		return;
+	}
 
 	const std::vector<char> &body = req.getBody(); // <-- your API returns vector<char>
 	if (cgi_body_off >= body.size())
@@ -391,15 +324,138 @@ void ClientConnection::onCgiReadable(int fd)
 
 /***---------------------------CLIENT CONNECTION HANDLING REQUEST AND RESPONSE---------------------------***/
 
+void ClientConnection::onTick()
+{
+	if (state == CLOSE || !fd)
+		return;
 
-static std::string makeHelloResponse()
+	// If we’re in an active CGI phase, enforce its deadline separately
+	if (cgi_active)
+	{
+		if (nowMs() > cgi_deadline)
+		{
+			// kill CGI and close connection; tests only require the close
+			if (cgi_in_fd >= 0)
+			{
+				::close(cgi_in_fd);
+				cgi_in_fd = -1;
+			}
+			if (cgi_out_fd >= 0)
+			{
+				::close(cgi_out_fd);
+				cgi_out_fd = -1;
+			}
+			proc.terminate();
+			close();
+			return;
+		}
+	}
+	else
+	{
+		// regular header/body/write phases
+		if (expired())
+		{
+			close(); // tests assert the connection is closed on timeout
+			return;
+		}
+	}
+}
+
+void ClientConnection::changeState(State state)
+{
+	this->state = state;
+}
+
+/**
+ * Make sure you remove ClientConnection after call
+ * @warning Call destructor after Close so the Client Connection dies
+ */
+void ClientConnection::close()
+{
+	if (fd)
+		this->fd.reset();
+	this->state = CLOSE;
+}
+
+
+void ClientConnection::analyzeHeaders(const HttpRequest &request)
+{
+	// If already analyzed, skip work (idempotent).
+	if (headersAnalyzed)
+		return;
+
+	// Defaults
+	bodyMode = BM_NONE;
+	expectedContentLength = 0;
+	expectContinue = false;
+	transferChunked = false;
+
+	const Headers &h = request.getHeaders();
+	// Iterate headers once: O(N) and avoid repeated map lookups and extra copies
+	for (std::map<std::string, std::string, CiLess>::const_iterator it = h.getBegin(); it != h.getEnd(); ++it)
+	{
+		const std::string &k = it->first;
+		const std::string &v = it->second;
+		if (k == "Content-Length")
+		{
+			size_t len = 0;
+			for (size_t i = 0; i < v.size(); ++i)
+			{
+				if (v[i] < '0' || v[i] > '9') break;
+				len = len * 10 + (v[i] - '0');
+			}
+			expectedContentLength = len;
+			bodyMode = BM_CONTENT_LENGTH;
+		}
+		else if (k == "Transfer-Encoding")
+		{
+			// lowercase check for 'chunked'
+			for (size_t i = 0; i < v.size(); ++i)
+			{
+				char c = v[i];
+				if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+				// match substring "chunked"
+				// simple find without allocations
+				size_t rem = v.size() - i;
+				if (rem >= 7 &&
+					(v[i] == 'c' || v[i] == 'C') &&
+					(v[i+1] == 'h' || v[i+1] == 'H'))
+				{
+					// fallback to lowercase search using std::string::find on a lowercased temp;
+					std::string tmp = v;
+					for (size_t j = 0; j < tmp.size(); ++j) if (tmp[j] >= 'A' && tmp[j] <= 'Z') tmp[j] = tmp[j] - 'A' + 'a';
+					if (tmp.find("chunked") != std::string::npos)
+					{
+						transferChunked = true;
+						bodyMode = BM_CHUNKED;
+					}
+					break;
+				}
+			}
+		}
+		else if (k == "Expect")
+		{
+			// check for 100-continue case-insensitively
+			std::string tmp = v;
+			for (size_t j = 0; j < tmp.size(); ++j) if (tmp[j] >= 'A' && tmp[j] <= 'Z') tmp[j] = tmp[j] - 'A' + 'a';
+			if (tmp.find("100-continue") != std::string::npos)
+				expectContinue = true;
+		}
+	}
+
+	headersAnalyzed = true;
+}
+
+
+
+static std::string makeHelloResponse(bool keepAlive)
 {
 	const char *body = "hello";
 	std::string resp;
 	resp.reserve(128);
 	resp += "HTTP/1.1 200 OK\r\n";
 	resp += "Content-Length: 5\r\n";
-	resp += "Connection: close\r\n";
+	resp += std::string("Connection: ") + (keepAlive ? "keep-alive\r\n" : "close\r\n");
 	resp += "Content-Type: text/plain\r\n";
 	resp += "\r\n";
 	resp += body;
@@ -413,73 +469,12 @@ static std::string makeErrorResponse()
 	resp.reserve(128);
 	resp += "HTTP/1.1 500 Internal Server Error\r\n";
 	resp += "Content-Length: 22\r\n";
-	resp += "Connection: close\r\n";
+	resp += std::string("Connection: ") + (false ? "keep-alive\r\n" : "close\r\n");
 	resp += "Content-Type: text/plain\r\n";
 	resp += "\r\n";
 	resp += body;
 	return resp;
 }
-
-void ClientConnection::onReadable()
-{
-	readFromSocket();
-}
-
-void ClientConnection::readFromSocket()
-{
-	if (this->state != READ_HEADERS || !fd)
-		return;
-
-	while (true)
-	{
-
-		if (req.getTotalBytesRead() >= MAX_INBUFFER)
-		{
-			close();
-			return;
-		}
-		char buffer[READ_CHUNK];
-		ssize_t n = ::recv(fd.get(), buffer, sizeof(buffer), 0);
-		buffer[n] = '\0';
-		if (n > 0)
-		{
-			size_t spaceLeft = MAX_INBUFFER - inBuffer.size();
-			size_t toCopy = static_cast<size_t>(n);
-			toCopy = (toCopy > spaceLeft) ? spaceLeft : toCopy;
-			inBuffer.insert(inBuffer.end(), buffer, buffer + toCopy);
-			bumpDeadline(HDR_TIMEOUT_MS);
-			if (headersComplete(inBuffer, req))
-			{
-				if (processIncoming())
-					return;
-			}
-			inBuffer.clear();
-			continue;
-		}
-
-		if (n == 0)
-		{
-			if (headersComplete(inBuffer, req))
-			{
-				if (processIncoming())
-					return;
-			}
-			inBuffer.clear();
-			close();
-			return;
-		}
-		if (n < 0)
-		{
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return;
-			close();
-			return;
-		}
-	}
-}
-
-
-
 
 static int get_local_port(int fd)
 {
@@ -496,6 +491,169 @@ static int get_local_port(int fd)
 
 
 
+void ClientConnection::onReadable()
+{
+	readFromSocket();
+}
+
+void ClientConnection::readFromSocket()
+{
+	if (this->state != READ_HEADERS || !fd)
+		return;
+	while (true)
+	{
+		if (req.getTotalBytesRead() >= MAX_INBUFFER)
+		{
+			close();
+			return;
+		}
+		char buffer[READ_CHUNK];
+		ssize_t n = ::recv(fd.get(), buffer, sizeof(buffer), 0);
+		buffer[n < 0 ? 0 : n] = '\0';
+
+		if (n > 0)
+		{
+			if (handleRecvPositive(n, buffer))
+				return;
+			inBuffer.clear();
+			continue;
+		}
+
+		if (n == 0)
+		{
+			if (handleRecvZero())
+				return;
+			inBuffer.clear();
+			close();
+			return;
+		}
+
+		if (n < 0)
+		{
+			if (handleRecvError(n))
+				return;
+			close();
+			return;
+		}
+	}
+}
+
+bool ClientConnection::handleRecvPositive(ssize_t n, char *buffer)
+{
+	size_t spaceLeft = MAX_INBUFFER - inBuffer.size();
+	size_t toCopy = static_cast<size_t>(n);
+	toCopy = (toCopy > spaceLeft) ? spaceLeft : toCopy;
+	inBuffer.insert(inBuffer.end(), buffer, buffer + toCopy);
+	bumpDeadline(HDR_TIMEOUT_MS);
+
+	// After appending bytes, let parser consume them. If headers are
+	// complete we may need to offload the body to disk based on server
+	// configuration; headersComplete() will mark request properties.
+	if (headersComplete(inBuffer, req))
+	{
+		const int local_port = get_local_port(fd.get());
+		vs_idx = -1;
+
+		if (server && local_port > 0)
+			vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
+
+		
+		// Possibly enable file-backed body storage if Content-Length is large
+		if (req.getState() == BODY && !req.isBodyOnDisk())
+			createBodyTempFileIfNeeded();
+
+		// If the request is file-backed, write the bytes that were just
+		// handled by the parser into the file. HttpRequest::getBytesHandledLast()
+		// reports how many bytes the last parse() call consumed and those bytes
+		// correspond to the prefix of inBuffer.
+		if (req.isBodyOnDisk())
+			writeParsedBytesToBodyFile();
+
+		if (processIncoming())
+			return true;
+	}
+	return false;
+}
+
+bool ClientConnection::handleRecvZero()
+{
+	if (headersComplete(inBuffer, req))
+	{
+		if (processIncoming())
+			return true;
+	}
+	return false;
+}
+
+bool ClientConnection::handleRecvError(ssize_t n)
+{
+	(void)n;
+	if (errno == EAGAIN || errno == EWOULDBLOCK)
+		return true; // caller will simply return and try later
+	return false;
+}
+
+void ClientConnection::createBodyTempFileIfNeeded()
+{
+	size_t expected = req.getBodyLength();
+	size_t memThreshold = 1024 * 1024; // 1MiB
+	if (server && vs_idx >= 0)
+	{
+		const std::vector<VirtualServer> &svs = server->getConfig().servers();
+		if (vs_idx >= 0 && static_cast<size_t>(vs_idx) < svs.size())
+		{
+			int serverLimit = svs[vs_idx].client_max_body_size;
+			if (serverLimit > 0 && static_cast<size_t>(serverLimit) < memThreshold)
+				memThreshold = static_cast<size_t>(serverLimit);
+		}
+	}
+	if (expected > memThreshold)
+	{
+		// create temp dir if needed
+		std::string tmpdir = "/home/schiper/Desktop/Projects/webserv/tmp/webserv_bodies";
+		if (server && vs_idx >= 0)
+		{
+			const std::vector<VirtualServer> &svs = server->getConfig().servers();
+			if (vs_idx >= 0 && static_cast<size_t>(vs_idx) < svs.size())
+			{
+				std::string p = svs[vs_idx].client_body_temp_path;
+				if (!p.empty()) tmpdir = p;
+			}
+		}
+		// ensure dir exists (best-effort)
+		::mkdir(tmpdir.c_str(), 0700);
+		// create unique filename
+		char fname[PATH_MAX];
+		snprintf(fname, sizeof(fname), "%s/webbody_%u_%llu.tmp", tmpdir.c_str(), (unsigned)getpid(), (unsigned long long)nowMs());
+		// open file and move already-parsed body bytes into it
+		std::ofstream ofs(fname, std::ios::out | std::ios::binary | std::ios::trunc);
+		if (ofs)
+		{
+			std::vector<char> current = req.getBody();
+			if (!current.empty()) ofs.write(&current[0], current.size());
+			ofs.flush(); ofs.close();
+			req.enableBodyOnDisk(std::string(fname));
+		}
+	}
+}
+
+void ClientConnection::writeParsedBytesToBodyFile()
+{
+	size_t handled = req.getBytesHandledLast();
+	if (handled > 0 && handled <= inBuffer.size())
+	{
+		std::ofstream ofs(req.getBodyFilePath().c_str(), std::ios::out | std::ios::binary | std::ios::app);
+		if (ofs)
+		{
+			ofs.write(&inBuffer[0], handled);
+			ofs.flush();
+		}
+	}
+}
+
+
+
+
 /**
  * Needs to be extended to HTTP Request parsing later
  * @brief Called after onReadable() has appended bytes
@@ -509,31 +667,16 @@ bool ClientConnection::processIncoming()
 	// TODO: parse method/target/Host from inBuffer. For now, we rely on HttpRequest
 	// parser state (req) to determine if a body is expected and whether it's complete.
 
-	const int local_port = get_local_port(fd.get());
-	vs_idx = -1;
-	if (server && local_port > 0)
-	{
-		vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
-	}
 
-	// If headers indicate a body (parser state BODY), ensure we've received the full body
 	if (req.getState() == BODY)
 	{
 		size_t expected = req.getBodyLength();
 		size_t received = req.getBody().size();
-		// If Content-Length known and not yet received, wait for more.
-		// Keep state as READ_HEADERS so the outer loop and tests will continue
-		// to call readFromSocket()/onReadable and the remaining bytes can
-		// be read into the parser. We only switch state after the body is
-		// complete (processIncoming will be retried once parser advances).
 		if (expected > 0 && received < expected)
 			return false;
-		// If Content-Length == 0 but parser still in BODY, wait
 		if (expected == 0 && req.getState() == BODY)
 			return false;
 	}
-
-	// Now headers (and body, if any) are complete — call pipeline if we resolved a VS
 	if (server && vs_idx >= 0)
 	{
 		bool ok = server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res);
@@ -565,7 +708,7 @@ bool ClientConnection::processIncoming()
 		}
 		else
 		{
-			std::string resp = makeHelloResponse();
+			std::string resp = makeHelloResponse(req.keepAlive());
 			outBuffer.assign(resp.begin(), resp.end());
 		}
 
@@ -578,7 +721,7 @@ bool ClientConnection::processIncoming()
 	}
 
 	// No server -> default hello response
-	std::string resp = makeHelloResponse();
+	std::string resp = makeHelloResponse(req.keepAlive());
 	outBuffer.assign(resp.begin(), resp.end());
 	if (!flow.isReadPaused() && outBuffer.size() >= HIGH_WATER)
 		flow.setReadPaused(true);
@@ -588,22 +731,31 @@ bool ClientConnection::processIncoming()
 	return true;
 }
 
-/**
- *  Just a placeholder until he have a proper Parser
- *  Look for \r\n\r\n using parseOffset to avoid rescanning.
- */
+
 bool ClientConnection::headersComplete(const std::vector<char> &buf, HttpRequest &request)
 {
 	if (!request.parse(buf.data(), buf.size()))
 		return (false);
 	if (request.getState() <= HEADER || request.getState() == ERROR)
 		return (false);
-	// Update keep-alive flag based on Connection header if present
+	// Update keep-alive flag based on Connection header if present.
+	// HTTP/1.1 defaults to keep-alive, HTTP/1.0 defaults to close unless explicitly asked.
 	if (request.getHeaders().keyExists(HDR_CONNECTION))
 	{
-		if (request.keepAlive() || request.getHeaders().get(HDR_CONNECTION) == "keep-alive")
+		std::string val = request.getHeaders().get(HDR_CONNECTION);
+		// lowercase
+		for (size_t i = 0; i < val.size(); ++i) if (val[i] >= 'A' && val[i] <= 'Z') val[i] = val[i] - 'A' + 'a';
+		if (val == "keep-alive")
 			request.setKeepAlive(true);
-		else if (request.getHeaders().get(HDR_CONNECTION) == "closed")
+		else if (val == "close")
+			request.setKeepAlive(false);
+	}
+	else
+	{
+		// No Connection header: default based on HTTP version
+		if (request.getHttpVer() == "HTTP/1.1")
+			request.setKeepAlive(true);
+		else
 			request.setKeepAlive(false);
 	}
 

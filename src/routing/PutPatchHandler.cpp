@@ -58,6 +58,12 @@ int	writeFilePath(const char *path, int offset, enum FileOpenMode mode, const st
 
 	// Try to open target
 	openWithMode(to, path, mode);
+
+	// For Patch Methods, if file doesnt exist, its an error, for Put its not
+	if (access(path, F_OK) != 0 && mode > PUT)
+		return (HTTP_NOT_FOUND);
+
+	// If still not open, then invalid permissions
 	if (!to.is_open())
 		return (HTTP_FORBIDDEN);
 
@@ -99,6 +105,12 @@ int	writeFileTemp(const char *path, int offset, enum FileOpenMode mode, const st
 
 	// Try to open target with mode
 	openWithMode(to, path, mode);
+
+	// For Patch Methods, if file doesnt exist, its an error, for Put its not
+	if (access(path, F_OK) != 0 && mode > PUT)
+		return (HTTP_NOT_FOUND);
+
+	// If still not open, then invalid permissions
 	if (!to.is_open())
 		return (HTTP_FORBIDDEN);
 
@@ -289,10 +301,7 @@ bool allowedPatchMethod(const std::string &chosen_mime, std::string &mime_type, 
  */
 int	applyPatchAppend(HttpRequest &req, RequestContext &ctx)
 {
-	int status;
-
-	status = decideWrite(req.getPath().c_str(), 0, APPEND, req, ctx);
-	return (status);
+	return (decideWrite(req.getPath().c_str(), 0, APPEND, req, ctx));
 }
 
 /**
@@ -313,14 +322,11 @@ int	applyPatch(const std::string &type, const std::string &param, HttpRequest &r
 	// unused
 	(void)param;
 	(void)res;
-	// Get offset for patching
-	offset = Atoi::atoiPatchOffset(req.getHeaders().get(HDR_PATCH_OFFSET).c_str(), offset_error);
 	(void)offset;
 
-	// Append is exempt from this error, is it doesnt require an offset
-	if (type != "p_append" && offset_error)
-		return (1);
-	
+	// Get offset for patching (if error is encountered, keep going with 0 value)
+	offset = Atoi::atoiPatchOffset(req.getHeaders().get(HDR_PATCH_OFFSET).c_str(), offset_error);
+
 	// Get Case we have
 	for (; i < 1; i++)
 	{
@@ -328,12 +334,15 @@ int	applyPatch(const std::string &type, const std::string &param, HttpRequest &r
 			break ;
 	}
 
+	// Execute Patch method
 	switch (i)
 	{
 		case 0:
 			return (applyPatchAppend(req, ctx));
+		// ...
+		// More methods here
 		default:
-			return (1);
+			return (HTTP_INV_MEDIA);
 	}
 }
 
@@ -366,16 +375,16 @@ int	PutPatchHandler::handle_patch(HttpRequest &req, HttpResponse &res, RequestCo
 
 	// Should have methods specified on how to patch
 	if (!req.getHeaders().keyExists(HDR_CONTENT_TYPE))
-		return (1);
+		return (HTTP_INV_MEDIA);
 
 	// Get patch methods
 	chosen_mime = req.getHeaders().get(HDR_CONTENT_TYPE);
 	if (!populatePatchMethod(chosen_mime, type, subtype, parameters))
-		return (1);
+		return (HTTP_BAD_REQUEST);
 	
 	// Check if specified Mime type is allowed in config
-	if (!allowedPatchMethod(type + "/" + subtype, short_type, ctx.cfg->mime_mapping))
-		return (1);
+	if (!allowedPatchMethod((CSTM_PATCH + type + "/" + subtype), short_type, ctx.cfg->mime_mapping))
+		return (HTTP_INV_MEDIA);
 
 	// Apply whatever method was specified to the file
 	return (applyPatch(short_type, parameters, req, res, ctx));

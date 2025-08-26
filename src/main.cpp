@@ -10,21 +10,18 @@ using namespace std;
 static Server *g_srv = 0;
 static void on_sig(int)
 {
-	if (g_srv)
-		g_srv->stop();
+    if (g_srv)
+        g_srv->stop();
 }
 
-
-
 /** For now I get port from ARGV */
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-    const std::string &path = (argc > 1)? argv[1] : "config/extended.conf";
+    const std::string &path = (argc > 1) ? argv[1] : "config/extended.conf";
 
-    ServerConfig cfg;            // no argv-taking ctor anymore
+    ServerConfig cfg; // no argv-taking ctor anymore
 
-
-	cfg.parseFile(path);
+    cfg.parseFile(path);
     Server server(cfg);
     // server.setPipeline(&pipeline);
 
@@ -32,10 +29,13 @@ int main(int argc, char** argv)
     std::signal(SIGINT, on_sig);
     std::signal(SIGTERM, on_sig);
 
-    try {
+    try
+    {
         server.start();
         server.run(50);
-    } catch (const std::exception& e) {
+    }
+    catch (const std::exception &e)
+    {
         std::cerr << "fatal: " << e.what() << "\n";
         return 1;
     }

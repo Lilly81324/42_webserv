@@ -22,8 +22,8 @@ struct RequestContext
 	std::string upstream_name; // name of upstream if proxy
 
 	// If body of request was stored in a temporary file
-	bool		temp_file_used;
-	std::string	temp_filename;
+	bool		temp_file_used; // For checking IF the body was stored in a temp file
+	std::string	temp_filename; // The temp files name, only used when temp_file_used is true
 
 	// Optional connection info you may add later:
 	// std::string remote_ip;

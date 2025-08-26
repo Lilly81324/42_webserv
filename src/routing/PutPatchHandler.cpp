@@ -8,55 +8,38 @@ date: 8/16/2025
 #include "PutPatchHandler.h"
 #include "HTTPCODES.h"
 
-PutPatchHandler::PutPatchHandler() {
-    // Constructor
-}
-
-PutPatchHandler::~PutPatchHandler() {
-    // Destructor
-}
-
-/**
- * Checks wether file can be written to or not
- * @param path path of the file
- * @returns true if writeable
- * @returns false if not
- */
-bool checkWritePermission(const std::string &path)
+PutPatchHandler::PutPatchHandler()
 {
-	int	status;
-	struct stat buffer;
-
-	if (access(path.c_str(), W_OK) == 0)
-		return (true);
-	return (false);
+	// Constructor
 }
 
-/**
- * @brief Writes into path file based off the content of filename
- */
-int	writeFileTemp(HttpRequest &req, const std::string &filename)
+PutPatchHandler::~PutPatchHandler()
 {
-	
+	// Destructor
 }
 
 /**
- * Writes HttpRequest->body into a file created by opening
- * the HttpRequest->path. 
+ * Writes HttpRequest->body into a file created by
+ * opening the HttpRequest->path
  * Writes in one chunk and performs test if opening and writing
  * was validly performed
  * @brief Writes into path file based off req body
  * @param path Name of the file to create and write
  * @param cont Vector of characters containing the content to write into a file
  */
-int	writeFilePath(const std::string &path, const std::vector<char> &cont)
+int	writeFilePath(const char *path, const std::vector<char> &cont)
 {
 	std::ofstream to; 
 
-	to.open(path.c_str());
+	// Try to open target in binary and truncating mode
+	to.open(path, std::ios::binary | std::ios::trunc);
 	if (!to.is_open())
 		return (HTTP_FORBIDDEN);
+	
+	// Write in a single write from our <cont> into our target
 	to.write(cont.data(), cont.size());
+
+	// If error in target
 	if (!to.good())
 	{
 		to.close();
@@ -69,20 +52,20 @@ int	writeFilePath(const std::string &path, const std::vector<char> &cont)
 /**
  * Writes Temporary File containing body into a file 
  * created by opening the HttpRequest->path. 
- * Writes in one chunk and performs test if opening and writing
- * was validly performed
- * @brief Writes into path file based off req body
+ * Writes in multiple chunks, at most PUT_WRITE_BUFFER_SIZE bytes big
+ * Repeats writing until EOF or error hit
+ * @brief Writes into path file based off temp file
  * @param path Name of the file to create and write
- * @param cont Vector of characters containing the content to write into a file
+ * @param cont Name of the temporary file holding the body information
  */
-int	writeFileTemp(const std::string &path, const std::string &source)
+int	writeFileTemp(const char *path, const std::string &source)
 {
 	std::ofstream to; 
 	std::ifstream from;
 	char buffer[PUT_WRITE_BUFFER_SIZE];
 
-	// Try to open target
-	to.open(path.c_str());
+	// Try to open target in binary and truncating mode
+	to.open(path, std::ios::binary | std::ios::trunc);
 	if (!to.is_open())
 		return (HTTP_FORBIDDEN);
 
@@ -94,12 +77,18 @@ int	writeFileTemp(const std::string &path, const std::string &source)
 		return (HTTP_FORBIDDEN);
 	}
 
+	// While the <from> streams badbit and failbit are both set (stream still has data)
 	while (from)
 	{
+		// Read data into buffer, so we can see how much was written
 		from.read(buffer, PUT_WRITE_BUFFER_SIZE);
 		std::streamsize written = from.gcount();
+
+		// Write as much into <to> as was read from <from>
 		if (written > 0)
 			to.write(buffer, written);
+		
+		// If error in <to> fstream
 		if (!to.good())
 		{
 			from.close();
@@ -120,35 +109,30 @@ int	writeFileTemp(const std::string &path, const std::string &source)
  * @returns HTTP_FILE_CREATED if new resource created 
  * @returns HTTP_OK if existing file updated
  * @returns HTTP_FORBIDDEN if no write permissions on this file
- * @returns HTTP_CONFLICT if server forbids the file from being created
  * @returns HTTP_INV_SERVER_ERR on unexpected errors
  */
 int	PutPatchHandler::handle_put(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
-	std::string	path;
-	int			fd;
 	int			status;
 	bool		exists;
 	
-	// Make path
-	path = req.getPath();
+	// Make path for file to put
+	const char *path = req.getPath().c_str();
 
-	// Check if file exists, for the right exit code
-	exists = access(path.c_str(), F_OK);
-
-	// Check writing permissions
-	if (access(path.c_str(), W_OK) != 0)
-		return (HTTP_FORBIDDEN);
+	// Store if the file is new or not, for later
+	exists = access(path, F_OK) + 1;
 
 	// Create file and write to it
 	if (ctx.temp_file_used)
-		status = writeFileTemp(req.getPath(), ctx.temp_filename);
+		status = writeFileTemp(path, ctx.temp_filename);
 	else
-		status = writeFilePath(req.getPath(), req.getBody());
+		status = writeFilePath(path, req.getBody());
 
+	// If Any exit code encountered in writing, exit with that
 	if (status != 0)
 		return (status);
 	
+	// If File was created from fresh -> 201, otherwise -> 200
 	if (exists)
 		return (HTTP_OK);
 	return (HTTP_FILE_CREATED);

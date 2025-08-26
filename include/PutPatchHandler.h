@@ -12,9 +12,25 @@ Date: 8/16/2025
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include "Handler.h"
+#include "HTTPCODES.h"
+#include "HEADER_ENTRIES.h"
+#include "Atoi.h"
 
+// Buffer size and how many bytes are read when we read from temp file containing body
 #define PUT_WRITE_BUFFER_SIZE 8192
+// Prefix for our custom patch methods (vnd.webserv.insert)
+#define CSTM_PATCH "vnd.webserv."
+
+enum FileOpenMode
+{
+	PUT,
+	APPEND,
+	INSERT,
+	REPLACE,
+	OVERWRITE
+};
 
 /**
  * PUT replaces a source entirely

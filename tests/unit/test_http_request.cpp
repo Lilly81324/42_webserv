@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include "HttpRequest.h"
+#include "HTTPCODES.h"
 
 void	test(const std::string &in)
 {
@@ -9,7 +10,7 @@ void	test(const std::string &in)
 	result = test.parse(in.c_str(), in.length());
 	REQUIRE(result == false);
 	REQUIRE(test.getState() == ERROR);
-	REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+	REQUIRE(errno == HTTP_BAD_REQUEST);
 }
 
 TEST_CASE("HTTP Request", "[https]")
@@ -58,21 +59,21 @@ TEST_CASE("HTTP Request", "[https]")
 			HttpRequest x;
 			x.parse("PUT /path Https\r\nkey: value\r\n\r\n", 31);
 			REQUIRE(x.parse("bliblablub\r\n", 12) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Invalid, because GET may not have a body
 			HttpRequest x;
 			x.parse("GET /path Https\r\nContent-Length: 5\r\nkey: value\r\n\r\n", 50);
 			REQUIRE(x.parse("12345", 5) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Invalid, because GET may not have a body
 			HttpRequest x;
 			x.parse("PUT /path Https\r\nContent-Length:blablabla\r\nkey: value\r\n\r\n", 57);
 			REQUIRE(x.parse("12345", 5) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 	}
 	SECTION("Content Length Tests")
@@ -82,14 +83,14 @@ TEST_CASE("HTTP Request", "[https]")
 			HttpRequest x;
 			x.parse("PUT /path Https\r\nContent-Length:0\r\nkey: value\r\n\r\n", 50);
 			REQUIRE(x.parse("12345", 5) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Invalid, because Content Length too low
 			HttpRequest x;
 			x.parse("PUT /path Https\r\nContent-Length: 2\r\nkey: value\r\n\r\n", 50);
 			REQUIRE(x.parse("12345", 5) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Invalid, because Content Length too low
@@ -97,28 +98,28 @@ TEST_CASE("HTTP Request", "[https]")
 			x.parse("PUT /path Https\r\nContent-Length: 5\r\nkey: value\r\n\r\n", 50);
 			REQUIRE(x.parse("abcd", 4) == true);
 			REQUIRE(x.parse("12345", 5) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{ 
 			// Invalid Content Length
 			HttpRequest x;
 			errno = 0;
 			REQUIRE(x.parse("PUT / Http\r\nContent-Length:bla\r\nkey:value\r\n\r\nI", 46) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Negative value for Content Length
 			HttpRequest x;
 			errno = 0;
 			REQUIRE(x.parse("PUT / Http\r\nContent-Length: -1\r\nkey:value\r\n\r\nI", 46) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Too big of a value for Content Length
 			HttpRequest x;
 			errno = 0;
 			REQUIRE(x.parse("PUT / Http\r\nContent-Length:99999999999999999999999999\r\nkey:value\r\n\r\nI", 69) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// MAX_INT Content Length
@@ -132,7 +133,7 @@ TEST_CASE("HTTP Request", "[https]")
 			HttpRequest x;
 			errno = 0;
 			REQUIRE(x.parse("PUT / Http\r\nContent-Length:2147483648\r\nkey:value\r\n\r\nI", 53) == false);
-			REQUIRE(errno == ERR_HTTP_BAD_REQUEST);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 	}
 	SECTION("Valid Start Line")

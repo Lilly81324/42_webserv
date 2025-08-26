@@ -2,10 +2,8 @@
 #define REQUEST_CONTEXT_H
 
 #include <string>
-
-class ServerConfig;
-class VirtualServer;
-struct Location;
+#include "ServerConfig.h"
+#include "VirtualServer.h"
 
 struct RequestContext
 {

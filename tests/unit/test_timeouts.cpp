@@ -41,7 +41,7 @@ TEST_CASE("Header timeout: idle connection gets closed  = 1;     by onTick()", "
     REQUIRE(!conn.isClosed());
 
     // Force the deadline into the past → onTick() must close
-    conn.deadline_ms = 1;           // ms since epoch long ago
+    conn.phaseDeadline.deadline_ms = 1;           // ms since epoch long ago
     conn.onTick();
     REQUIRE(conn.isClosed());
 
@@ -60,8 +60,8 @@ TEST_CASE("Header deadline extends after readable progress", "[timeouts]") {
     REQUIRE(!conn.isClosed());
 
     // Make deadline "expired"
-    conn.deadline_ms = now_ms() - 1;
-    const unsigned long long old_deadline = conn.deadline_ms;
+    conn.phaseDeadline.deadline_ms = now_ms() - 1;
+    const unsigned long long old_deadline = conn.phaseDeadline.deadline_ms;
 
     // Write a single byte from the peer so onReadable() makes progress
     const char one = 'X';
@@ -71,7 +71,7 @@ TEST_CASE("Header deadline extends after readable progress", "[timeouts]") {
     conn.onReadable();
     REQUIRE(!conn.isClosed());
     // Progress should extend header deadline
-    REQUIRE(conn.deadline_ms > old_deadline);
+    REQUIRE(conn.phaseDeadline.deadline_ms > old_deadline);
 
     // Cleanup
     close(sv[1]);
@@ -92,7 +92,7 @@ TEST_CASE("Write timeout: expired write-phase gets closed by onTick()", "[timeou
     conn.changeState(WRITE);
 
     // Force deadline in the past
-    conn.deadline_ms = 1;
+    conn.phaseDeadline.deadline_ms = 1;
     conn.onTick();
     REQUIRE(conn.isClosed());
 
@@ -114,8 +114,8 @@ TEST_CASE("Write deadline extends on send progress", "[timeouts]") {
     conn.changeState(WRITE);
 
     // Set a very near deadline
-    conn.deadline_ms = now_ms() + 1;
-    const unsigned long long before = conn.deadline_ms;
+    conn.phaseDeadline.deadline_ms = now_ms() + 1;
+    const unsigned long long before = conn.phaseDeadline.deadline_ms;
 
     // Let onWritable() send something (peer has room initially)
     conn.onWritable();
@@ -123,7 +123,7 @@ TEST_CASE("Write deadline extends on send progress", "[timeouts]") {
     // Should have made progress (either fully sent or partially)
     REQUIRE(conn.outOffset > 0);
     // Progress should have bumped the write deadline
-    REQUIRE(conn.deadline_ms >= before);
+    REQUIRE(conn.phaseDeadline.deadline_ms >= before);
 
     close(sv[1]);
 }
@@ -140,7 +140,7 @@ TEST_CASE("Backpressure: resume reads when write buffer drains below LOW_WATER",
     const std::size_t big = ClientConnection::HIGH_WATER + 64 * 1024;
     conn.outBuffer.assign(big, 'C');
     conn.outOffset  = 0;
-    conn.readPaused = true;
+    conn.setReadPaused(true);
     conn.changeState(WRITE);
 
     // Drain from peer to allow kernel to accept our sends
@@ -162,7 +162,7 @@ TEST_CASE("Backpressure: resume reads when write buffer drains below LOW_WATER",
     const std::size_t remaining = conn.outBuffer.size() - conn.outOffset;
     REQUIRE(remaining <= ClientConnection::LOW_WATER);
     // onWritable() should have auto-resumed reads once drained enough
-    REQUIRE(conn.readPaused == false);
+    REQUIRE(conn.isReadPaused() == false);
 
     // Finish sending to avoid leaks
     while (!conn.isClosed() && conn.outOffset < conn.outBuffer.size()) {
@@ -183,11 +183,11 @@ TEST_CASE("Backpressure: wantsRead() is false while paused", "[backpressure]") {
     REQUIRE(conn.state == READ_HEADERS);
     REQUIRE(conn.wantsRead()); // initially true
 
-    conn.readPaused = true;
+    conn.setReadPaused(true);
     REQUIRE_FALSE(conn.wantsRead()); // paused ⇒ handler must drop POLLIN
 
     // unpause
-    conn.readPaused = false;
+    conn.setReadPaused(false);
     REQUIRE(conn.wantsRead());
 
     close(sv[1]);

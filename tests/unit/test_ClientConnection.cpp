@@ -215,3 +215,42 @@ TEST_CASE("Large outBuffer causes partial send and eventually completes", "[send
 
 	::close(peer);
 }
+
+TEST_CASE("Wait for full Content-Length before responding", "[io][bodywait]")
+{
+	int peer, connFd;
+	{
+		std::pair<int, int> p = make_socketpair();
+		peer = p.first;
+		connFd = p.second;
+	}
+	set_nonblock(connFd);
+	set_nonblock(peer);
+
+	ClientConnection conn(connFd);
+	REQUIRE(conn.getState() == READ_HEADERS);
+
+	// Send headers with Content-Length:10 and only 5 bytes of body for now
+	const char *part1 = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n12345";
+	REQUIRE(write_all(peer, part1, std::strlen(part1)) == (ssize_t)std::strlen(part1));
+
+	// Pump a few iterations: server should still be in READ_HEADERS while
+	// waiting for the remaining body bytes (so onReadable continues to be
+	// called by the test harness).
+	pump(conn, 10);
+	REQUIRE(conn.getState() == READ_HEADERS);
+
+	// Send remaining body bytes
+	const char *rest = "67890";
+	REQUIRE(write_all(peer, rest, std::strlen(rest)) == (ssize_t)std::strlen(rest));
+
+	// Pump to allow server to process full body and respond
+	pump(conn, 50);
+
+	std::string resp = read_available(peer);
+	REQUIRE(resp.find("HTTP/1.1 200 OK") != std::string::npos);
+	REQUIRE(resp.find("hello") != std::string::npos);
+
+	REQUIRE(conn.getState() == CLOSE);
+	::close(peer);
+}

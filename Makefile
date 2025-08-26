@@ -6,7 +6,6 @@ NAME                := webserv
 
 # Test binaries
 TEST_BIN            := test_webserv
-TEST_BIN_STUBS      := test_webserv_stubs
 CATCH2_LIB          := libcatch2.a
 
 # Directories
@@ -18,7 +17,6 @@ CATCH2_DIR      := libraries/Catch2/src
 
 BUILD_DIR       := build
 OBJ98_DIR       := $(BUILD_DIR)/obj98
-OBJ98_STUBS_DIR := $(BUILD_DIR)/obj98_stubs
 OBJ14_DIR       := $(BUILD_DIR)/obj14_tests
 LIB_DIR         := $(BUILD_DIR)/lib
 
@@ -42,8 +40,8 @@ CXXFLAGS_98 := -Wall -Wextra -Werror -std=c++98 -MMD -MP -g -pipe $(PCHFLAG)
 CXXFLAGS_14 := -std=c++14 -MMD -MP -pthread -pipe $(PCHFLAG) -g
 CFLAGS_C    := -Wall -Wextra -Werror -std=c99   -MMD -MP -g -pipe
 
-INCS      := -I$(INC_DIR)
-TEST_INCS := -I$(TESTS_INC_DIR) -I$(INC_DIR) -I$(CATCH2_DIR)
+INCS      := -I$(INC_DIR) -I$(INC_DIR)/CGI -I$(INC_DIR)/Config -I$(INC_DIR)/CoreLayer -I$(INC_DIR)/HttpLayer -I$(INC_DIR)/NetworkLayer -I$(INC_DIR)/Routing -I$(INC_DIR)/Utils
+TEST_INCS := -I$(TESTS_INC_DIR) $(INCS) -I$(CATCH2_DIR)
 
 TESTFLAGS := --reporter console --durations yes
 
@@ -79,14 +77,11 @@ OBJS_98        := $(SRCS_CPP:$(SRC_DIR)/%.cpp=$(OBJ98_DIR)/%.o) \
 OBJS_98_NOMAIN := $(SRCS_CPP_NOMAIN:$(SRC_DIR)/%.cpp=$(OBJ98_DIR)/%.o) \
                   $(SRCS_C:$(SRC_DIR)/%.c=$(OBJ98_DIR)/%.o)
 
-OBJS_98_STUBS  := $(SRCS_CPP_NOMAIN:$(SRC_DIR)/%.cpp=$(OBJ98_STUBS_DIR)/%.o) \
-                  $(SRCS_C:$(SRC_DIR)/%.c=$(OBJ98_STUBS_DIR)/%.o)
 
 TEST_OBJS_14   := $(TEST_SRCS_CPP:$(TEST_DIR)/%.cpp=$(OBJ14_DIR)/%.o)
 
 # Deps
 DEPS_98         := $(OBJS_98:.o=.d)
-DEPS_98_STUBS   := $(OBJS_98_STUBS:.o=.d)
 TEST_DEPS_14    := $(TEST_OBJS_14:.o=.d)
 CATCH2_DEPS_14  := $(CATCH2_OBJS_14:.o=.d)
 
@@ -117,10 +112,10 @@ $(OBJ98_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS_C) $(INCS) -c $< -o $@
 
 clean:
-	@$(RM) $(OBJ98_DIR) $(OBJ98_STUBS_DIR) $(OBJ14_DIR) $(LIB_DIR)
+	@$(RM) $(OBJ98_DIR)  $(OBJ14_DIR) $(LIB_DIR)
 
 fclean: clean
-	@$(RM) $(NAME) $(TEST_BIN) $(TEST_BIN_STUBS)
+	@$(RM) $(NAME) $(TEST_BIN) 
 
 re: fclean all
 
@@ -172,35 +167,11 @@ $(OBJ14_DIR)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_14) -DUNIT_TEST $(TEST_INCS) -c $< -o $@
 
-# ------------------------------ Tests (stubs) -------------------------------- #
-
-test-stubs: $(TEST_BIN_STUBS)
-
-run-tests-stubs:
-	@if [ -f $(TEST_BIN_STUBS) ]; then \
-		echo "Running stubbed tests..."; \
-		./$(TEST_BIN_STUBS) $(TESTFLAGS); \
-	else \
-		echo "Stubbed test binary not found. Run 'make test-stubs' first."; \
-		exit 1; \
-	fi
-
-$(OBJ98_STUBS_DIR)/%.o: $(SRC_DIR)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS_98) -DUSE_STUBS -DUNIT_TEST $(TEST_INCS) -c $< -o $@
-
-$(OBJ98_STUBS_DIR)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_C) -DUSE_STUBS -DUNIT_TEST $(TEST_INCS) -c $< -o $@
-
-$(TEST_BIN_STUBS): $(OBJS_98_STUBS) $(TEST_OBJS_14) $(CATCH2_LIB_PATH)
-	@echo "Linking stubbed test executable..."
-	$(CXX) $(OBJS_98_STUBS) $(TEST_OBJS_14) $(CATCH2_LIB_PATH) -pthread -o $@
 
 # ------------------------------ Utilities ----------------------------------- #
 
 clean-tests:
-	@$(RM) $(OBJ14_DIR) $(TEST_BIN) $(TEST_BIN_STUBS) $(OBJ98_STUBS_DIR) $(LIB_DIR)/$(CATCH2_LIB)
+	@$(RM) $(OBJ14_DIR) $(TEST_BIN) $(LIB_DIR)/$(CATCH2_LIB)
 
 re-tests: clean-tests test
 
@@ -218,7 +189,6 @@ help:
 	@echo "  test            - Build test executable ($(TEST_BIN)) using prod objects"
 	@echo "  test-fast       - Build and run tests"
 	@echo "  run-tests       - Run tests without rebuilding"
-	@echo "  test-stubs      - Build stubbed test executable ($(TEST_BIN_STUBS))"
 	@echo "  run-tests-stubs - Run stubbed tests without rebuilding"
 	@echo "  clean-tests     - Remove test objs/bin and Catch2 lib"
 	@echo "  re-tests        - Clean tests then build test"
@@ -234,6 +204,5 @@ help:
 # ------------------------------ Dependencies -------------------------------- #
 
 -include $(DEPS_98)
--include $(DEPS_98_STUBS)
 -include $(TEST_DEPS_14)
 -include $(CATCH2_DEPS_14)

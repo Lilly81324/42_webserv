@@ -1,5 +1,4 @@
 /* --- ClientConnection.cpp --- */
-
 /* ------------------------------------------
 author: undefined
 date: 8/10/2025
@@ -19,6 +18,9 @@ date: 8/10/2025
 
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <netinet/in.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -324,6 +326,18 @@ void ClientConnection::onCgiReadable(int fd)
 
 /***---------------------------CLIENT CONNECTION HANDLING REQUEST AND RESPONSE---------------------------***/
 
+// Send HTTP/1.1 100 Continue if client sent Expect: 100-continue
+void ClientConnection::handleExpectContinueIfNeeded()
+{
+	if (expectContinue && state == READ_HEADERS && fd) {
+		const char *resp = "HTTP/1.1 100 Continue\r\n\r\n";
+		ssize_t n = ::send(fd.get(), resp, std::strlen(resp), MSG_NOSIGNAL);
+		(void)n; // ignore short send, best effort
+		expectContinue = false;
+	}
+}
+
+
 void ClientConnection::onTick()
 {
 	if (state == CLOSE || !fd)
@@ -502,20 +516,23 @@ void ClientConnection::readFromSocket()
 		return;
 	while (true)
 	{
-		if (req.getTotalBytesRead() >= MAX_INBUFFER)
-		{
-			close();
-			return;
+		if (req.getState() == HEADER || req.getState() == START) {
+			if (req.getTotalBytesRead() >= MAX_INBUFFER) {
+				close();
+				return;
+			}
 		}
+
 		char buffer[READ_CHUNK];
 		ssize_t n = ::recv(fd.get(), buffer, sizeof(buffer), 0);
-		buffer[n < 0 ? 0 : n] = '\0';
 
 		if (n > 0)
 		{
 			if (handleRecvPositive(n, buffer))
 				return;
 			inBuffer.clear();
+			if(state == WRITE)
+				return;
 			continue;
 		}
 
@@ -551,11 +568,15 @@ bool ClientConnection::handleRecvPositive(ssize_t n, char *buffer)
 	// configuration; headersComplete() will mark request properties.
 	if (headersComplete(inBuffer, req))
 	{
+
 		const int local_port = get_local_port(fd.get());
 		vs_idx = -1;
 
 		if (server && local_port > 0)
 			vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
+
+		// Handle Expect: 100-continue if needed
+		handleExpectContinueIfNeeded();
 
 		
 		// Possibly enable file-backed body storage if Content-Length is large
@@ -677,6 +698,7 @@ bool ClientConnection::processIncoming()
 		if (expected == 0 && req.getState() == BODY)
 			return false;
 	}
+
 	if (server && vs_idx >= 0)
 	{
 		bool ok = server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res);
@@ -693,7 +715,7 @@ bool ClientConnection::processIncoming()
 		// If pipeline populated a response (headers or body), use it. Otherwise fall
 		// back to the simple hello response to preserve previous behavior in tests.
 		bool hasResponse = (res.body.size() > 0) || (res.headers.getLength() > 0);
-			if (hasResponse)
+		if (hasResponse)
 		{
 			std::ostringstream oss;
 			oss << "HTTP/1.1 200 OK\r\n";

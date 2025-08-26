@@ -8,6 +8,9 @@ Date: 8/10/2025
 #ifndef CLIENTCONNECTION_H
 #define CLIENTCONNECTION_H
 
+
+
+
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>
@@ -26,6 +29,15 @@ Date: 8/10/2025
 #include "FlowControl.h"
 
 class Server;
+
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 
 enum State
 {
@@ -107,6 +119,7 @@ class ClientConnection
 		bool processIncoming();
 		bool headersComplete(const std::vector<char> &buf, HttpRequest &request);
 		void analyzeHeaders(const HttpRequest &request);
+		void handleExpectContinueIfNeeded();
 
 	public:
 		static const int HDR_TIMEOUT_MS = 10000;

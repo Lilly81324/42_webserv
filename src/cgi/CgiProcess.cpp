@@ -64,7 +64,9 @@ CgiProcess::~CgiProcess()
 }
 
 // High-level convenience overload: build argv/envp and delegate
-bool CgiProcess::spawn(const CgiSpec &spec, const std::string &scriptPath, const std::vector<std::string> &envv)
+bool CgiProcess::spawn(const CgiSpec &spec,
+					   const std::string &scriptPath,
+					   const std::vector<std::string> &envv)
 {
 	// argv: [bin, script, NULL]
 	std::vector<char *> argvv;
@@ -83,29 +85,91 @@ bool CgiProcess::spawn(const CgiSpec &spec, const std::string &scriptPath, const
 }
 
 // Low-level spawn: do the actual fork/exec (stub for now; returns false)
-bool CgiProcess::spawn(const std::string &bin, const std::string &script, char *const *argv, char *const *envp, int timeout_ms)
+bool CgiProcess::spawn(const std::string &bin,
+					   const std::string &script,
+					   char *const *argv,
+					   char *const *envp,
+					   int timeout_ms)
 {
-	// If there is an existing child, clean it up
+	// Clean up any previous child
 	terminate();
 
-	// Establish deadline (if timeout_ms <= 0, treat as no timeout)
-	if (timeout_ms > 0)
-		_deadline = nowMs() + (unsigned long long)timeout_ms;
-	else
-		_deadline = 0ULL;
+	// Establish deadline
+	_deadline = (timeout_ms > 0)
+					? (nowMs() + (unsigned long long)timeout_ms)
+					: 0ULL;
 
-	// TODO: implement real pipe()/fork()/dup2()/execve() here and set:
-	//   _pid = child pid
-	//   _in  = writable end for child's stdin
-	//   _out = readable end for child's stdout (and/or merged stderr)
-	//   setNonBlocking(_in/_out) and setCloseOnExec as appropriate
-	// For now, suppress unused warnings and return false so callers can 500.
-	(void)bin;
-	(void)script;
-	(void)argv;
-	(void)envp;
+	int inPipe[2] = {-1, -1};  // parent writes -> child reads (stdin)
+	int outPipe[2] = {-1, -1}; // child writes -> parent reads (stdout/stderr)
 
-	return false;
+	if (::pipe(inPipe) < 0)
+	{
+		return false;
+	}
+	if (::pipe(outPipe) < 0)
+	{
+		::close(inPipe[0]);
+		::close(inPipe[1]);
+		return false;
+	}
+
+	pid_t pid = ::fork();
+	if (pid < 0)
+	{
+		// fork failed
+		::close(inPipe[0]);
+		::close(inPipe[1]);
+		::close(outPipe[0]);
+		::close(outPipe[1]);
+		return false;
+	}
+
+	if (pid == 0)
+	{
+		// ---------------- child ----------------
+		// close parent ends
+		::close(inPipe[1]);
+		::close(outPipe[0]);
+
+		// stdin from inPipe[0]
+		if (::dup2(inPipe[0], STDIN_FILENO) < 0)
+			_exit(126);
+		// stdout to outPipe[1]
+		if (::dup2(outPipe[1], STDOUT_FILENO) < 0)
+			_exit(126);
+		// stderr merged to stdout
+		(void)::dup2(outPipe[1], STDERR_FILENO);
+
+		// close the originals after dup
+		::close(inPipe[0]);
+		::close(outPipe[1]);
+
+		// Exec the interpreter/binary with provided argv/envp.
+		// argv should look like: [bin, script, NULL]
+		(void)script; // only to silence unused warning; script is already in argv
+		::execve(bin.c_str(),
+				 const_cast<char *const *>(argv),
+				 const_cast<char *const *>(envp));
+		_exit(127); // exec failed
+	}
+
+	// ---------------- parent ----------------
+	_pid = pid;
+
+	// parent keeps write-end of stdin and read-end of stdout
+	::close(inPipe[0]);
+	::close(outPipe[1]);
+
+	_in = inPipe[1];
+	_out = outPipe[0];
+
+	// Make them non-blocking & close-on-exec
+	(void)setNonBlocking(_in);
+	(void)setNonBlocking(_out);
+	(void)setCloseOnExec(_in);
+	(void)setCloseOnExec(_out);
+
+	return true;
 }
 
 void CgiProcess::closeIn() { (void)xclose(_in); }

@@ -19,11 +19,12 @@ PutPatchHandler::~PutPatchHandler()
 }
 
 /**
+ * @brief Writes into path file based off req body
+ * 
  * Writes HttpRequest->body into a file created by
  * opening the HttpRequest->path
  * Writes in one chunk and performs test if opening and writing
  * was validly performed
- * @brief Writes into path file based off req body
  * @param path Name of the file to create and write
  * @param cont Vector of characters containing the content to write into a file
  */
@@ -50,11 +51,12 @@ int	writeFilePath(const char *path, const std::vector<char> &cont)
 }
 
 /**
+ * @brief Writes into path file based off temp file
+ * 
  * Writes Temporary File containing body into a file 
  * created by opening the HttpRequest->path. 
  * Writes in multiple chunks, at most PUT_WRITE_BUFFER_SIZE bytes big
  * Repeats writing until EOF or error hit
- * @brief Writes into path file based off temp file
  * @param path Name of the file to create and write
  * @param cont Name of the temporary file holding the body information
  */
@@ -103,6 +105,13 @@ int	writeFileTemp(const char *path, const std::string &source)
 
 /**
  * @brief Creates or overwrites a file
+ * 
+ * Checks if file exists, then tries to write to file
+ * Writing is based on if the context (ctx) temp_file_used is set to true
+ * If true, then the file gets written based on a teporary files data
+ * If false, then the file gets written based on the Requests entire body
+ * Returns different codes based on if file already existed and was modified
+ * or if the file was created completely new
  * @param req Request that specifies the file to overwrite
  * @param res Response, which should be prepared by this function
  * @param ctx Context, how the file should be created

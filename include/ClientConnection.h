@@ -11,26 +11,24 @@ Date: 8/10/2025
 
 
 
+
 #include <vector>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <cstring>
 #include <string>
 #include <sys/socket.h>
 #include <netinet/in.h> // for sockaddr_in, sockaddr_in6, ntohs
-#include "CgiProcess.h"
 #include "UniqueFD.h"
-#include "Router.h"
-#include "RouteResolver.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
-
 #include "DeadlineManager.h"
 #include "FlowControl.h"
 
-class Server;
+// Only include these if CGI or routing is used in the header (minimal for decls)
+#include "CgiProcess.h"
+#include "Router.h"
+#include "RouteResolver.h"
 
+class Server;
+class RequestContext;
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -123,6 +121,7 @@ class ClientConnection
 		bool headersComplete(const std::vector<char> &buf, HttpRequest &request);
 		void analyzeHeaders(const HttpRequest &request);
 		void handleExpectContinueIfNeeded();
+		bool evaluate_request_policy(HttpRequest &req, RequestContext &ctx, HttpResponse &res);
 
 	public:
 		static const int HDR_TIMEOUT_MS = 10000;
@@ -208,6 +207,8 @@ class ClientConnection
 
 		void onCgiReadable(int fd);
 		void onCgiWritable(int fd);
+		bool send_keepalive(const HttpResponse &r);
+		bool send_and_close(const HttpResponse &r);
 
 	#ifdef UNIT_TEST
 	public:

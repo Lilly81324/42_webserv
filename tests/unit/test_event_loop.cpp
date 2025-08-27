@@ -1,5 +1,5 @@
 #include <catch2/catch_all.hpp>
-#include "../../include/EventLoop.h"
+#include "EventLoop.h"
 #include <unistd.h>
 #include <fcntl.h>
 

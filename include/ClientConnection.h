@@ -8,6 +8,9 @@ Date: 8/10/2025
 #ifndef CLIENTCONNECTION_H
 #define CLIENTCONNECTION_H
 
+
+
+
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>
@@ -15,34 +18,48 @@ Date: 8/10/2025
 #include <cstring>
 #include <string>
 #include <sys/socket.h>
-#include "CgiProcess.h" 
+#include "CgiProcess.h"
 #include "UniqueFD.h"
 #include "Router.h"
 #include "RouteResolver.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
+
+#include "DeadlineManager.h"
+#include "FlowControl.h"
+
 class Server;
+
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 
 enum State
 {
 	READ_HEADERS,
 	READ_BODY,
+	BODY_COMPLETE,
 	WRITE,
 	CLOSE,
 };
 
-struct CgiState {
-  CgiProcess proc;
-  int in_fd;          // proc.inFD()
-  int out_fd;         // proc.outFD()
-  size_t body_off;
-  std::string buf;    // accumulates CGI output
-  bool headers_done;
-  int status;         // parsed "Status: NNN" or 200
-  long content_len;   // from CGI headers, or -1 if unknown
-  unsigned long long deadline;
+struct CgiState
+{
+	CgiProcess proc;
+	int in_fd;
+	int out_fd;
+	size_t body_off;
+	std::string buf;
+	bool headers_done;
+	int status;
+	long content_len;
+	unsigned long long deadline;
 };
-
 
 class ClientConnection
 {
@@ -54,192 +71,134 @@ class ClientConnection
 		size_t parseOffset;
 		size_t outOffset;
 		size_t bytesErased;
-		const Server * server;
+		const Server *server;
 		int vs_idx;
-		unsigned long long 	deadline_ms; // absolute deadline for current phase
-		bool               	readPaused;  // if true, we should not register POLLIN
-		bool 				writeLingerArmed; // after full flush, ask handler to keep POLLOUT once
+
+		// extracted helpers
+		DeadlineManager phaseDeadline;
+		FlowControl flow;
 
 		HttpRequest req;
 		HttpResponse res;
-		
-		size_t cgi_bytes_streamed;   // bytes pushed into outBuffer after headers
-		bool   cgi_headers_emitted;  // true once HTTP headers were sent to client
 
+		// ---- markers discovered after parsing headers ----
+		enum BodyMode
+		{
+			BM_NONE,
+			BM_CONTENT_LENGTH,
+			BM_CHUNKED,
+			BM_UNKNOWN
+		};
+		BodyMode bodyMode;
+		size_t expectedContentLength;
+		bool expectContinue;
+		bool transferChunked;
+		bool headersAnalyzed;
 
 		// ---- I/O limits ----
-		static const size_t READ_CHUNK   = 8192;
-		// Protect against slowloris / memory blowups:
-		static const size_t MAX_INBUFFER = (1u << 20); // 1 MiB
-		// Cap CGI output to something reasonable (16 MiB here)
-		static const size_t CGI_MAX_OUTPUT = (16u << 20);   // 16 MiB
+		static const size_t READ_CHUNK = 8192;
+		static const size_t MAX_INBUFFER = (1u << 20);
 
+		// helpers
+		static u_int64_t nowMs();
 
+		// read-from-socket helpers (extracted from readFromSocket for clarity)
+		bool handleRecvPositive(ssize_t n, char *buffer);
+		bool handleRecvZero();
+		bool handleRecvError(ssize_t n);
+		void createBodyTempFileIfNeeded();
+		void writeParsedBytesToBodyFile();
 
-		// ---- timeouts (milliseconds) ----
-		// You can tweak these without touching code elsewhere.
-
-
-		// ---- timing / backpressure bookkeeping ----
-		// Use unsigned long long to stay C++98-friendly.
-
-
-		// ---- helpers (implemented in .cpp) ----
-		 static u_int64_t nowMs();
-
-		inline void resetDeadlineForHeaders() { 
-			deadline_ms = nowMs() + (unsigned long long)HDR_TIMEOUT_MS;
-		}
-		inline void resetDeadlineForBody()    { 
-			deadline_ms = nowMs() + (unsigned long long)BODY_TIMEOUT_MS; 
-		}
-		inline void resetDeadlineForWrite()   { 
-			deadline_ms = nowMs() + (unsigned long long)WRITE_TIMEOUT_MS;
-		}
-		inline void bumpDeadline(int ms)      { 
-			deadline_ms = nowMs() + (unsigned long long)ms;
-		}
-		inline bool expired() const           { 
-			return nowMs() > deadline_ms;
-		}
-
-
+		inline void resetDeadlineForHeaders() { phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS); }
+		inline void resetDeadlineForBody() { phaseDeadline.reset(nowMs(), BODY_TIMEOUT_MS); }
+		inline void resetDeadlineForWrite() { phaseDeadline.reset(nowMs(), WRITE_TIMEOUT_MS); }
+		inline void bumpDeadline(int ms) { phaseDeadline.bump(nowMs(), ms); }
+		inline bool expired() const { return phaseDeadline.expired(nowMs()); }
 
 		void readFromSocket();
-
-		
 		bool processIncoming();
-		
-		// bool headersComplete(const std::vector<char> &buf, size_t &parseOffset, HttpRequest &request);
+		bool headersComplete(const std::vector<char> &buf, HttpRequest &request);
+		void analyzeHeaders(const HttpRequest &request);
+		void handleExpectContinueIfNeeded();
 
 	public:
+		static const int HDR_TIMEOUT_MS = 10000;
+		static const int BODY_TIMEOUT_MS = 20000;
+		static const int WRITE_TIMEOUT_MS = 10000;
+		static const unsigned POST_WRITE_LINGER_MS = 100;
 
-	  // --- CGI state (minimal, safe defaults) ---
-	  
-	  
-	  static const int HDR_TIMEOUT_MS   = 10000; // headers read deadline
-	  static const int BODY_TIMEOUT_MS  = 20000; // (reserved for future body reads)
-	  static const int WRITE_TIMEOUT_MS = 10000; // response flush deadline
-	  // near your other timeouts
-	  static const unsigned POST_WRITE_LINGER_MS = 100; // close very soon after flush
-	  
-	  
-	  // ---- backpressure watermarks (bytes) ----
-	  static const size_t HIGH_WATER = 256u * 1024u; // pause reads if above
-	  static const size_t LOW_WATER  =  64u * 1024u; // resume reads if below
-	  
-	  CgiProcess proc;
-	  bool        cgi_active;
-	  int         cgi_in_fd;
-	  int         cgi_out_fd;
-	  size_t      cgi_body_off;
-	  std::string cgi_buf;
-	  bool        cgi_headers_done;
-	  int         cgi_status;
-	  long        cgi_content_len;
-	  unsigned long long cgi_deadline;
+		static const size_t HIGH_WATER = 256u * 1024u;
+		static const size_t LOW_WATER = 64u * 1024u;
 
-		bool wantsWriteLinger() const { return writeLingerArmed; }
+		CgiProcess proc;
+		bool cgi_active;
+		int cgi_in_fd;
+		int cgi_out_fd;
+		size_t cgi_body_off;
+		std::string cgi_buf;
+		bool cgi_headers_done;
+		int cgi_status;
+		long cgi_content_len;
+		unsigned long long cgi_deadline;
+
+		bool wantsWriteLinger() const { return flow.getWriteLinger(); }
 
 		explicit ClientConnection(int fd_)
-			: state(READ_HEADERS), fd(fd_),
-			inBuffer(), outBuffer(),
-			parseOffset(0), outOffset(0),
-			server(0), vs_idx(-1),
-			deadline_ms(nowMs() + HDR_TIMEOUT_MS),
-			readPaused(false),
-			writeLingerArmed(false),
-			req(),
-			res(),
-			cgi_active(false),
-			cgi_in_fd(-1),
-			cgi_out_fd(-1),
-			cgi_body_off(0),
-			cgi_headers_done(false),
-			cgi_status(200),
-			cgi_content_len(-1),
-			cgi_deadline(0ULL)
-			{}
-	
-		explicit ClientConnection(int fd,const Server* srv) : state(READ_HEADERS), fd(fd),
-			inBuffer(), outBuffer(),
-			parseOffset(0), outOffset(0),
-			server(srv), vs_idx(-1),
-			deadline_ms(nowMs() + HDR_TIMEOUT_MS),
-			readPaused(false),
-			writeLingerArmed(false),
-			req(),
-			res(),
-			cgi_active(false),
-			cgi_in_fd(-1),
-			cgi_out_fd(-1),
-			cgi_body_off(0),
-			cgi_headers_done(false),
-			cgi_status(200),
-			cgi_content_len(-1),
-			cgi_deadline(0ULL)
-			{}
-		~ClientConnection() {};
+			: state(READ_HEADERS), fd(fd_), inBuffer(), outBuffer(), parseOffset(0), outOffset(0), bytesErased(0), server(0), vs_idx(-1),
+			phaseDeadline(), flow(), req(), res(), bodyMode(BM_NONE), expectedContentLength(0), expectContinue(false), transferChunked(false), headersAnalyzed(false),
+			proc(), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1), cgi_body_off(0), cgi_buf(), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1), cgi_deadline(0ULL)
+		{
+			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
+			flow = FlowControl(HIGH_WATER, LOW_WATER);
+		}
 
-		bool wantsRead() const {
-			return state == READ_HEADERS && !isReadPaused();/*|| state == RECV_BODY*/;
+		explicit ClientConnection(int fd, const Server *srv)
+			: state(READ_HEADERS), fd(fd), inBuffer(), outBuffer(), parseOffset(0), outOffset(0), bytesErased(0), server(srv), vs_idx(-1),
+			phaseDeadline(), flow(), req(), res(), bodyMode(BM_NONE), expectedContentLength(0), expectContinue(false), transferChunked(false), headersAnalyzed(false),
+			proc(), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1), cgi_body_off(0), cgi_buf(), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1), cgi_deadline(0ULL)
+		{
+			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
+			flow = FlowControl(HIGH_WATER, LOW_WATER);
 		}
-		bool hasPendingWrite() const {
-			return outOffset < outBuffer.size();
-		}
-		bool isReadPaused() const {
-			return readPaused;
-		}
-		void setReadPaused(bool v) {
-			readPaused = v;
-		}
-		
+
+		~ClientConnection() {}
+
+		bool wantsRead() const { return state == READ_HEADERS && !isReadPaused(); }
+		bool hasPendingWrite() const { return outOffset < outBuffer.size(); }
+		bool isReadPaused() const { return flow.isReadPaused(); }
+		void setReadPaused(bool v) { flow.setReadPaused(v); }
+
 		State getState() { return this->state; }
-		
+
 		void onReadable();
-		
 		void onWritable();
-		
 		void changeState(State);
-		
-		
 		void onTick();
 
+		int getFD() const { return fd.get(); }
+		bool isClosed() const { return !fd; }
+		bool wantsWrite() const { return state == WRITE; }
 
-		int  getFD() const { 
-			return fd.get();
-		}
-		bool isClosed() const { 
-			return !fd; 
-		}
-		bool wantsWrite() const {
-			return state == WRITE;
-		}
-		
 		void close();
 
-		bool beginCgi(const CgiSpec& spec,
-              const std::string& script_path,
-              const std::vector<std::string>& envv);
-		void unregisterCgiFds();
+		bool beginCgi(const CgiSpec &spec, const std::string &script_path, const std::vector<std::string> &envv);
 
-		// Called by the EventLoop when a registered CGI fd is readable/writable.
 		void onCgiReadable(int fd);
 		void onCgiWritable(int fd);
 
-		#ifdef UNIT_TEST
-			public:
-				std::vector<char>& getInBuffer() { return inBuffer; }
-				std::vector<char>& getOutBuffer() { return outBuffer; }
-				size_t& getParseOffset() { return parseOffset; }
-				void setState(State state) {this->state = state;}
-				bool processIncoming(std::string ok)
-				{ 
-					(void)ok;
-					return this->processIncoming();
-				};
-				size_t getparseOffset(){return this->parseOffset;};
-		#endif
+	#ifdef UNIT_TEST
+	public:
+		std::vector<char> &getInBuffer() { return inBuffer; }
+		std::vector<char> &getOutBuffer() { return outBuffer; }
+		size_t &getParseOffset() { return parseOffset; }
+		void setState(State state) { this->state = state; }
+		bool processIncoming(std::string ok)
+		{
+			(void)ok;
+			return this->processIncoming();
+		}
+		size_t getparseOffset() { return this->parseOffset; }
+	#endif
 };
 
 #endif // CLIENTCONNECTION_H

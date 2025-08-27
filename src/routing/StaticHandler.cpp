@@ -5,9 +5,6 @@ author: undefined
 date: 8/10/2025
 ------------------------------------------ */
 
-/* --- StaticHandler.cpp (implemented) --- */
-/* --- StaticHandler.cpp --- */
-
 #include "StaticHandler.h"
 #include "RequestContext.h"
 #include "VirtualServer.h"

@@ -125,6 +125,8 @@ static bool headersComplete(const std::vector<char> &buf, HttpRequest &request)
  */
 bool ClientConnection::processIncoming()
 {
+	(void)this->parseOffset;
+	(void)this->bytesErased;
 	if (this->state != READ_HEADERS)
 		return false;
 

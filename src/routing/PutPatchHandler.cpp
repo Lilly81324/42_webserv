@@ -26,17 +26,20 @@ PutPatchHandler::~PutPatchHandler()
  * @param mode Mode in which to open the file
  * @note by default opens in PUT mode
  */
-void openWithMode(std::ofstream &to, const char *path, enum FileOpenMode mode)
+void openWithMode(std::fstream &to, const char *path, enum FileOpenMode mode)
 {
 	switch (mode)
 	{
 		case (PUT):
-			return (to.open(path, std::ios::binary | std::ios::trunc));
+			return(to.open(path, std::ios::binary | std::ios::out | std::ios::trunc));
 		case (APPEND):
-			return (to.open(path, std::ios::binary | std::ios_base::app));
+			return(to.open(path, std::ios::binary | std::ios::out | std::ios_base::app));
+		case (OVERWRITE):
+			return(to.open(path, std::ios::binary | std::ios::in | std::ios::out));
 		default:
-			return (to.open(path, std::ios::binary | std::ios::trunc));
+			return(to.open(path, std::ios::binary |std::ios::out | std::ios::trunc));
 	}
+
 }
 
 /**
@@ -52,12 +55,14 @@ void openWithMode(std::ofstream &to, const char *path, enum FileOpenMode mode)
  * @param mode mode in which the file is to be opened
  * @param cont Vector of characters containing the content to write into a file
  */
-int	writeFilePath(const char *path, int offset, enum FileOpenMode mode, const std::vector<char> &cont)
+int	writeFilePath(const char *path, std::size_t offset, enum FileOpenMode mode, const std::vector<char> &cont)
 {
-	std::ofstream to; 
+	std::fstream to; 
+	std::size_t fileLength;
 
 	// Try to open target
 	openWithMode(to, path, mode);
+	std::cout << "Opened file" << std::endl;
 
 	// For Patch Methods, if file doesnt exist, its an error, for Put its not
 	if (access(path, F_OK) != 0 && mode > PUT)
@@ -66,14 +71,33 @@ int	writeFilePath(const char *path, int offset, enum FileOpenMode mode, const st
 	// If still not open, then invalid permissions
 	if (!to.is_open())
 		return (HTTP_FORBIDDEN);
+	std::cout << "File stream was opened" << std::endl;
 
 	// Skip to offset when required
 	if (mode > APPEND)
-		to.seekp(offset);
+	{
+		to.seekg(0, std::ios::end);
+		fileLength = to.tellg();
+		if (offset <= fileLength)
+			to.seekp(offset, std::ios::beg);
+		else
+			to.seekp(fileLength, std::ios::beg);
+	}
+
+	std::cout << "Skipped offset if specified" << std::endl;
+
+	// Extra check in case seeking caused error
+	if (!to.good())
+	{
+		to.close();
+		return (HTTP_INV_SERVER_ERR);
+	}
+	std::cout << "Stream still good" << std::endl;
 
 	// Write in a single write from our <cont> into our target
 	to.write(cont.data(), cont.size());
 
+	std::cout << "Wrote data to file" << std::endl;
 	// If error in target
 	if (!to.good())
 	{
@@ -97,9 +121,9 @@ int	writeFilePath(const char *path, int offset, enum FileOpenMode mode, const st
  * @param mode mode in which the file is to be opened
  * @param source Name of the temporary file holding the body information
  */
-int	writeFileTemp(const char *path, int offset, enum FileOpenMode mode, const std::string &source)
+int	writeFileTemp(const char *path, std::size_t offset, enum FileOpenMode mode, const std::string &source)
 {
-	std::ofstream to; 
+	std::fstream to; 
 	std::ifstream from;
 	char buffer[PUT_WRITE_BUFFER_SIZE];
 
@@ -124,7 +148,21 @@ int	writeFileTemp(const char *path, int offset, enum FileOpenMode mode, const st
 
 	// Skip to offset when required
 	if (mode > APPEND)
-		to.seekp(offset);
+	{
+		to.seekg(0, std::ios::end);
+		std::size_t fileLength = to.tellg();
+		if (offset <= fileLength)
+			to.seekp(offset, std::ios::beg);
+		else
+			to.seekp(fileLength, std::ios::beg);
+	}
+
+	// Extra check in case seeking caused error
+	if (!to.good())
+	{
+		to.close();
+		return (HTTP_INV_SERVER_ERR);
+	}
 
 	// While the <from> streams badbit and failbit are both set (stream still has data)
 	while (from)
@@ -164,9 +202,15 @@ int	writeFileTemp(const char *path, int offset, enum FileOpenMode mode, const st
 int decideWrite(const char *path, int offset, enum FileOpenMode mode, HttpRequest &req, RequestContext &ctx)
 {
 	if (ctx.temp_file_used)
+	{
+		std::cout << "Decided to use Temp File for content" << std::endl;
 		return (writeFileTemp(path, offset, mode, ctx.temp_filename));
+	}
 	else
+	{
+		std::cout << "Decided to use body for content" << std::endl;
 		return (writeFilePath(path, offset, mode, req.getBody()));
+	}
 }
 
 /**
@@ -190,13 +234,17 @@ int	PutPatchHandler::handle_put(HttpRequest &req, HttpResponse &res, RequestCont
 {
 	int			status;
 	bool		exists;
+	std::string path_string;
 	
 	(void)res;
 	// Make path for file to put
-	const char *path = req.getPath().c_str();
+	path_string = req.getPath();
+	const char *path = path_string.c_str();
 
+	std::cout << "Target path is [" << path << "]" << std::endl;
 	// Store if the file is new or not, for later
 	exists = access(path, F_OK) + 1;
+	std::cout << "Target file exists: " << exists << std::endl;
 
 	// Create file and write to it
 	status = decideWrite(path, 0, PUT, req, ctx);
@@ -305,6 +353,24 @@ int	applyPatchAppend(HttpRequest &req, RequestContext &ctx)
 }
 
 /**
+ * @brief Overwrite Patch Method
+ * 
+ * Writes given information at a specific offset
+ * Keeps old data before that, overwrites for each character in data
+ * Tries to conserve data after offset
+ * Meaning that if offset = 2, data_len = 4, oldLen = 10
+ * We turn
+ * [10 OLD] => [2 OLD] [4 NEW] [4 OLD]
+ * @param req Request specifying which file and what content
+ * @param ctx Context about Request
+ * @returns Http Exit Code
+ */
+int	applyPatchOverwrite(size_t offset, HttpRequest &req, RequestContext &ctx)
+{
+	return (decideWrite(req.getPath().c_str(), offset, OVERWRITE, req, ctx));
+}
+
+/**
  * @brief Checks which patching method is asked for and calls it
  * @param type Type of patch method
  * @param param Parameters of this type
@@ -312,23 +378,21 @@ int	applyPatchAppend(HttpRequest &req, RequestContext &ctx)
  * @param res Response, which should be prepared
  * @param ctx Context, how the file should be created
  */
-int	applyPatch(const std::string &type, const std::string &param, HttpRequest &req, HttpResponse &res, RequestContext &ctx)
+int	applyPatch(const std::string &type, const std::string &param, HttpRequest &req, RequestContext &ctx)
 {
-	std::string types[1] = {"p_append"};
+	std::string types[2] = {"p_append", "p_overwrite"};
 	size_t	offset;
 	bool	offset_error;
 	int i = 0;
 
 	// unused
 	(void)param;
-	(void)res;
-	(void)offset;
 
 	// Get offset for patching (if error is encountered, keep going with 0 value)
 	offset = Atoi::atoiPatchOffset(req.getHeaders().get(HDR_PATCH_OFFSET).c_str(), offset_error);
 
 	// Get Case we have
-	for (; i < 1; i++)
+	for (; i < 2; i++)
 	{
 		if (types[i] == type)
 			break ;
@@ -339,39 +403,84 @@ int	applyPatch(const std::string &type, const std::string &param, HttpRequest &r
 	{
 		case 0:
 			return (applyPatchAppend(req, ctx));
-		// ...
-		// More methods here
+		case 1:
+			return (applyPatchOverwrite(offset, req, ctx));
 		default:
 			return (HTTP_INV_MEDIA);
 	}
 }
 
 /**
- * @brief Handles a Patch Request
+ * @brief Set the Headers HDR_ACCEPT_PATCH field
+ * @param res HttpResponse, whoose fields to set
+ * @param mime_map Map of all allowed MIME types in the server config
  * 
- * Patch Requests come with a specified method for patching data
- * This can be as simple as appending data to the end of a file
- * or overwriting after a specific offset
- * or inserting data with an offset
- * But it can also be complicated things such as a Json Merger
- * which will require their own JSON Parser
- * For this exercise we will stick with 
- * append, (add the specified data at the end of the target)
- * insert, (adds data at a specific offset, keeping later data) [keep old data]
- * replace, (replaces the content after an offset, removing the old rest) [remove old data]
- * overwrite (replaces the content after an offset, removing data as more is added) [gradual replace old data]
+ * Iterates through all Mime mappings in the ServerConfig,
+ * checks if they are a registered Patch method,
+ * then stores them into a string and sets the Header field to that string
+ */
+void	responseSetAllowed(HttpResponse &res, const std::map<std::string, std::string> &mime_map)
+{
+	std::map<std::string, std::string>::const_iterator it_mime;
+	std::string types[2] = {"application/vnd.webserv.append", "application/vnd.webserv.overwrite"};
+	std::vector<std::string> allowed_list;
+	std::string allowed;
+
+	// For each Mime Map Entry
+	for (it_mime = mime_map.begin(); it_mime != mime_map.end(); it_mime++)
+	{
+		// Store it, if we found an allowed Patch Mime Type
+		if (it_mime->second == types[0] || it_mime->second == types[1])
+			allowed_list.push_back(it_mime->second);
+	}
+
+	// For all the registered allowed methods, make them into a string
+	for (std::vector<std::string>::const_iterator it_alow = allowed_list.begin(); \
+	it_alow != allowed_list.end(); it_alow++)
+	{
+		if (it_alow != allowed_list.begin())
+			allowed += ", ";
+		allowed += *it_alow;
+	}
+	res.headers.set(HDR_ACCEPT_PATCH, allowed);
+}
+
+/**
+ * @brief Handles a Patch Request (augmenting an existing file)
  * @param req Request that specifies the file to overwrite
  * @param res Response, which should be prepared by this function
  * @param ctx Context, how the file should be created
+ * @returns	HTTP_INV_MEDIA (415) if no valid Patch Method was specified in Header
+ * @returns	HTTP_BAD_REQUEST (400) if Path Method is invalidly configured
+ * @returns HTTP_NOT_FOUND (404) if target file is not existant
+ * @returns HTTP_FORBIDDEN (403) if target file cannot be opened, but exists
+ * @returns HTTP_INV_SERVER_ERR (500) if error while writing to file
+ * 
+ * Each Patch Requests must come with a specified method for patching data
+ * This is specified in the Header 
+ * (HDR_CONTENT_TYPE) Content-Type: application/vnd.webserv.<type>
+ * where <type> can be "append" or "overwrite"
+ * This method has to be a ServerConfig-allowed MIME-type
+ * There should also be a Header for an offset, which is used in specific methods like overwrite
+ * (HDR_PATCH_OFFSET) Parse-Offset: <number>
+ * where <number> is the amount of bytes after which we write
+ * 
+ * The Patching will set an Http Exit Codein the response
+ * It will also set a Header in the response:
+ * (HDR_ACCEPT_PATCH) Accept-Patch: application/vnd.webserv.<type>, ...
+ * Where it will give back all allowed patch MIME types in the specified format,
+ * in a comma seperated string
  */
 int	PutPatchHandler::handle_patch(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
-	// ctx.cfg->mime_mapping.find()
 	std::string chosen_mime;
 	std::string type;
 	std::string subtype;
 	std::string parameters;
 	std::string short_type;
+
+	// Set Allowed MIME types for patching in response
+	responseSetAllowed(res, ctx.cfg->mime_mapping);
 
 	// Should have methods specified on how to patch
 	if (!req.getHeaders().keyExists(HDR_CONTENT_TYPE))
@@ -387,11 +496,8 @@ int	PutPatchHandler::handle_patch(HttpRequest &req, HttpResponse &res, RequestCo
 		return (HTTP_INV_MEDIA);
 
 	// Apply whatever method was specified to the file
-	return (applyPatch(short_type, parameters, req, res, ctx));
+	return (applyPatch(short_type, parameters, req, ctx));
 }
-
-// Gets its used methods from HDR_CONTENT_TYPE
-// returns all possible methods supported for that file in Responses Header field HDR_ACCEPT_PATCH
 
 // Patch Notes
 /**
@@ -406,19 +512,6 @@ int	PutPatchHandler::handle_patch(HttpRequest &req, HttpResponse &res, RequestCo
    Accept-Patch = "Accept-Patch" ":" 1#media-type
    example:		Accept-Patch: application/example, text/example
 				Accept-Patch: text/example;charset=utf-8
-
-	Patch methods:
-	JSON PATCH (RFC 6902)
-		MIME: application/json-patch+json
-		Changing json parameters
-	JSON MERGE PATCH (RFC 7386)
-		MIME: application/merge-patch+json
-		Merging and changing json parameters
-	XML Patch / Merge
-		Merger for XML files
-	diff/patch style
-		MIME: text/patch or application/diff
-
 
    Malformed patch document -> 400
    Unsupported patch document -> 415

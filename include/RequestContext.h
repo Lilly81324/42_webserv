@@ -29,7 +29,8 @@ struct RequestContext
 	// bool is_tls;
 
 	RequestContext()
-		: cfg(0), vs(0), loc(0), vs_index(-1), local_port(0) {};
+		: cfg(0), vs(0), loc(0), vs_index(-1), local_port(0), cgi_ext(),
+		upstream_name(), temp_file_used(false), temp_filename() {};
 };
 
 #endif // REQUEST_CONTEXT_H

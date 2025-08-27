@@ -9,6 +9,8 @@
 #define HDR_ACCEPT_ENCODING "Accept-Encoding"
 #define HDR_ACCEPT_LANGUAGE "Accept-Language"
 #define HDR_ACCEPT_CHARSET "Accept-Charset"
+#define HDR_ACCEPT_PATCH "Accept-Patch"
+#define HDR_PATCH_OFFSET "Patch-Offset"
 #define HDR_CONNECTION "Connection"
 #define HDR_CONTENT_LENGTH "Content-Length"
 #define HDR_CONTENT_TYPE "Content-Type"

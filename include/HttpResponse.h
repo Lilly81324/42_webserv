@@ -29,6 +29,7 @@ class HttpResponse
 		Headers headers;
 		CookieJar cookies;
 		vector<char> body;
+		int	exit_code;
 
 		HttpResponse();
 		~HttpResponse();

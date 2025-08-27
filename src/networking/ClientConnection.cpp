@@ -664,6 +664,8 @@ void ClientConnection::writeParsedBytesToBodyFile()
  */
 bool ClientConnection::processIncoming()
 {
+	(void)this->parseOffset;
+	(void)this->bytesErased;
 	if (this->state != READ_HEADERS)
 		return false;
 	// TODO: parse method/target/Host from inBuffer. For now, we rely on HttpRequest

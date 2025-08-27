@@ -486,6 +486,12 @@ static std::string makeErrorResponse()
 }
 // ---- Socket I/O ------------------------------------------------------------
 
+
+void ClientConnection::onReadable()
+{
+	readFromSocket();
+}
+
 void ClientConnection::readFromSocket()
 {
 	if (this->state != READ_HEADERS || !fd)
@@ -649,6 +655,8 @@ void ClientConnection::writeParsedBytesToBodyFile()
 	}
 }
 
+
+
 /**
  * Needs to be extended to HTTP Request parsing later
  * @brief Called after onReadable() has appended bytes
@@ -658,7 +666,6 @@ bool ClientConnection::processIncoming()
 {
 	if (this->state != READ_HEADERS)
 		return false;
-
 	// TODO: parse method/target/Host from inBuffer. For now, we rely on HttpRequest
 	// parser state (req) to determine if a body is expected and whether it's complete.
 
@@ -671,7 +678,6 @@ bool ClientConnection::processIncoming()
 		if (expected == 0 && req.getState() == BODY)
 			return false;
 	}
-
 	if (server && vs_idx >= 0)
 	{
 		bool ok = server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res);
@@ -723,6 +729,7 @@ bool ClientConnection::processIncoming()
 	flow.setWriteLinger(false);
 	changeState(WRITE);
 	resetDeadlineForWrite();
+
 	return true;
 }
 
@@ -775,9 +782,7 @@ void ClientConnection::onWritable()
 	if (outOffset >= total)
 	{
 		if (flow.getWriteLinger())
-		{
 			close();
-		}
 		else
 		{
 			flow.setWriteLinger(true);
@@ -801,9 +806,7 @@ void ClientConnection::onWritable()
 			flow.setReadPaused(false);
 
 		if (outOffset >= total)
-		{
 			flow.setWriteLinger(true);
-		}
 		return;
 	}
 

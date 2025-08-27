@@ -342,7 +342,7 @@ bool ClientConnection::processIncoming()
 
     // ---------- Fallback: if no body was produced, inject "hello" ----------
     // (Needed for integration tests like IPv6 optional request, and for manual runs
-    //  when no VS is resolved / no handler wrote a body.)
+    //  when no VS is resolved / no handler wrote a body.
     if (res.body.empty()) {
         static const char msg[] = "hello";
         res.body.assign(msg, msg + sizeof(msg) - 1);

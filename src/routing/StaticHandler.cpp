@@ -13,7 +13,6 @@ date: 8/10/2025
 #include "HttpResponse.h"
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
-#include "Logger.h"
 
 #include <sys/stat.h>
 #include <dirent.h>
@@ -209,7 +208,7 @@ StaticHandler::~StaticHandler() {}
 // ---------------- main handler --------------------------------------
 // ---------------- main handler --------------------------------------
 // at top of StaticHandler.cpp
-#include "Logger.h" // <-- add this
+
 
 bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {

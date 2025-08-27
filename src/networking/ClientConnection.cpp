@@ -14,13 +14,12 @@ date: 8/10/2025
 
 #include <unistd.h>
 #include <fstream>
-#include <sstream> 
+#include <sstream>
 
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <netinet/in.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -28,19 +27,14 @@ date: 8/10/2025
 #include <vector>
 
 #include <string>
-#include <cstring> 
+#include <cstring>
 
 #include <limits.h>
 
 #include <cstdio>
-
-#include <cstdlib> 
-
-
-
+#include <cstdlib>
 
 /***---------------------------CGI PROCCESSING AND EXECUTION--------------------------- ***/
-
 
 // Parse CGI headers from buf. On success, removes headers from buf,
 // sets status (default 200), and sets content_len (or -1 if unknown).
@@ -162,7 +156,6 @@ bool ClientConnection::beginCgi(const CgiSpec &spec,
 
 	return true; // success, CGI is now active and will be serviced by onReadable/onWritable
 }
-
 
 void ClientConnection::onCgiWritable(int fd)
 {
@@ -323,20 +316,19 @@ void ClientConnection::onCgiReadable(int fd)
 	}
 }
 
-
 /***---------------------------CLIENT CONNECTION HANDLING REQUEST AND RESPONSE---------------------------***/
 
 // Send HTTP/1.1 100 Continue if client sent Expect: 100-continue
 void ClientConnection::handleExpectContinueIfNeeded()
 {
-	if (expectContinue && state == READ_HEADERS && fd) {
+	if (expectContinue && state == READ_HEADERS && fd)
+	{
 		const char *resp = "HTTP/1.1 100 Continue\r\n\r\n";
 		ssize_t n = ::send(fd.get(), resp, std::strlen(resp), MSG_NOSIGNAL);
 		(void)n; // ignore short send, best effort
 		expectContinue = false;
 	}
 }
-
 
 void ClientConnection::onTick()
 {
@@ -391,7 +383,6 @@ void ClientConnection::close()
 	this->state = CLOSE;
 }
 
-
 void ClientConnection::analyzeHeaders(const HttpRequest &request)
 {
 	// If already analyzed, skip work (idempotent).
@@ -415,7 +406,8 @@ void ClientConnection::analyzeHeaders(const HttpRequest &request)
 			size_t len = 0;
 			for (size_t i = 0; i < v.size(); ++i)
 			{
-				if (v[i] < '0' || v[i] > '9') break;
+				if (v[i] < '0' || v[i] > '9')
+					break;
 				len = len * 10 + (v[i] - '0');
 			}
 			expectedContentLength = len;
@@ -427,17 +419,20 @@ void ClientConnection::analyzeHeaders(const HttpRequest &request)
 			for (size_t i = 0; i < v.size(); ++i)
 			{
 				char c = v[i];
-				if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+				if (c >= 'A' && c <= 'Z')
+					c = c - 'A' + 'a';
 				// match substring "chunked"
 				// simple find without allocations
 				size_t rem = v.size() - i;
 				if (rem >= 7 &&
 					(v[i] == 'c' || v[i] == 'C') &&
-					(v[i+1] == 'h' || v[i+1] == 'H'))
+					(v[i + 1] == 'h' || v[i + 1] == 'H'))
 				{
 					// fallback to lowercase search using std::string::find on a lowercased temp;
 					std::string tmp = v;
-					for (size_t j = 0; j < tmp.size(); ++j) if (tmp[j] >= 'A' && tmp[j] <= 'Z') tmp[j] = tmp[j] - 'A' + 'a';
+					for (size_t j = 0; j < tmp.size(); ++j)
+						if (tmp[j] >= 'A' && tmp[j] <= 'Z')
+							tmp[j] = tmp[j] - 'A' + 'a';
 					if (tmp.find("chunked") != std::string::npos)
 					{
 						transferChunked = true;
@@ -451,7 +446,9 @@ void ClientConnection::analyzeHeaders(const HttpRequest &request)
 		{
 			// check for 100-continue case-insensitively
 			std::string tmp = v;
-			for (size_t j = 0; j < tmp.size(); ++j) if (tmp[j] >= 'A' && tmp[j] <= 'Z') tmp[j] = tmp[j] - 'A' + 'a';
+			for (size_t j = 0; j < tmp.size(); ++j)
+				if (tmp[j] >= 'A' && tmp[j] <= 'Z')
+					tmp[j] = tmp[j] - 'A' + 'a';
 			if (tmp.find("100-continue") != std::string::npos)
 				expectContinue = true;
 		}
@@ -459,20 +456,6 @@ void ClientConnection::analyzeHeaders(const HttpRequest &request)
 
 	headersAnalyzed = true;
 }
-
-static int get_local_port(int fd)
-{
-	struct sockaddr_storage ss = sockaddr_storage();
-	socklen_t sl = sizeof(ss);
-	if (::getsockname(fd, (struct sockaddr *)&ss, &sl) != 0)
-		return -1;
-	if (ss.ss_family == AF_INET)
-		return (int)ntohs(((sockaddr_in *)&ss)->sin_port);
-	if (ss.ss_family == AF_INET6)
-		return (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
-	return -1;
-}
-
 
 static std::string makeHelloResponse(bool keepAlive)
 {
@@ -488,138 +471,19 @@ static std::string makeHelloResponse(bool keepAlive)
 	return resp;
 }
 
-/* static std::string makeErrorResponse()
+static std::string makeErrorResponse()
 {
-    const char *body = "Internal Server Error\n";
-    std::string resp;
-    resp.reserve(128);
-    resp += "HTTP/1.1 500 Internal Server Error\r\n";
-    resp += "Content-Length: 22\r\n";
-    resp += "Connection: close\r\n";
-    resp += "Content-Type: text/plain\r\n";
-    resp += "\r\n";
-    resp += body;
-    return resp;
-}*/
-
-static bool headersComplete(const std::vector<char> &buf, HttpRequest &request)
-{
-    if (!request.parse(buf.data(), buf.size()))
-        return false;
-    if (request.getState() <= HEADER || request.getState() == ERROR)
-        return false;
-
-    if (request.getHeaders().keyExists(HDR_CONNECTION))
-    {
-        if (request.keepAlive() || request.getHeaders().get(HDR_CONNECTION) == "keep-alive")
-            request.setKeepAlive(true);
-        else if (request.getHeaders().get(HDR_CONNECTION) == "closed")
-            request.setKeepAlive(false);
-    }
-    return true;
+	const char *body = "Internal Server Error\n";
+	std::string resp;
+	resp.reserve(128);
+	resp += "HTTP/1.1 500 Internal Server Error\r\n";
+	resp += "Content-Length: 22\r\n";
+	resp += "Connection: close\r\n";
+	resp += "Content-Type: text/plain\r\n";
+	resp += "\r\n";
+	resp += body;
+	return resp;
 }
-
-bool ClientConnection::processIncoming()
-{
-    if (state != READ_HEADERS)
-        return false;
-
-    if (!headersComplete(inBuffer, req))
-        return false;
-
-    // Resolve VS (if we have a server)
-    const int local_port = get_local_port(fd.get());
-    vs_idx = -1;
-    if (server && local_port > 0)
-        vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
-
-#ifdef UNIT_TEST
-    // --- Hard guarantee for the unit test: exact header line "Content-Length: 5"
-    {
-        static const char body[] = "hello";
-        std::string head;
-        head.reserve(128);
-        head += "HTTP/1.1 200 OK\r\n";
-        head += "Content-Length: 5\r\n";
-        head += "Connection: close\r\n";
-        head += "Content-Type: text/plain\r\n";
-        head += "\r\n";
-
-        outBuffer.assign(head.begin(), head.end());
-        outBuffer.insert(outBuffer.end(), body, body + sizeof(body) - 1);
-
-        if (!readPaused && outBuffer.size() >= HIGH_WATER)
-            readPaused = true;
-        writeLingerArmed = false;
-        changeState(WRITE);
-        resetDeadlineForWrite();
-        return true;
-    }
-#else
-    // Production path: run the pipeline; if it fails, send a 500.
-    if (server && vs_idx >= 0)
-    {
-        if (!server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res))
-        {
-            static const char body[] = "Internal Server Error\n";
-            std::ostringstream h;
-            h << "HTTP/1.1 500 Internal Server Error\r\n"
-              << "Content-Type: text/plain\r\n"
-              << "Content-Length: " << (unsigned long)(sizeof(body) - 1) << "\r\n"
-              << "Connection: close\r\n\r\n";
-            const std::string head = h.str();
-            outBuffer.assign(head.begin(), head.end());
-            outBuffer.insert(outBuffer.end(), body, body + sizeof(body) - 1);
-            writeLingerArmed = false;
-            changeState(WRITE);
-            resetDeadlineForWrite();
-            return false;
-        }
-    }
-
-    // If a handler didn’t produce a body, keep the legacy hello (for manual runs).
-    if (res.body.empty())
-    {
-        static const char msg[] = "hello";
-        res.body.assign(msg, msg + sizeof(msg) - 1);
-        if (!res.headers.keyExists(HDR_CONTENT_TYPE))
-            res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-    }
-
-    // Serialize HttpResponse -> wire
-    {
-        const std::string ver = res.http_version.empty() ? "HTTP/1.1" : res.http_version;
-        std::ostringstream head;
-        head << ver << " 200 OK\r\n";
-
-        std::ostringstream cl;
-        cl << (unsigned long)res.body.size();
-        res.headers.set(HDR_CONTENT_LENGTH, cl.str());
-        res.bodyLength = res.body.size();
-
-        if (!res.headers.keyExists(HDR_CONTENT_TYPE))
-            res.headers.set(HDR_CONTENT_TYPE, "application/octet-stream");
-        if (!res.headers.keyExists(HDR_CONNECTION))
-            res.headers.set(HDR_CONNECTION, "close");
-
-        const std::string hdrs = res.headers.serialize();
-        head << hdrs;
-
-        const std::string headStr = head.str();
-        outBuffer.assign(headStr.begin(), headStr.end());
-        if (!res.body.empty())
-            outBuffer.insert(outBuffer.end(), res.body.begin(), res.body.end());
-    }
-
-    if (!readPaused && outBuffer.size() >= HIGH_WATER)
-        readPaused = true;
-    writeLingerArmed = false;
-    changeState(WRITE);
-    resetDeadlineForWrite();
-    return true;
-#endif
-}
-
 // ---- Socket I/O ------------------------------------------------------------
 
 void ClientConnection::readFromSocket()
@@ -628,8 +492,10 @@ void ClientConnection::readFromSocket()
 		return;
 	while (true)
 	{
-		if (req.getState() == HEADER || req.getState() == START) {
-			if (req.getTotalBytesRead() >= MAX_INBUFFER) {
+		if (req.getState() == HEADER || req.getState() == START)
+		{
+			if (req.getTotalBytesRead() >= MAX_INBUFFER)
+			{
 				close();
 				return;
 			}
@@ -643,7 +509,7 @@ void ClientConnection::readFromSocket()
 			if (handleRecvPositive(n, buffer))
 				return;
 			inBuffer.clear();
-			if(state == WRITE)
+			if (state == WRITE)
 				return;
 			continue;
 		}
@@ -680,17 +546,13 @@ bool ClientConnection::handleRecvPositive(ssize_t n, char *buffer)
 	// configuration; headersComplete() will mark request properties.
 	if (headersComplete(inBuffer, req))
 	{
-
-		const int local_port = get_local_port(fd.get());
 		vs_idx = -1;
-
 		if (server && local_port > 0)
 			vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
 
 		// Handle Expect: 100-continue if needed
 		handleExpectContinueIfNeeded();
 
-		
 		// Possibly enable file-backed body storage if Content-Length is large
 		if (req.getState() == BODY && !req.isBodyOnDisk())
 			createBodyTempFileIfNeeded();
@@ -750,7 +612,8 @@ void ClientConnection::createBodyTempFileIfNeeded()
 			if (vs_idx >= 0 && static_cast<size_t>(vs_idx) < svs.size())
 			{
 				std::string p = svs[vs_idx].client_body_temp_path;
-				if (!p.empty()) tmpdir = p;
+				if (!p.empty())
+					tmpdir = p;
 			}
 		}
 		// ensure dir exists (best-effort)
@@ -763,8 +626,10 @@ void ClientConnection::createBodyTempFileIfNeeded()
 		if (ofs)
 		{
 			std::vector<char> current = req.getBody();
-			if (!current.empty()) ofs.write(&current[0], current.size());
-			ofs.flush(); ofs.close();
+			if (!current.empty())
+				ofs.write(&current[0], current.size());
+			ofs.flush();
+			ofs.close();
 			req.enableBodyOnDisk(std::string(fname));
 		}
 	}
@@ -784,9 +649,6 @@ void ClientConnection::writeParsedBytesToBodyFile()
 	}
 }
 
-
-
-
 /**
  * Needs to be extended to HTTP Request parsing later
  * @brief Called after onReadable() has appended bytes
@@ -799,7 +661,6 @@ bool ClientConnection::processIncoming()
 
 	// TODO: parse method/target/Host from inBuffer. For now, we rely on HttpRequest
 	// parser state (req) to determine if a body is expected and whether it's complete.
-
 
 	if (req.getState() == BODY)
 	{
@@ -814,15 +675,15 @@ bool ClientConnection::processIncoming()
 	if (server && vs_idx >= 0)
 	{
 		bool ok = server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res);
-			if (!ok)
-			{
-				std::string resp = makeErrorResponse();
-				outBuffer.assign(resp.begin(), resp.end());
-				flow.setWriteLinger(false);
-				changeState(WRITE);
-				resetDeadlineForWrite();
-				return false;
-			}
+		if (!ok)
+		{
+			std::string resp = makeErrorResponse();
+			outBuffer.assign(resp.begin(), resp.end());
+			flow.setWriteLinger(false);
+			changeState(WRITE);
+			resetDeadlineForWrite();
+			return false;
+		}
 
 		// If pipeline populated a response (headers or body), use it. Otherwise fall
 		// back to the simple hello response to preserve previous behavior in tests.
@@ -846,9 +707,9 @@ bool ClientConnection::processIncoming()
 			outBuffer.assign(resp.begin(), resp.end());
 		}
 
-			if (!flow.isReadPaused() && outBuffer.size() >= HIGH_WATER)
-				flow.setReadPaused(true);
-			flow.setWriteLinger(false);
+		if (!flow.isReadPaused() && outBuffer.size() >= HIGH_WATER)
+			flow.setReadPaused(true);
+		flow.setWriteLinger(false);
 		changeState(WRITE);
 		resetDeadlineForWrite();
 		return true;
@@ -865,7 +726,6 @@ bool ClientConnection::processIncoming()
 	return true;
 }
 
-
 bool ClientConnection::headersComplete(const std::vector<char> &buf, HttpRequest &request)
 {
 	if (!request.parse(buf.data(), buf.size()))
@@ -878,7 +738,9 @@ bool ClientConnection::headersComplete(const std::vector<char> &buf, HttpRequest
 	{
 		std::string val = request.getHeaders().get(HDR_CONNECTION);
 		// lowercase
-		for (size_t i = 0; i < val.size(); ++i) if (val[i] >= 'A' && val[i] <= 'Z') val[i] = val[i] - 'A' + 'a';
+		for (size_t i = 0; i < val.size(); ++i)
+			if (val[i] >= 'A' && val[i] <= 'Z')
+				val[i] = val[i] - 'A' + 'a';
 		if (val == "keep-alive")
 			request.setKeepAlive(true);
 		else if (val == "close")
@@ -900,7 +762,6 @@ bool ClientConnection::headersComplete(const std::vector<char> &buf, HttpRequest
 	// processIncoming for now; analyzeHeaders only sets markers for future use.
 	return true;
 }
-
 
 void ClientConnection::onWritable()
 {
@@ -952,6 +813,3 @@ void ClientConnection::onWritable()
 	// hard error
 	close();
 }
-
-
-

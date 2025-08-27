@@ -18,6 +18,7 @@ Date: 8/10/2025
 #include <cstring>
 #include <string>
 #include <sys/socket.h>
+#include <netinet/in.h> // for sockaddr_in, sockaddr_in6, ntohs
 #include "CgiProcess.h"
 #include "UniqueFD.h"
 #include "Router.h"
@@ -94,6 +95,8 @@ class ClientConnection
 		bool expectContinue;
 		bool transferChunked;
 		bool headersAnalyzed;
+		bool readPaused;
+		bool writeLingerArmed;
 
 		// ---- I/O limits ----
 		static const size_t READ_CHUNK = 8192;
@@ -150,15 +153,16 @@ class ClientConnection
 		{
 			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
 			flow = FlowControl(HIGH_WATER, LOW_WATER);
-			struct sockaddr_storage ss = sockaddr_storage();
+			struct sockaddr_storage ss;
 			socklen_t sl = sizeof(ss);
-			local_port = -1;				 
-			if (ss.ss_family == AF_INET)
-			{
-				local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
-			}else if (ss.ss_family == AF_INET6)
-				 local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
-			 
+			local_port = -1;
+			if (getsockname(fd, (struct sockaddr *)&ss, &sl) == 0) {
+				if (ss.ss_family == AF_INET) {
+					local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+				} else if (ss.ss_family == AF_INET6) {
+					local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+				}
+			}
 		}
 
 		explicit ClientConnection(int fd, const Server *srv)
@@ -168,14 +172,16 @@ class ClientConnection
 		{
 			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
 			flow = FlowControl(HIGH_WATER, LOW_WATER);
-			struct sockaddr_storage ss = sockaddr_storage();
+			struct sockaddr_storage ss;
 			socklen_t sl = sizeof(ss);
-			local_port = -1;				 
-			if (ss.ss_family == AF_INET)
-			{
-				local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
-			}else if (ss.ss_family == AF_INET6)
-				 local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+			local_port = -1;
+			if (getsockname(fd, (struct sockaddr *)&ss, &sl) == 0) {
+				if (ss.ss_family == AF_INET) {
+					local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+				} else if (ss.ss_family == AF_INET6) {
+					local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+				}
+			}
 		}
 
 		~ClientConnection() {}

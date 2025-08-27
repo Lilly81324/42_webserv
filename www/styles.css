@@ -1,0 +1,19 @@
+
+body{
+	text-align: center;
+	padding: 10rem;
+}
+
+.btn{
+	margin-top: 5rem;
+}
+
+.buttons{
+	
+	padding: .5rem 0.8rem;
+	text-decoration: none;
+	background-color: rgb(245, 243, 243);
+	box-shadow: 0.5px 0.5px 1px 1px rgb(196, 195, 195);
+	color: black;
+}
+

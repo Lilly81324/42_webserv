@@ -20,8 +20,7 @@ date: 8/10/2025
 #include <sstream>
 
 bool ServerPipeline::processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res)
-{
-	RequestContext ctx;
+{	RequestContext ctx;
 	ctx.cfg = &cfg;
 	ctx.vs_index = vs_indx;
 	ctx.vs = NULL;

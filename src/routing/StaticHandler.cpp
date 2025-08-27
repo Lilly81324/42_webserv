@@ -216,28 +216,35 @@ StaticHandler::~StaticHandler() {}
 
 bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
+    // Only GET/HEAD; soft-fail others with empty body (serializer always sends 200).
+    const std::string m = req.getMethod();
+    const bool is_head = (m == "HEAD");
+    if (m != "GET" && !is_head) {
+        res.body.clear();
+        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+        res.headers.set(HDR_CONTENT_LENGTH, "0");
+        res.bodyLength = 0;
+        return true;
+    }
+
     // Prefer router/pipeline-computed paths
-    std::string base = !ctx.effective_root.empty()
-                           ? ctx.effective_root
-                           : ((ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root);
+    const std::string base = !ctx.effective_root.empty()
+        ? ctx.effective_root
+        : ((ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root);
 
     std::string rel = !ctx.rel_path.empty() ? ctx.rel_path : req.getPath();
-    if (rel.empty() || rel[0] != '/')
-        rel = "/" + rel;
+    if (rel.empty() || rel[0] != '/') rel = "/" + rel;
 
     std::string fsCandidate = base;
     if (!fsCandidate.empty() && fsCandidate[fsCandidate.size() - 1] == '/')
         fsCandidate.erase(fsCandidate.size() - 1);
     fsCandidate += rel;
 
-    // DEBUG (safe to leave in; it’s a macro)
 #if defined(DEBUG) || defined(UNIT_TEST)
-    LOG_INFO("effective_root=" << base
-                               << " rel_path=" << rel
-                               << " fs=" << fsCandidate);
+    LOG_INFO("effective_root=" << base << " rel_path=" << rel << " fs=" << fsCandidate);
 #endif
 
-    // Canonicalize and enforce no-traversal
+    // Canonicalize and block traversal
     std::string canonRoot, canonPath;
     if (!realpathString(base, canonRoot) ||
         !realpathString(fsCandidate, canonPath) ||
@@ -251,8 +258,8 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
     }
 
     struct stat st;
-    if (::stat(canonPath.c_str(), &st) != 0)
-    {
+    if (::stat(canonPath.c_str(), &st) != 0) {
+        // Not found -> empty (serializer sends 200 in this project)
         res.body.clear();
         res.headers.set(HDR_CONTENT_TYPE, "text/plain");
         res.headers.set(HDR_CONTENT_LENGTH, "0");
@@ -260,55 +267,55 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         return true;
     }
 
-    if (S_ISDIR(st.st_mode))
-    {
+    if (S_ISDIR(st.st_mode)) {
+        // Try index files: location first, then server
         std::vector<std::string> idx;
-        if (ctx.loc)
-            idx.insert(idx.end(), ctx.loc->index_files.begin(), ctx.loc->index_files.end());
-        if (idx.empty() && ctx.vs)
-            idx = ctx.vs->index_files;
+        if (ctx.loc) idx.insert(idx.end(), ctx.loc->index_files.begin(), ctx.loc->index_files.end());
+        if (idx.empty() && ctx.vs) idx = ctx.vs->index_files;
 
-        for (size_t i = 0; i < idx.size(); ++i)
-        {
+        for (size_t i = 0; i < idx.size(); ++i) {
             std::string candidate = canonPath;
             if (candidate.empty() || candidate[candidate.size() - 1] != '/')
                 candidate += "/";
             candidate += idx[i];
 
             struct stat st2;
-            if (::stat(candidate.c_str(), &st2) == 0 && S_ISREG(st2.st_mode))
-            {
+            if (::stat(candidate.c_str(), &st2) == 0 && S_ISREG(st2.st_mode)) {
+                std::vector<char> file;
+                (void)readWholeFile(candidate, file);
+
                 res.body.clear();
-                (void)readWholeFile(candidate, res.body);
+                if (!is_head) res.body.assign(file.begin(), file.end());
 
                 res.headers.set(HDR_CONTENT_TYPE, guessMime(candidate, ctx.cfg));
                 res.headers.set(HDR_ETAG, makeEtag(st2));
 
-                std::ostringstream cl;
-                cl << (unsigned long)res.body.size();
+                std::ostringstream cl; cl << (unsigned long)file.size();
                 res.headers.set(HDR_CONTENT_LENGTH, cl.str());
-                res.bodyLength = res.body.size();
+                res.bodyLength = file.size();
                 return true;
             }
         }
 
+        // Autoindex if enabled
         const bool autoindex = (ctx.loc ? ctx.loc->autoindex : false);
-        if (autoindex)
-        {
+        if (autoindex) {
             std::string urlBase = rel;
             if (urlBase.empty() || urlBase[urlBase.size() - 1] != '/')
                 urlBase += "/";
             const std::string html = buildAutoindex(urlBase, canonPath);
 
-            res.body.assign(html.begin(), html.end());
+            res.body.clear();
+            if (!is_head) res.body.assign(html.begin(), html.end());
+
             res.headers.set(HDR_CONTENT_TYPE, "text/html; charset=utf-8");
-            std::ostringstream cl;
-            cl << (unsigned long)res.body.size();
+            std::ostringstream cl; cl << (unsigned long)html.size();
             res.headers.set(HDR_CONTENT_LENGTH, cl.str());
-            res.bodyLength = res.body.size();
+            res.bodyLength = html.size();
             return true;
         }
 
+        // Directory without index and autoindex off -> empty
         res.body.clear();
         res.headers.set(HDR_CONTENT_TYPE, "text/plain");
         res.headers.set(HDR_CONTENT_LENGTH, "0");
@@ -316,26 +323,33 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         return true;
     }
 
-    if (S_ISREG(st.st_mode))
-    {
+    if (S_ISREG(st.st_mode)) {
+        std::vector<char> file;
+        if (!readWholeFile(canonPath, file)) {
+            res.body.clear();
+            res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+            res.headers.set(HDR_CONTENT_LENGTH, "0");
+            res.bodyLength = 0;
+            return true;
+        }
+
         res.body.clear();
-        (void)readWholeFile(canonPath, res.body);
+        if (!is_head) res.body.assign(file.begin(), file.end());
 
         res.headers.set(HDR_CONTENT_TYPE, guessMime(canonPath, ctx.cfg));
         const std::string et = makeEtag(st);
         res.headers.set(HDR_ETAG, et);
 
-        const std::string inm = req.getHeaders().get(HDR_IF_NONE_MATCH);
-        if (!inm.empty() && inm == et)
-            res.body.clear();
+        // NOTE: We do not send 304 here; serializer always emits "200 OK".
+        // If-None-Match handling (304) would require status support in the serializer.
 
-        std::ostringstream cl;
-        cl << (unsigned long)res.body.size();
+        std::ostringstream cl; cl << (unsigned long)file.size();
         res.headers.set(HDR_CONTENT_LENGTH, cl.str());
-        res.bodyLength = res.body.size();
+        res.bodyLength = file.size();
         return true;
     }
 
+    // Not a dir or regular file -> empty
     res.body.clear();
     res.headers.set(HDR_CONTENT_TYPE, "text/plain");
     res.headers.set(HDR_CONTENT_LENGTH, "0");

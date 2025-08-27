@@ -40,7 +40,7 @@ CXXFLAGS_98 := -Wall -Wextra -Werror -std=c++98 -MMD -MP -g -pipe $(PCHFLAG)
 CXXFLAGS_14 := -std=c++14 -MMD -MP -pthread -pipe $(PCHFLAG) -g
 CFLAGS_C    := -Wall -Wextra -Werror -std=c99   -MMD -MP -g -pipe
 
-INCS      := -I$(INC_DIR) -I$(INC_DIR)/CGI -I$(INC_DIR)/Config -I$(INC_DIR)/CoreLayer -I$(INC_DIR)/HttpLayer -I$(INC_DIR)/NetworkLayer -I$(INC_DIR)/Routing -I$(INC_DIR)/Utils
+INCS      := -I$(INC_DIR)
 TEST_INCS := -I$(TESTS_INC_DIR) $(INCS) -I$(CATCH2_DIR)
 
 TESTFLAGS := --reporter console --durations yes

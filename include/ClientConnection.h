@@ -98,7 +98,7 @@ class ClientConnection
 		// ---- I/O limits ----
 		static const size_t READ_CHUNK = 8192;
 		static const size_t MAX_INBUFFER = (1u << 20);
-
+		int local_port;
 		// helpers
 		static u_int64_t nowMs();
 
@@ -150,6 +150,15 @@ class ClientConnection
 		{
 			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
 			flow = FlowControl(HIGH_WATER, LOW_WATER);
+			struct sockaddr_storage ss = sockaddr_storage();
+			socklen_t sl = sizeof(ss);
+			local_port = -1;				 
+			if (ss.ss_family == AF_INET)
+			{
+				local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+			}else if (ss.ss_family == AF_INET6)
+				 local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+			 
 		}
 
 		explicit ClientConnection(int fd, const Server *srv)
@@ -159,6 +168,14 @@ class ClientConnection
 		{
 			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
 			flow = FlowControl(HIGH_WATER, LOW_WATER);
+			struct sockaddr_storage ss = sockaddr_storage();
+			socklen_t sl = sizeof(ss);
+			local_port = -1;				 
+			if (ss.ss_family == AF_INET)
+			{
+				local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+			}else if (ss.ss_family == AF_INET6)
+				 local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
 		}
 
 		~ClientConnection() {}

@@ -460,6 +460,18 @@ void ClientConnection::analyzeHeaders(const HttpRequest &request)
 	headersAnalyzed = true;
 }
 
+static int get_local_port(int fd)
+{
+	struct sockaddr_storage ss = sockaddr_storage();
+	socklen_t sl = sizeof(ss);
+	if (::getsockname(fd, (struct sockaddr *)&ss, &sl) != 0)
+		return -1;
+	if (ss.ss_family == AF_INET)
+		return (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+	if (ss.ss_family == AF_INET6)
+		return (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+	return -1;
+}
 
 
 static std::string makeHelloResponse(bool keepAlive)

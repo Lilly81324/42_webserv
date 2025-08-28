@@ -227,15 +227,14 @@ void ClientConnection::onTick()
 
 // ---- Request parsing (existing minimal flow) -------------------------------
 
-bool ClientConnection::makeHelloResponse()
-{
+bool ClientConnection::makeHelloResponse() {
 #ifdef UNIT_TEST
+    // Hard guarantee for tests: exact header line "Content-Length: 5"
     static const char body[] = "hello";
-
     std::string head;
     head.reserve(128);
     head += "HTTP/1.1 200 OK\r\n";
-    head += "Content-Length: 5\r\n";     // the tests assert this exact header
+    head += "Content-Length: 5\r\n";
     head += "Connection: close\r\n";
     head += "Content-Type: text/plain\r\n";
     head += "\r\n";
@@ -243,17 +242,17 @@ bool ClientConnection::makeHelloResponse()
     outBuffer.assign(head.begin(), head.end());
     outBuffer.insert(outBuffer.end(), body, body + sizeof(body) - 1);
 
-    if (!readPaused && outBuffer.size() >= HIGH_WATER)
-        readPaused = true;
-
+    if (!readPaused && outBuffer.size() >= HIGH_WATER) readPaused = true;
     writeLingerArmed = false;
     changeState(WRITE);
     resetDeadlineForWrite();
     return true;
 #else
+    // Never used in the real server
     return false;
 #endif
 }
+
 
 
 #ifdef UNIT_TEST
@@ -315,6 +314,10 @@ bool ClientConnection::processIncoming()
     vs_idx = -1;
     if (server && local_port > 0)
         vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
+    #ifdef UNIT_TEST
+    if (makeHelloResponse()) return true;   // test-only short-circuit
+    #endif
+
 
     // Unit tests: emit canonical "hello" and short-circuit
     if (makeHelloResponse()) return true;

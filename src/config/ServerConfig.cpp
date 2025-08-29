@@ -1,4 +1,5 @@
 #include "ServerConfig.h"
+#include "HTTPCODES.h"
 
 #include <fstream>
 #include <sstream>
@@ -29,8 +30,7 @@ static bool parseUnsigned(const std::string &s, int &out)
 static void validateErrorStatusOrThrow(const std::string &raw)
 {
     int code = -1;
-    if (!parseUnsigned(raw, code) || code < 400 || code > 599)
-    {
+    if (!parseUnsigned(raw, code) || code < HTTP_BAD_REQUEST || code > HTTP_SERVER_ERROR) {
         std::ostringstream oss;
         oss << "invalid error_page status code: '" << raw << "'";
         throw std::runtime_error(oss.str());

@@ -14,13 +14,7 @@ Date: 8/10/2025
 # include "Headers.h"
 # include "CookieJar.h"
 # include "Atoi.h"
-
-# ifndef ERR_HTTP_BAD_REQUEST
-#  define ERR_HTTP_BAD_REQUEST 400
-# endif
-# ifndef ERR_HTTP_HEADER_LIMIT
-#  define ERR_HTTP_HEADER_LIMIT 431
-# endif
+# include "HTTPCODES.h"
 
 using namespace std;
 

@@ -2,6 +2,7 @@
 #include "RouteResolver.h"
 #include "ServerConfig.h"
 #include "VirtualServer.h"
+#include "HTTPCODES.h"
 #include <map>
 #include <string>
 
@@ -176,7 +177,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	if (!isValidVSIndex(cfg, vs_idx))
 	{
 		out.kind = RouteDecision::HK_ERROR;
-		out.status = 400;
+		out.status = HTTP_BAD_REQUEST;
 		out.vs = 0;
 		out.loc = 0;
 		return;
@@ -237,7 +238,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	if (!isMethodAllowed(L, method))
 	{
 		out.kind = RouteDecision::HK_ERROR;
-		out.status = 405;
+		out.status = HTTP_METHOD_FORBIDDEN;
 		return;
 	}
 
@@ -245,13 +246,13 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	if ((method == "PUT" || method == "PATCH") && !isPutPatchAllowed(L, method))
 	{
 		out.kind = RouteDecision::HK_ERROR;
-		out.status = 405;
+		out.status = HTTP_METHOD_FORBIDDEN;
 		return;
 	}
 	if ((method == "PUT" || method == "PATCH") && isPutPatchAllowed(L, method))
 	{
 		out.kind = RouteDecision::HK_PUTPATCH;
-		out.status = 200;
+		out.status = HTTP_OK;
 		return;
 	}
 
@@ -260,7 +261,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	{
 		out.kind = RouteDecision::HK_PROXY;
 		out.upstream_name = L->proxy_name;
-		out.status = 200;
+		out.status = HTTP_OK;
 		return;
 	}
 
@@ -270,7 +271,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	{
 		out.kind = RouteDecision::HK_CGI;
 		out.cgi_ext = ext;
-		out.status = 200;
+		out.status = HTTP_OK;
 		return;
 	}
 
@@ -278,13 +279,13 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	if (L)
 	{
 		out.kind = RouteDecision::HK_STATIC;
-		out.status = 200;
+		out.status = HTTP_OK;
 		return;
 	}
 	else
 	{
 		out.kind = RouteDecision::HK_STATIC;
-		out.status = 200;
+		out.status = HTTP_OK;
 		return;
 	}
 }

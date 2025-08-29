@@ -59,7 +59,6 @@ public:
 						  const std::string &method,
 						  const std::string &uri,
 						  RouteDecision &out);
-	static void selectVirtualServer()
 
 private:
 	Router();

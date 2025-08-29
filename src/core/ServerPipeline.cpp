@@ -16,10 +16,21 @@ date: 8/10/2025
 #include "CgiHandler.h"
 #include "PutPatchHandler.h"
 #include "RequestContext.h"
+#include "ResponseFactory.h"
 #include <sys/stat.h>
 #include <sstream>
 
-bool ServerPipeline::processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res)
+// C++98: helper to uppercase a method cheaply
+static std::string upcase(const std::string &s)
+{
+	std::string r(s);
+	for (size_t i = 0; i < r.size(); ++i)
+		if (r[i] >= 'a' && r[i] <= 'z')
+			r[i] = r[i] - 'a' + 'A';
+	return r;
+}
+
+bool ServerPipeline::processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res , RouteDecision &decision)
 {
 	RequestContext ctx;
 	ctx.cfg = &cfg;
@@ -34,181 +45,129 @@ bool ServerPipeline::processRequest(const ServerConfig &cfg, int vs_indx, HttpRe
 		return false;
 	}
 
-	RouteDecision decision;
-	Router::makeDecisionForVS(cfg, vs_indx, req.getMethod(), req.getPath(), decision);
-
-	if (decision.kind == RouteDecision::HK_ERROR)
+	// Pick the handler
+	Handler *h = 0;
+	switch (decision.kind)
+	{
+	case RouteDecision::HK_STATIC:
+		h = new StaticHandler();
+		break;
+	case RouteDecision::HK_CGI:
+		h = new CgiHandler();
+		break;
+	case RouteDecision::HK_PROXY:
+		h = new ProxyHandler();
+		break;
+	case RouteDecision::HK_PUTPATCH:
+		h = new PutPatchHandler();
+		break;
+	case RouteDecision::HK_ERROR:
 		return false;
-	// 405 Method Not Allowed (use decision.allowed_methods if you surface it; otherwise leave as-is)
-	if (decision.status == 405)
-	{ // your Router sets HK_ERROR/status for deny; if not, skip this
-		res.status = 405;
-		res.reason = "Method Not Allowed";
-		// If you keep an Allow string somewhere, set it here:
-		// res.headers.set("Allow", decision.allow_header);
-		// Minimal body (optional)
-		const std::string body = "Method Not Allowed";
-		res.body.assign(body.begin(), body.end());
+		break;
+	default:
+		// setError(res, dec.status, toReason(dec.status));
 		return true;
 	}
+
+	const bool done = h->handle(req, res, ctx); // true => response complete
+	delete h;
+	return done;
+}
+
+
+PipelineAction ServerPipeline::policyGate(const ServerConfig &cfg, int vs_index, HttpRequest &req, RouteDecision &decision, HttpResponse &res)
+{
+
+	Router::makeDecisionForVS(cfg, vs_index, req.getMethod(), req.getPath(), decision);
+	if (decision.kind == RouteDecision::HK_ERROR)
+	{
+		res = ResponseFactory::makeError(500, "Internal Server Error");
+		return PIPE_ERR_SENT;
+	}
+
+	// 1) HTTP/1.1 Host requirement (do it here so ClientConnection stays lean)
 	const Headers &H = req.getHeaders();
-	// Body policy
+	if (!H.keyExists(HDR_HOST))
+	{
+		res = ResponseFactory::makeError(400, "Bad Request", /*close*/ true);
+		return PIPE_ERR_SENT;
+	}
+
+	// 2) Method policy (if your Router surfaces 405 via decision.status, prefer that)
+	if (decision.status == 405)
+	{
+		res = ResponseFactory::makeError(405, "Method Not Allowed", /*close*/ true);
+		// Optional: if you have a prebuilt Allow header string:
+		// res.headers.set("Allow", decision.allow_header);
+		return PIPE_ERR_SENT;
+	}
+
+	// 3) Body policy (early, cheap)
 	const bool hasCL = H.keyExists(HDR_CONTENT_LENGTH);
 	const bool hasTE = H.keyExists(HDR_TRANSFER_ENCODING);
+
 	bool chunked = false;
 	if (hasTE)
 	{
 		std::string v = H.get(HDR_TRANSFER_ENCODING);
 		for (size_t i = 0; i < v.size(); ++i)
 			if (v[i] >= 'A' && v[i] <= 'Z')
-				v[i] = v[i] - 'A' + 'a';
+				v[i] += 32;
 		chunked = (v.find("chunked") != std::string::npos);
 	}
 
-	// Conflict: both CL and chunked
 	if (hasCL && chunked)
 	{
-		res.status = 400;
-		res.reason = "Bad Request";
-		const std::string body = "Bad Request";
-		res.body.assign(body.begin(), body.end());
-		return true;
+		res = ResponseFactory::makeError(400, "Bad Request", /*close*/ true);
+		return PIPE_ERR_SENT;
 	}
 
-	// Methods that require a body (adjust if you need)
-	std::string m = req.getMethod();
-	for (size_t i = 0; i < m.size(); ++i)
-		if (m[i] >= 'a' && m[i] <= 'z')
-			m[i] = m[i] - 'a' + 'A';
+	const std::string m = upcase(req.getMethod());
 	const bool needs_body = (m == "POST" || m == "PUT" || m == "PATCH");
 
-	// 411 Length Required
 	if (needs_body && !hasCL && !chunked)
 	{
-		res.status = 411;
-		res.reason = "Length Required";
-		const std::string body = "Length Required";
-		res.body.assign(body.begin(), body.end());
-		return true;
+		res = ResponseFactory::makeError(411, "Length Required", /*close*/ true);
+		return PIPE_ERR_SENT;
 	}
 
-	// Early 413 on declared Content-Length
-	size_t cl = 0;
 	if (hasCL)
 	{
-		std::string s = H.get(HDR_CONTENT_LENGTH);
-		// strict digits parse
+		// parse CL strictly
+		size_t cl = 0;
+		const std::string s = H.get(HDR_CONTENT_LENGTH);
+		if (s.empty())
+		{
+			res = ResponseFactory::makeError(400, "Bad Request", /*close*/ true);
+			return PIPE_ERR_SENT;
+		}
 		for (size_t i = 0; i < s.size(); ++i)
 		{
-			char c = s[i];
+			const char c = s[i];
 			if (c < '0' || c > '9')
 			{
-				res.status = 400;
-				res.reason = "Bad Request";
-				return true;
+				res = ResponseFactory::makeError(400, "Bad Request", /*close*/ true);
+				return PIPE_ERR_SENT;
 			}
 			cl = cl * 10 + (c - '0');
 		}
-		// location limit else server limit
-		size_t locLimit = (decision.loc) ? decision.loc->write_conf.max_body_bytes : 0;
-		size_t srvLimit = (decision.vs) ? decision.vs->client_max_body_size : 0;
-		size_t limit = (locLimit > 0) ? locLimit : srvLimit;
+
+		// Prefer location limit, else server limit (your fields)
+		const size_t locLimit = (decision.loc) ? decision.loc->write_conf.max_body_bytes : 0;
+		const size_t srvLimit = (decision.vs) ? decision.vs->client_max_body_size : 0;
+		const size_t limit = (locLimit > 0) ? locLimit : srvLimit;
 
 		if (limit > 0 && cl > limit)
 		{
-			res.status = 413;
-			res.reason = "Payload Too Large";
-			const std::string body = "Payload Too Large";
-			res.body.assign(body.begin(), body.end());
-			// You may also add: res.headers.set("Connection","close");
-			return true; // early reject (don’t read body)
+			res = ResponseFactory::makeError(413, "Payload Too Large", /*close*/ true);
+			return PIPE_ERR_SENT; // do NOT read body
 		}
-
-		ctx.loc = decision.loc;
-		ctx.cgi_ext = decision.cgi_ext;
-		ctx.upstream_name = decision.upstream_name;
-		if (decision.vs)
-			ctx.vs = decision.vs; // Router may refine VS
-
-		ctx.rel_path = decision.rel_path;
-		ctx.effective_root = decision.effective_root;
-
-		// HK_RETURN: immediate response
-		if (decision.kind == RouteDecision::HK_RETURN)
-		{
-			// If redirect-like status, set Location header; otherwise put target in body
-			if (!decision.return_target.empty())
-			{
-				if (decision.status >= 300 && decision.status < 400)
-					ctx.cfg->servers()[vs_indx].locations; // no-op to avoid unused warning
-			}
-			// build a simple body containing the return_target (or empty)
-			std::string body = decision.return_target;
-			res.body.assign(body.begin(), body.end());
-			res.bodyLength = res.body.size();
-			std::ostringstream oss;
-			oss << res.bodyLength;
-			res.headers.set(std::string("Content-Length"), oss.str());
-			if (decision.status >= 300 && decision.status < 400 && !decision.return_target.empty())
-				res.headers.set(std::string("Location"), decision.return_target);
-			return true;
-		}
-		// Evaluate try_files tokens if present
-		if (!decision.try_files.empty())
-		{
-			for (std::vector<std::string>::const_iterator it = decision.try_files.begin(); it != decision.try_files.end(); ++it)
-			{
-				std::string token = *it;
-				std::string candidate;
-				if (token == std::string("$uri"))
-					candidate = ctx.effective_root + ctx.rel_path;
-				else if (!token.empty() && token[0] == '/')
-					candidate = ctx.effective_root + token;
-				else
-					candidate = ctx.effective_root + token; // relative token
-
-				struct stat st;
-				if (stat(candidate.c_str(), &st) == 0)
-				{
-					// Found a matching file — rewrite rel_path to candidate-relative and dispatch static
-					if (candidate.find(ctx.effective_root) == 0)
-					{
-						ctx.rel_path = candidate.substr(ctx.effective_root.size());
-						if (ctx.rel_path.empty() || ctx.rel_path[0] != '/')
-							ctx.rel_path = std::string("/") + ctx.rel_path;
-					}
-					decision.kind = RouteDecision::HK_STATIC;
-					break;
-				}
-			}
-		}
-
-		// Pick the handler
-		Handler *h = 0;
-		switch (decision.kind)
-		{
-		case RouteDecision::HK_STATIC:
-			h = new StaticHandler();
-			break;
-		case RouteDecision::HK_CGI:
-			h = new CgiHandler();
-			break;
-		case RouteDecision::HK_PROXY:
-			h = new ProxyHandler();
-			break;
-		case RouteDecision::HK_PUTPATCH:
-			h = new PutPatchHandler();
-			break;
-		case RouteDecision::HK_ERROR:
-			return false;
-			break;
-		default:
-			// setError(res, dec.status, toReason(dec.status));
-			return true;
-		}
-
-		const bool done = h->handle(req, res, ctx); // true => response complete
-		delete h;
-		return done;
 	}
+
+	// 4) Decide the next step for the connection
+	if (!needs_body || (!hasCL && !chunked))
+	{
+		return PIPE_HANDLE_NOW; // e.g., GET/HEAD or POST without body
+	}
+	return PIPE_READ_BODY; // stream the body next
 }

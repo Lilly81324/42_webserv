@@ -29,6 +29,7 @@ Date: 8/10/2025
 
 class Server;
 class RequestContext;
+struct RouterDecision;
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -42,7 +43,8 @@ enum State
 {
 	READ_HEADERS,
 	READ_BODY,
-	BODY_COMPLETE,
+	HANDLE_REQUEST,
+	SENDING_RESPONSE,
 	WRITE,
 	CLOSE,
 };
@@ -67,9 +69,9 @@ class ClientConnection
 		UniqueFD fd;
 		std::vector<char> inBuffer;
 		std::vector<char> outBuffer;
-		size_t parseOffset;
+		bool decisionValid;
 		size_t outOffset;
-		size_t bytesErased;
+		size_t bodyReceived;
 		const Server *server;
 		int vs_idx;
 
@@ -96,6 +98,10 @@ class ClientConnection
 		bool readPaused;
 		bool writeLingerArmed;
 
+		RouteDecision cache;
+		size_t maxBodyLimit_;
+		
+
 		// ---- I/O limits ----
 		static const size_t READ_CHUNK = 8192;
 		static const size_t MAX_INBUFFER = (1u << 20);
@@ -117,10 +123,29 @@ class ClientConnection
 		inline bool expired() const { return phaseDeadline.expired(nowMs()); }
 
 		void readFromSocket();
-		bool processIncoming();
 		bool headersComplete(const std::vector<char> &buf, HttpRequest &request);
 		void analyzeHeaders(const HttpRequest &request);
-		void handleExpectContinueIfNeeded();
+		void handleExpectContinueIfNeeded();// ---- Queue helpers (centralize serialization & state switch) ----
+		void queueResponseKeepAlive(const HttpResponse &r);
+		void queueResponseClose(const HttpResponse &r);
+		
+		// Overloads that build with ResponseFactory (quick one-liners)
+		void send_keepalive(const HttpResponse &r);                    // existing? keep signature
+		void send_and_close(const HttpResponse &r);                    // existing? keep signature
+		void send_keepalive(int code, const std::string &reason);      // new
+		void send_keepalive(int code);                                 // new (auto reason)
+		void send_and_close(int code, const std::string &reason);      // new
+		void send_and_close(int code);                                 // new (auto reason)
+		void send_and_close_413();                                     // new micro helper
+		
+		// ---- Decision / limits helpers ----
+		void cacheDecisionAndLimits(const RouteDecision &d);
+		size_t effectiveLimitFromDecision(const RouteDecision &d) const;
+		
+		// ---- Small util (status → wire) ----
+		void serializeToOutBuffer(const HttpResponse &r);
+		void resetResponse();
+
 
 	public:
 		static const int HDR_TIMEOUT_MS = 10000;
@@ -145,7 +170,7 @@ class ClientConnection
 		bool wantsWriteLinger() const { return flow.getWriteLinger(); }
 
 		explicit ClientConnection(int fd_)
-			: state(READ_HEADERS), fd(fd_), inBuffer(), outBuffer(), parseOffset(0), outOffset(0), bytesErased(0), server(0), vs_idx(-1),
+			: state(READ_HEADERS), fd(fd_), inBuffer(), outBuffer(), decisionValid(true), outOffset(0), bodyReceived(0), server(0), vs_idx(-1),
 			phaseDeadline(), flow(), req(), res(), bodyMode(BM_NONE), expectedContentLength(0), expectContinue(false), transferChunked(false), headersAnalyzed(false),
 			proc(), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1), cgi_body_off(0), cgi_buf(), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1), cgi_deadline(0ULL)
 		{
@@ -164,7 +189,7 @@ class ClientConnection
 		}
 
 		explicit ClientConnection(int fd, const Server *srv)
-			: state(READ_HEADERS), fd(fd), inBuffer(), outBuffer(), parseOffset(0), outOffset(0), bytesErased(0), server(srv), vs_idx(-1),
+			: state(READ_HEADERS), fd(fd), inBuffer(), outBuffer(), decisionValid(true), outOffset(0), bodyReceived(0), server(srv), vs_idx(-1),
 			phaseDeadline(), flow(), req(), res(), bodyMode(BM_NONE), expectedContentLength(0), expectContinue(false), transferChunked(false), headersAnalyzed(false),
 			proc(), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1), cgi_body_off(0), cgi_buf(), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1), cgi_deadline(0ULL)
 		{
@@ -206,21 +231,16 @@ class ClientConnection
 
 		void onCgiReadable(int fd);
 		void onCgiWritable(int fd);
-		bool send_keepalive(const HttpResponse &r);
-		bool send_and_close(const HttpResponse &r);
+
 
 	#ifdef UNIT_TEST
 	public:
 		std::vector<char> &getInBuffer() { return inBuffer; }
 		std::vector<char> &getOutBuffer() { return outBuffer; }
-		size_t &getParseOffset() { return parseOffset; }
+		size_t &getdecisionValid() { return decisionValid; }
 		void setState(State state) { this->state = state; }
-		bool processIncoming(std::string ok)
-		{
-			(void)ok;
-			return this->processIncoming();
-		}
-		size_t getparseOffset() { return this->parseOffset; }
+
+		size_t getdecisionValid() { return this->decisionValid; }
 	#endif
 };
 

@@ -121,7 +121,6 @@ class ClientConnection
 		bool headersComplete(const std::vector<char> &buf, HttpRequest &request);
 		void analyzeHeaders(const HttpRequest &request);
 		void handleExpectContinueIfNeeded();
-		bool evaluate_request_policy(HttpRequest &req, RequestContext &ctx, HttpResponse &res);
 
 	public:
 		static const int HDR_TIMEOUT_MS = 10000;

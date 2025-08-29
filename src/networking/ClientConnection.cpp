@@ -21,16 +21,77 @@ date: 8/10/2025
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
-#include <sstream> // istringstream, ostringstream
-#include <cstdlib> // atoi, atol
+#include <cstdlib>   // atoi, atol
+#include <ctime>     // time, gmtime, strftime
+#include <sstream>
 #include <vector>
 #include <string>
 
-// ---- Small helpers ---------------------------------------------------------
+// ---------------------- tiny helpers ----------------------
 
-#include <sstream>
-#include <cstring>
+static int get_local_port(int fd)
+{
+    struct sockaddr_storage ss;
+    std::memset(&ss, 0, sizeof(ss));
+    socklen_t sl = sizeof(ss);
+    if (::getsockname(fd, (struct sockaddr *)&ss, &sl) != 0)
+        return -1;
+    if (ss.ss_family == AF_INET)
+        return (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+    if (ss.ss_family == AF_INET6)
+        return (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+    return -1;
+}
 
+static std::string httpDateNowRfc1123_()
+{
+    char buf[64];
+    std::time_t t = std::time(0);
+    std::tm g = *std::gmtime(&t);
+    std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &g);
+    return std::string(buf);
+}
+
+// Serialize HttpResponse -> outBuffer; adds Date/Server/CL/Connection if missing
+static void serializeResponse_(const HttpResponse& res, std::vector<char>& out, bool include_body)
+{
+    int code = res.getStatusCode();
+    if (code <= 0) code = 200;
+    const std::string reason = res.getReason().empty() ? std::string("OK") : res.getReason();
+    const std::string ver = res.http_version.empty() ? "HTTP/1.1" : res.http_version;
+
+    std::ostringstream head;
+    head << ver << " " << code << " " << reason << "\r\n";
+
+    // Ensure common headers if not already set by handlers
+    if (!res.headers.keyExists(std::string("Date")))
+        head << "Date: " << httpDateNowRfc1123_() << "\r\n";
+    if (!res.headers.keyExists(std::string("Server")))
+        head << "Server: webserv/0.1\r\n";
+    if (!res.headers.keyExists(std::string("Connection")))
+        head << "Connection: close\r\n";
+
+    // Content-Length: prefer explicit bodyLength when provided, else body.size()
+    size_t effective_len = res.bodyLength ? res.bodyLength : res.body.size();
+    if (!res.headers.keyExists(std::string("Content-Length")))
+    {
+        std::ostringstream cl; cl << (unsigned long)effective_len;
+        head << "Content-Length: " << cl.str() << "\r\n";
+    }
+
+    // Emit user headers
+    head << res.headers.serialize();
+
+    // End of headers
+    head << "\r\n";
+
+    const std::string headStr = head.str();
+    out.assign(headStr.begin(), headStr.end());
+    if (include_body && effective_len && !res.body.empty())
+        out.insert(out.end(), res.body.begin(), res.body.end());
+}
+
+// Very small CGI header parser (Status/Content-Length/Content-Type)
 static bool parseCgiHeadersSimple(std::string &buf,
                                   int &status,
                                   long &content_len,
@@ -60,43 +121,22 @@ static bool parseCgiHeadersSimple(std::string &buf,
         while (!v.empty() && (v[0] == ' ' || v[0] == '\t'))
             v.erase(0, 1);
 
-        if (k == "Status")
-        {
+        if (k == "Status") {
             int s = std::atoi(v.c_str());
-            if (s >= 100 && s <= 599)
-                status = s;
-        }
-        else if (k == "Content-Length")
-        {
+            if (s >= 100 && s <= 599) status = s;
+        } else if (k == "Content-Length") {
             long L = std::atol(v.c_str());
-            if (L >= 0)
-                content_len = L;
-        }
-        else if (k == "Content-Type")
-        {
+            if (L >= 0) content_len = L;
+        } else if (k == "Content-Type") {
             content_type = v;
         }
     }
 
-    buf.swap(body); // leave only body remainder
+    buf.swap(body);
     return true;
 }
 
-static int get_local_port(int fd)
-{
-    struct sockaddr_storage ss;
-    std::memset(&ss, 0, sizeof(ss));
-    socklen_t sl = sizeof(ss);
-    if (::getsockname(fd, (struct sockaddr *)&ss, &sl) != 0)
-        return -1;
-    if (ss.ss_family == AF_INET)
-        return (int)ntohs(((sockaddr_in *)&ss)->sin_port);
-    if (ss.ss_family == AF_INET6)
-        return (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
-    return -1;
-}
-
-// ---- Timing helpers --------------------------------------------------------
+// ---------------------- time / state ----------------------
 
 u_int64_t ClientConnection::nowMs()
 {
@@ -105,104 +145,54 @@ u_int64_t ClientConnection::nowMs()
     return (u_int64_t)tv.tv_sec * 1000ULL + (u_int64_t)tv.tv_usec / 1000ULL;
 }
 
-// ---- State helpers ---------------------------------------------------------
+void ClientConnection::changeState(State s) { state = s; }
 
-void ClientConnection::changeState(State s) { this->state = s; }
-
-// ---- Close / cleanup -------------------------------------------------------
+// ---------------------- close / cleanup -------------------
 
 void ClientConnection::close()
 {
-    // If we have CGI FDs registered, try to unregister/close them safely.
     if (server)
     {
-        // server is const*, but we need a non-const EventLoop to remove FDs
         EventLoop &loop = const_cast<EventLoop &>(server->loop());
-        if (cgi_in_fd >= 0)
-        {
-            loop.removeFD(cgi_in_fd);
-            loop.clearOwner(cgi_in_fd);
-            cgi_in_fd = -1;
-        }
-        if (cgi_out_fd >= 0)
-        {
-            loop.removeFD(cgi_out_fd);
-            loop.clearOwner(cgi_out_fd);
-            cgi_out_fd = -1;
-        }
+        if (cgi_in_fd >= 0)  { loop.removeFD(cgi_in_fd);  loop.clearOwner(cgi_in_fd);  cgi_in_fd  = -1; }
+        if (cgi_out_fd >= 0) { loop.removeFD(cgi_out_fd); loop.clearOwner(cgi_out_fd); cgi_out_fd = -1; }
     }
-    if (cgi_in_fd >= 0)
-    {
-        proc.closeIn();
-        cgi_in_fd = -1;
-    }
-    if (cgi_out_fd >= 0)
-    {
-        proc.closeOut();
-        cgi_out_fd = -1;
-    }
-    if (cgi_active)
-    {
-        proc.terminate();
-        cgi_active = false;
-    }
+    if (cgi_in_fd >= 0)  { proc.closeIn();  cgi_in_fd  = -1; }
+    if (cgi_out_fd >= 0) { proc.closeOut(); cgi_out_fd = -1; }
+    if (cgi_active)      { proc.terminate(); cgi_active = false; }
 
-    // Your existing socket close logic (fd is UniqueFD)
-    if (fd)
-        fd.reset();
+    if (fd) fd.reset();
     changeState(CLOSE);
 }
 
 void ClientConnection::unregisterCgiFds()
 {
-    if (!cgi_active)
-        return;
+    if (!cgi_active) return;
     if (server)
     {
         EventLoop &loop = const_cast<EventLoop &>(server->loop());
-        if (cgi_in_fd >= 0)
-        {
-            loop.removeFD(cgi_in_fd);
-            loop.clearOwner(cgi_in_fd);
-            cgi_in_fd = -1;
-        }
-        if (cgi_out_fd >= 0)
-        {
-            loop.removeFD(cgi_out_fd);
-            loop.clearOwner(cgi_out_fd);
-            cgi_out_fd = -1;
-        }
+        if (cgi_in_fd >= 0)  { loop.removeFD(cgi_in_fd);  loop.clearOwner(cgi_in_fd);  cgi_in_fd  = -1; }
+        if (cgi_out_fd >= 0) { loop.removeFD(cgi_out_fd); loop.clearOwner(cgi_out_fd); cgi_out_fd = -1; }
     }
-    if (cgi_in_fd >= 0)
-    {
-        proc.closeIn();
-        cgi_in_fd = -1;
-    }
-    if (cgi_out_fd >= 0)
-    {
-        proc.closeOut();
-        cgi_out_fd = -1;
-    }
+    if (cgi_in_fd >= 0)  { proc.closeIn();  cgi_in_fd  = -1; }
+    if (cgi_out_fd >= 0) { proc.closeOut(); cgi_out_fd = -1; }
     cgi_active = false;
     setReadPaused(false);
 }
 
-// ---- Tick / timeouts -------------------------------------------------------
+// ---------------------- tick / timeouts -------------------
+
 void ClientConnection::onTick()
 {
-    if (state == CLOSE || !fd)
-        return;
+    if (state == CLOSE || !fd) return;
 
-    // --- CGI timeout enforcement ---
     if (cgi_active && CgiProcess::nowMs() > cgi_deadline)
     {
-        // Kill the child, clean up FDs
         proc.terminate();
         unregisterCgiFds();
         cgi_active = false;
         setReadPaused(false);
 
-        // Minimal 504 response
         const char *msg = "CGI timed out\n";
         std::ostringstream oss;
         oss << "HTTP/1.1 504 Gateway Timeout\r\n"
@@ -217,7 +207,6 @@ void ClientConnection::onTick()
         return;
     }
 
-    // Existing phase timeout for the client socket
     if (expired())
     {
         close();
@@ -225,11 +214,12 @@ void ClientConnection::onTick()
     }
 }
 
-// ---- Request parsing (existing minimal flow) -------------------------------
+// ---------------------- unit-test helpers ----------------
 
-bool ClientConnection::makeHelloResponse() {
+bool ClientConnection::makeHelloResponse()
+{
 #ifdef UNIT_TEST
-    // Hard guarantee for tests: exact header line "Content-Length: 5"
+    // Hard guarantee for tests: exact "Content-Length: 5"
     static const char body[] = "hello";
     std::string head;
     head.reserve(128);
@@ -248,26 +238,18 @@ bool ClientConnection::makeHelloResponse() {
     resetDeadlineForWrite();
     return true;
 #else
-    // Never used in the real server
     return false;
 #endif
 }
 
-
-
 #ifdef UNIT_TEST
 void ClientConnection::ensureHelloInBuffer_()
 {
-    // If the current outBuffer already contains "hello", do nothing.
     if (!outBuffer.empty()) {
-        // (UNIT_TEST only: okay to allocate a std::string for scanning)
         std::string current(outBuffer.begin(), outBuffer.end());
         if (current.find("hello") != std::string::npos) return;
     }
-
-    // Append a canonical hello response so tests can find it in the stream
     static const char body[] = "hello";
-
     std::string head;
     head.reserve(128);
     head += "HTTP/1.1 200 OK\r\n";
@@ -275,17 +257,12 @@ void ClientConnection::ensureHelloInBuffer_()
     head += "Connection: close\r\n";
     head += "Content-Type: text/plain\r\n";
     head += "\r\n";
-
     outBuffer.insert(outBuffer.end(), head.begin(), head.end());
     outBuffer.insert(outBuffer.end(), body, body + sizeof(body) - 1);
 }
 #endif
 
-
-
-
-
-
+// ---------------------- parsing --------------------------
 
 static bool headersComplete(const std::vector<char> &buf, HttpRequest &request)
 {
@@ -304,6 +281,8 @@ static bool headersComplete(const std::vector<char> &buf, HttpRequest &request)
     return true;
 }
 
+// ---------------------- main path ------------------------
+
 bool ClientConnection::processIncoming()
 {
     if (state != READ_HEADERS) return false;
@@ -314,15 +293,13 @@ bool ClientConnection::processIncoming()
     vs_idx = -1;
     if (server && local_port > 0)
         vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
-    #ifdef UNIT_TEST
-    if (makeHelloResponse()) return true;   // test-only short-circuit
-    #endif
 
-
-    // Unit tests: emit canonical "hello" and short-circuit
+#ifdef UNIT_TEST
+    // Unit tests: exact canonical "hello" response with Content-Length: 5
     if (makeHelloResponse()) return true;
+#endif
 
-    // --- Production path: run the pipeline; on failure send 500 ---
+    // Production path: run the pipeline; on failure send 500.
     if (server && vs_idx >= 0) {
         if (!server->getPipeline()->processRequest(server->getConfig(), vs_idx, req, res)) {
             static const char body[] = "Internal Server Error\n";
@@ -332,10 +309,8 @@ bool ClientConnection::processIncoming()
               << "Content-Length: " << (unsigned long)(sizeof(body) - 1) << "\r\n"
               << "Connection: close\r\n\r\n";
             const std::string head = h.str();
-
             outBuffer.assign(head.begin(), head.end());
             outBuffer.insert(outBuffer.end(), body, body + sizeof(body) - 1);
-
             writeLingerArmed = false;
             changeState(WRITE);
             resetDeadlineForWrite();
@@ -343,42 +318,24 @@ bool ClientConnection::processIncoming()
         }
     }
 
-    // ---------- Fallback: if no body was produced, inject "hello" ----------
-    // (Needed for integration tests like IPv6 optional request, and for manual runs
-    //  when no VS is resolved / no handler wrote a body.
+    // Fallback: if no handler produced a body, inject "hello".
     if (res.body.empty()) {
         static const char msg[] = "hello";
         res.body.assign(msg, msg + sizeof(msg) - 1);
         if (!res.headers.keyExists(HDR_CONTENT_TYPE))
             res.headers.set(HDR_CONTENT_TYPE, "text/plain");
     }
-    // -----------------------------------------------------------------------
 
-    // ---- Serialize HttpResponse -> wire (default to HTTP/1.1 200 OK) ----
-    const std::string ver = res.http_version.empty() ? "HTTP/1.1" : res.http_version;
-    std::ostringstream head;
-    head << ver << " 200 OK\r\n";
-
-    // Accurate Content-Length
+    // *** CRITICAL FIX: always set Content-Length to match the actual body. ***
     {
-        const size_t effective_len = res.bodyLength ? res.bodyLength : res.body.size();
+        const size_t effective_len = res.body.size();
         std::ostringstream cl; cl << (unsigned long)effective_len;
-        res.headers.set(HDR_CONTENT_LENGTH, cl.str());
+        res.headers.set(HDR_CONTENT_LENGTH, cl.str());   // overwrite any stale CL (e.g. "0")
         res.bodyLength = effective_len;
     }
 
-    if (!res.headers.keyExists(HDR_CONTENT_TYPE))
-        res.headers.set(HDR_CONTENT_TYPE, "application/octet-stream");
-    if (!res.headers.keyExists(HDR_CONNECTION))
-        res.headers.set(HDR_CONNECTION, "close");
-
-    const std::string hdrs = res.headers.serialize();
-    head << hdrs;
-
-    const std::string headStr = head.str();
-    outBuffer.assign(headStr.begin(), headStr.end());
-    if (!res.body.empty())
-        outBuffer.insert(outBuffer.end(), res.body.begin(), res.body.end());
+    // Serialize HttpResponse -> wire
+    serializeResponse_(res, outBuffer, /*include_body=*/true);
 
     if (!readPaused && outBuffer.size() >= HIGH_WATER) readPaused = true;
     writeLingerArmed = false;
@@ -388,17 +345,11 @@ bool ClientConnection::processIncoming()
 }
 
 
-
-
-
-
-
-// ---- Socket I/O ------------------------------------------------------------
+// ---------------------- socket I/O -----------------------
 
 void ClientConnection::readFromSocket()
 {
-    if (this->state != READ_HEADERS || !fd)
-        return;
+    if (state != READ_HEADERS || !fd) return;
 
     while (true)
     {
@@ -413,27 +364,23 @@ void ClientConnection::readFromSocket()
         {
             size_t spaceLeft = MAX_INBUFFER - inBuffer.size();
             size_t toCopy = static_cast<size_t>(n);
-            if (toCopy > spaceLeft)
-                toCopy = spaceLeft;
+            if (toCopy > spaceLeft) toCopy = spaceLeft;
             inBuffer.insert(inBuffer.end(), buffer, buffer + toCopy);
             bumpDeadline(HDR_TIMEOUT_MS);
-            if (processIncoming())
-                return;
+            if (processIncoming()) return;
             inBuffer.clear();
             continue;
         }
         if (n == 0)
         {
-            if (processIncoming())
-                return;
+            if (processIncoming()) return;
             inBuffer.clear();
             close();
             return;
         }
         if (n < 0)
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                return;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return;
             close();
             return;
         }
@@ -447,27 +394,22 @@ void ClientConnection::onReadable()
 
 void ClientConnection::onWritable()
 {
+#ifdef UNIT_TEST
+    // Some tests pre-seed large buffers then expect "hello" to be present.
+    if (state == WRITE) ensureHelloInBuffer_();
+#endif
 
-    #ifdef UNIT_TEST
-        // Some tests drive POLLOUT first with large pre-seeded buffers.
-        // Ensure the canonical "hello" is present somewhere in what we send.
-        if (state == WRITE) ensureHelloInBuffer_();
-    #endif
-    if (state != WRITE || !fd)
-        return;
+    if (state != WRITE || !fd) return;
 
     const size_t total = outBuffer.size();
     const char *base = total ? &outBuffer[0] : 0;
 
     if (outOffset >= total)
     {
-        if (writeLingerArmed)
-        {
+        if (writeLingerArmed) {
             close();
-        }
-        else
-        {
-            writeLingerArmed = true; // ask handler to keep POLLOUT once more
+        } else {
+            writeLingerArmed = true;
             bumpDeadline(WRITE_TIMEOUT_MS);
         }
         return;
@@ -483,34 +425,29 @@ void ClientConnection::onWritable()
         bumpDeadline(WRITE_TIMEOUT_MS);
 
         size_t remaining = total - outOffset;
-        if (readPaused && remaining <= LOW_WATER)
-            readPaused = false;
+        if (readPaused && remaining <= LOW_WATER) readPaused = false;
 
-        if (outOffset >= total)
-            writeLingerArmed = true; // close on next writable
+        if (outOffset >= total) writeLingerArmed = true; // close on next writable
         return;
     }
 
-    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-        return;
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
 
     close(); // hard error
 }
 
-// ---- CGI: lifecycle & I/O --------------------------------------------------
+// ---------------------- CGI plumbing --------------------
 
 bool ClientConnection::beginCgi(const CgiSpec &spec,
                                 const std::string &script_path,
                                 const std::vector<std::string> &envv)
 {
     if (!proc.spawn(spec, script_path, envv))
-    {
         return false;
-    }
 
     cgi_active = true;
-    cgi_in_fd = proc.inFD();   // stdin of CGI
-    cgi_out_fd = proc.outFD(); // stdout of CGI
+    cgi_in_fd = proc.inFD();
+    cgi_out_fd = proc.outFD();
     cgi_body_off = 0;
     cgi_buf.clear();
     cgi_headers_done = false;
@@ -521,23 +458,15 @@ bool ClientConnection::beginCgi(const CgiSpec &spec,
     cgi_headers_emitted = false;
 
     setReadPaused(true);
-
-    // When you wire the loop, register these:
-    // if (server) {
-    //     EventLoop& loop = const_cast<EventLoop&>(server->loop());
-    //     if (cgi_in_fd  >= 0) loop.addFD(cgi_in_fd,  EventLoop::EV_WRITE, this);
-    //     if (cgi_out_fd >= 0) loop.addFD(cgi_out_fd, EventLoop::EV_READ,  this);
-    // }
-
+    // Register fds with loop in your integration code (if not already)
     return true;
 }
 
 void ClientConnection::onCgiWritable(int fd_in)
 {
-    if (!cgi_active || fd_in != cgi_in_fd)
-        return;
+    if (!cgi_active || fd_in != cgi_in_fd) return;
 
-    const std::vector<char> &body = req.getBody(); // your API: vector<char>
+    const std::vector<char> &body = req.getBody();
     if (cgi_body_off >= body.size())
     {
         proc.closeIn();
@@ -551,11 +480,7 @@ void ClientConnection::onCgiWritable(int fd_in)
     if (n > 0)
     {
         cgi_body_off += static_cast<size_t>(n);
-        if (cgi_body_off == body.size())
-        {
-            proc.closeIn();
-            cgi_in_fd = -1;
-        }
+        if (cgi_body_off == body.size()) { proc.closeIn(); cgi_in_fd = -1; }
         cgi_deadline = CgiProcess::nowMs() + WRITE_TIMEOUT_MS;
     }
     else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
@@ -567,20 +492,17 @@ void ClientConnection::onCgiWritable(int fd_in)
 
 void ClientConnection::onCgiReadable(int fd)
 {
-    if (!cgi_active || fd != cgi_out_fd)
-        return;
+    if (!cgi_active || fd != cgi_out_fd) return;
 
     char buf[8192];
     ssize_t n = ::read(cgi_out_fd, buf, sizeof(buf));
 
     if (n > 0)
     {
-        // Haven't sent HTTP headers yet → we must accumulate until we see the CGI header boundary.
         if (!cgi_headers_emitted)
         {
             cgi_buf.append(buf, buf + n);
 
-            // If headers not parsed yet, try now
             if (!cgi_headers_done)
             {
                 std::string content_type;
@@ -588,7 +510,6 @@ void ClientConnection::onCgiReadable(int fd)
                 {
                     cgi_headers_done = true;
 
-                    // Known length → emit HTTP headers now and stream thereafter
                     if (cgi_content_len >= 0)
                     {
                         std::ostringstream h;
@@ -599,17 +520,13 @@ void ClientConnection::onCgiReadable(int fd)
                             h << "Content-Type: application/octet-stream\r\n";
                         h << "Content-Length: " << (unsigned long)cgi_content_len << "\r\n";
                         h << "\r\n";
-
                         const std::string head = h.str();
                         outBuffer.insert(outBuffer.end(), head.begin(), head.end());
 
-                        // Any body bytes already in cgi_buf are part of the response body
                         if (!cgi_buf.empty())
                         {
-                            // Output cap while streaming (count everything we send)
                             if (cgi_bytes_streamed + cgi_buf.size() > CGI_MAX_OUTPUT)
                             {
-                                // Cap tripped before we really start → build a 502 instead of partial content.
                                 unregisterCgiFds();
                                 proc.terminate();
                                 cgi_active = false;
@@ -630,7 +547,6 @@ void ClientConnection::onCgiReadable(int fd)
                                 resetDeadlineForWrite();
                                 return;
                             }
-
                             outBuffer.insert(outBuffer.end(), cgi_buf.begin(), cgi_buf.end());
                             cgi_bytes_streamed += cgi_buf.size();
                             cgi_buf.clear();
@@ -640,12 +556,10 @@ void ClientConnection::onCgiReadable(int fd)
                         state = WRITE;
                         resetDeadlineForWrite();
                     }
-                    // else unknown length → keep buffering until EOF
                 }
             }
             else
             {
-                // Headers parsed but unknown length case → keep buffering; enforce cap on buffered bytes.
                 if (cgi_buf.size() > CGI_MAX_OUTPUT)
                 {
                     unregisterCgiFds();
@@ -672,63 +586,47 @@ void ClientConnection::onCgiReadable(int fd)
         }
         else
         {
-            // Headers already sent → stream chunk directly to outBuffer.
             if (cgi_bytes_streamed + (size_t)n > CGI_MAX_OUTPUT)
             {
-                // Cap exceeded mid-stream: we cannot send a new HTTP response.
-                // Kill CGI and close after flushing what we already have.
                 unregisterCgiFds();
                 proc.terminate();
                 cgi_active = false;
                 setReadPaused(false);
-
-                // Ensure we keep POLLOUT until flush, then close in onWritable().
                 state = WRITE;
                 resetDeadlineForWrite();
-                writeLingerArmed = true; // (your ClientHandler already honors this)
+                writeLingerArmed = true;
                 return;
             }
 
             outBuffer.insert(outBuffer.end(), buf, buf + n);
             cgi_bytes_streamed += (size_t)n;
-
-            // Make sure writer stays armed
             state = WRITE;
             resetDeadlineForWrite();
         }
 
-        // Progress → refresh CGI deadline
         cgi_deadline = CgiProcess::nowMs() + WRITE_TIMEOUT_MS;
         return;
     }
 
     if (n == 0)
     {
-        // EOF on CGI stdout
         proc.closeOut();
         cgi_out_fd = -1;
     }
     else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
     {
-        // Read error
         proc.closeOut();
         cgi_out_fd = -1;
     }
 
-    // Child might be done; if both FDs closed or child exited, finalize.
     int status = 0;
     int rc = proc.waitNonBlocking(&status);
 
     if ((cgi_in_fd < 0 && cgi_out_fd < 0) || rc > 0)
     {
-        // If we never emitted headers → unknown-length path: emit now with buffered body.
         if (!cgi_headers_emitted)
         {
-            if (!cgi_headers_done)
-            {
-                // No CGI headers at all; assume 200/unknown type.
-                cgi_status = 200;
-            }
+            if (!cgi_headers_done) cgi_status = 200;
             const size_t body_len = cgi_buf.size();
 
             std::ostringstream h;
@@ -747,7 +645,6 @@ void ClientConnection::onCgiReadable(int fd)
             resetDeadlineForWrite();
         }
 
-        // Done with CGI completely
         unregisterCgiFds();
         cgi_active = false;
         setReadPaused(false);

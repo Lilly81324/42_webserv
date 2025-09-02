@@ -153,7 +153,11 @@ void ClientConnection::parseHeaders()
 	if (avail == 0)
 		return;
 
-	(void)req.parse(buf, avail);
+	if(!req.parse(buf, avail))
+	{
+		if(errno == HTTP_BAD_REQUEST || errno == HTTP_HEADER_TOO_BIG)
+			fail(errno,"");
+	}
 
 	std::size_t used = req.getBytesHandledLast();
 
@@ -408,7 +412,6 @@ void ClientConnection::fail(int code, const char *reason)
 
 	std::ostringstream os;
 	os << res;
-	std::cout << res << std::endl;
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size()); // ChainBuf
 

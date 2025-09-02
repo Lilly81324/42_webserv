@@ -232,7 +232,7 @@ TEST_CASE("Deadline expiry -> write then close", "[conn][timeout]") {
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,10);
 	REQUIRE(conn.getState() == PH_READ_HEADERS);
 
 	// Force deadline to the past

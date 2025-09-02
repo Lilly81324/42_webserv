@@ -35,6 +35,7 @@ bool ServerPipeline::processRequest(const ServerConfig &cfg, int vs_indx, HttpRe
 		// setError(rep, 500, "No virtual server resolved");
 		return false;
 	}
+	ctx.loc = decision.loc;
 
 	// Pick the handler
 	Handler *h = 0;

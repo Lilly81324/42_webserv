@@ -12,21 +12,35 @@ void ClientHandler::onEvent(int fd, short revents)
 	// 1) Socket events and timer ticks drive the HTTP state machine
 	if (fd == clientConnection->fd())
 	{
-		// We don't branch on errno; connection decides using readiness + deadlines.
-		(void)revents; // onTick pulls as needed (read/write) based on phase & backpressure
-		if ((revents & POLLOUT) != 0)
+		Phase prev = clientConnection->getState();
+		clientConnection->onTick(now);
+		if (clientConnection->getState() == PH_CLOSE) return;
+	
+		for (int i = 0; i < PHASE_PUMP_CAP; ++i) {
+			Phase was = clientConnection->getState();
+			if (was == prev) break;   // no phase change → stop
+			prev = was;
 			clientConnection->onTick(now);
-
-		// If readable (or not paused), tick; otherwise we’ll still pump phases below.
-		if ((revents & POLLIN) != 0 || (!clientConnection->getFlow().isReadPaused()))
-			clientConnection->onTick(now);
-
-		// bounded pump
-		for (int steps = 0; steps < PHASE_PUMP_CAP; ++steps)
-		{
-			clientConnection->onTick(now);
-			if (clientConnection->getState() == PH_CLOSE)
-				return;
+			if (clientConnection->getState() == PH_CLOSE) return;
+		}
+	
+		// Compute desired interest mask
+		short ev = 0;
+		if (clientConnection->wantsRead() &&
+			!clientConnection->getFlow().isReadPaused())
+			ev |= POLLIN;
+	
+		if (clientConnection->hasPendingWrite() > 0)
+			ev |= POLLOUT;
+	
+		const int fd = clientConnection->fd(); // use your accessor
+	
+		// First registration vs subsequent updates
+		if (eventLoop.indexOfFD(fd) < 0) {
+			eventLoop.addFD(fd, ev, clientConnection);
+			eventLoop.setOwner(fd, clientConnection);
+		} else {
+			eventLoop.modFD(fd, ev);       // ← keep using this to “steer” interest
 		}
 
 		updateInterests();

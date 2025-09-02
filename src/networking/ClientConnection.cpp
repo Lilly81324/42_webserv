@@ -142,7 +142,9 @@ void ClientConnection::parseHeaders()
 	if (avail == 0)
 		return;
 
-	std::size_t used = req.parse(buf, avail);
+	(void)req.parse(buf, avail);
+
+	std::size_t used = req.getBytesHandledLast();
 
 	if (used > 0)
 	{
@@ -234,7 +236,7 @@ void ClientConnection::runPreflight()
 		fail(411, "Length Required");
 		return;
 	}
-	
+
 	body_bytes_prev = 0;
 	body_no_progress_ticks = 0;
 	flush_no_progress_ticks = 0;
@@ -247,7 +249,8 @@ void ClientConnection::readBody()
 	const char *buf = io.getInputRing().readPtr();
 	const std::size_t avail = io.getInputRing().readAvail();
 
-	if (!body) {
+	if (!body)
+	{
 		fail(400, "Bad Request");
 		return;
 	}
@@ -255,9 +258,11 @@ void ClientConnection::readBody()
 	const std::size_t before = body->bytes_received();
 
 	// 1) Try to consume whatever arrived this tick
-	if (avail != 0) {
+	if (avail != 0)
+	{
 		const std::size_t used = body->consume(buf, avail);
-		if (used > 0) {
+		if (used > 0)
+		{
 			io.getInputRing().consumed(used);
 			dl.reset(0, BODY_TIMEOUT_MS);
 		}
@@ -266,16 +271,20 @@ void ClientConnection::readBody()
 	const std::size_t after = body->bytes_received();
 
 	// 2) Enforce max-body guard (runtime, affects chunked too)
-	if (max_body_bytes && after > max_body_bytes) {
+	if (max_body_bytes && after > max_body_bytes)
+	{
 		fail(413, "Payload Too Large");
 		return; // do not attempt to flush
 	}
 
 	// 3) Progress watchdog for reading (no advance across ticks)
-	if (after == before && avail == 0) {
+	if (after == before && avail == 0)
+	{
 		// nothing new consumed, and no new bytes visible in ring
 		++body_no_progress_ticks;
-	} else {
+	}
+	else
+	{
 		body_no_progress_ticks = 0;
 	}
 	body_bytes_prev = after;
@@ -285,29 +294,37 @@ void ClientConnection::readBody()
 	std::size_t pending_before = 0;
 	std::size_t flushed = 0;
 
-	if (FileBodyReader *fr = dynamic_cast<FileBodyReader*>(body)) {
+	if (FileBodyReader *fr = dynamic_cast<FileBodyReader *>(body))
+	{
 		pending_before = fr->pending_size();
 		if (pending_before)
 			flushed = fr->flush_to_disk(64 * 1024);
-	} else if (ChunkedReader *cr = dynamic_cast<ChunkedReader*>(body)) {
+	}
+	else if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body))
+	{
 		pending_before = cr->pending_size();
 		if (pending_before)
 			flushed = cr->flush_to_disk(64 * 1024);
 	}
 
-	if (pending_before > 0 && flushed == 0) {
+	if (pending_before > 0 && flushed == 0)
+	{
 		++flush_no_progress_ticks;
-	} else {
+	}
+	else
+	{
 		flush_no_progress_ticks = 0;
 	}
 
 	// 5) Stall policies
-	if (body_no_progress_ticks >= BODY_STALL_TICK_LIMIT) {
+	if (body_no_progress_ticks >= BODY_STALL_TICK_LIMIT)
+	{
 		// We’ve been called many times with no read progress → timeout
 		fail(408, "Request Timeout");
 		return;
 	}
-	if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT) {
+	if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT)
+	{
 		// We had bytes staged for disk but couldn’t make any progress
 		// (don’t branch on errno; treat as storage/IO exhaustion class)
 		fail(507, "Insufficient Storage");
@@ -322,7 +339,6 @@ void ClientConnection::readBody()
 	state = PH_ROUTE;
 	dl.reset(0, WR_TIMEOUT_MS);
 }
-
 
 void ClientConnection::routeAndBuild()
 {
@@ -362,6 +378,7 @@ void ClientConnection::finishWriteOrNext()
 		body = 0;
 	}
 	plan = RoutePlan();
+	ctx->reset();
 	route_selected = false;
 
 	state = PH_READ_HEADERS;

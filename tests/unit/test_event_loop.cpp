@@ -3,6 +3,14 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+static void set_nonblock(int fd)
+{
+	int fl = ::fcntl(fd, F_GETFL, 0);
+	REQUIRE(fl >= 0);
+	REQUIRE(::fcntl(fd, F_SETFL, fl | O_NONBLOCK) == 0);
+}
+
+
 TEST_CASE("EventLoop default construction", "[EventLoop]")
 {
 	EventLoop loop;
@@ -95,4 +103,34 @@ TEST_CASE("EventLoop handleEvents returns empty on invalid fd", "[EventLoop][err
 	// Now rfd is invalid, poll should fail and return empty
 	auto events = loop.handleEvents(10);
 	REQUIRE(events.empty());
+}
+
+
+TEST_CASE("EventLoop basic add/mod/remove", "[loop]")
+{
+	EventLoop loop;
+	int fds[2];
+	REQUIRE(::pipe(fds) == 0);
+	set_nonblock(fds[0]);
+	set_nonblock(fds[1]);
+
+	REQUIRE(loop.addFD(fds[0], POLLIN));
+	REQUIRE_FALSE(loop.addFD(fds[0], POLLIN)); // cannot add twice
+	REQUIRE(loop.modFD(fds[0], POLLIN | POLLOUT));
+	loop.removeFD(fds[0]);
+	REQUIRE(loop.indexOfFD(fds[0]) < 0);
+
+	::close(fds[0]);
+	::close(fds[1]);
+}
+
+TEST_CASE("EventLoop owners: set/clear", "[loop][owner]")
+{
+	EventLoop loop;
+	int fds[2];
+	REQUIRE(::pipe(fds) == 0);
+	loop.setOwner(fds[0], 0);
+	loop.clearOwner(fds[0]);
+	::close(fds[0]);
+	::close(fds[1]);
 }

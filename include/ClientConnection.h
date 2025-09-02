@@ -65,6 +65,12 @@ class ClientConnection
 		
 		RouteDecision* ctx;
 		Preflight pr;
+
+	#ifdef UNIT_TEST
+		public :
+			Phase getState(){return state;}
+
+	#endif
 };
 
 #endif //  CLIENTCONNECTION_H

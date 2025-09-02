@@ -32,6 +32,8 @@ class ClientConnection
 		bool hasPendingWrite() ;
 		int fd() const { return io.getFD();}
 
+		CGIStreamer& getCGIStreamer()  {return cgi;}
+
 	private:
 
 		void flushOut();

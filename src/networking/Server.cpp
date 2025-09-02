@@ -19,6 +19,7 @@ date: 8/10/2025
 #include <sstream>
 #include <set>
 #include "UniqueFD.h"
+#include "AcceptorHandler.h"
 
 static void throwErr(const char *what)
 {
@@ -105,6 +106,7 @@ void Server::stop()
 	unregisterListeners();
 	closeAll();
 	loop.stop();
+	shutdownAllHandlers();
 }
 
 void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique_pairs,

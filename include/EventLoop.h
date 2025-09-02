@@ -1,42 +1,58 @@
+// include/EventLoop.h
 #ifndef EVENTLOOP_H
 #define EVENTLOOP_H
 
 #include <vector>
+#include <map>
 #include <poll.h>
+
+class ClientConnection; // forward
 
 class EventLoop
 {
-	public:
-		// Per-fd callback
-		struct Handler
-		{
-			virtual ~Handler() {}
-			virtual void onEvent(int fd, short revents) = 0;
-		};
+public:
+	struct Handler
+	{
+		virtual ~Handler() {}
+		virtual void onEvent(int fd, short revents) = 0;
+	};
 
-	public:
-		EventLoop();
-		~EventLoop();
+	EventLoop();
+	~EventLoop();
 
-		// Register / modify / remove a file descriptor
-		bool addFD(int fd, short events);			  // legacy
-		bool addFD(int fd, short events, Handler *h); // preferred
-		bool modFD(int fd, short events);
-		void removeFD(int fd); // deletes its handler
+	enum
+	{
+		EV_READ = 1,
+		EV_WRITE = 2
+	};
 
-		// Main loop: poll + call handlers
-		void run(int timeout_ms);
-		void stop();
+	// Register / modify / remove a file descriptor
+	bool addFD(int fd, short events);						   // legacy
+	bool addFD(int fd, short events, Handler *h);			   // preferred
+	bool addFD(int fd, short events, ClientConnection *owner); // optional owner map
+	bool modFD(int fd, short events);
+	void removeFD(int fd);
 
-		// Legacy helper (optional)
-		std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
+	// *** Keep only this declaration ***
+	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
-	private:
-		std::vector<struct pollfd> _pfds;
-		std::vector<Handler *> _hs; // aligned with _pfds
-		bool _stop;
+	void run(int timeout_ms);
+	void stop();
 
-		int indexOfFD(int fd) const;
+	// Owner helpers (optional)
+	bool setOwner(int fd, ClientConnection *owner);
+	void clearOwner(int fd);
+	ClientConnection *ownerOf(int fd) const;
+	int indexOfFD(int fd) const;
+
+private:
+
+	std::vector<struct pollfd> _pfds;
+	std::vector<Handler *> _hs; // aligned with _pfds
+	bool _stop;
+
+	std::map<int, int> watch_mask_;			   // if you track masks
+	std::map<int, ClientConnection *> owners_; // fd -> owner
 };
 
 #endif // EVENTLOOP_H

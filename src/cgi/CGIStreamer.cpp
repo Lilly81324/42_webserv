@@ -1,31 +1,24 @@
-
 #include "CGIStreamer.h"
-#include "HttpRequest.h"
-#include "HttpResponse.h"
-#include "CgiProcess.h"
 #include <fstream>
 #include <sstream>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/uio.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <vector>
-#include <string>
 #include <cstring>
-#include <cstdio>
-#include <cstdlib>
-
-
-
+#include <stdexcept>
+#include <unistd.h>
 
 /***---------------------------CGI PROCCESSING AND EXECUTION--------------------------- ***/
+
+CGIStreamer::CGIStreamer( HttpRequest& req, HttpResponse& res)
+    : req(req), res(res), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1),
+      cgi_body_off(0), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1),
+      cgi_deadline(0), outOffset(0), state(READ) {
+    // Initialize the output buffer
+    outBuffer.clear();
+}
 
 // Parse CGI headers from buf. On success, removes headers from buf,
 // sets status (default 200), and sets content_len (or -1 if unknown).
 // ---- keep this near the top of CGIStreamer.cpp ----
- bool CGIStreamer::parseCgiHeaders(std::string &buf, int &status, long &content_len)
+bool CGIStreamer::parseCgiHeaders(std::string &buf, int &status, long &content_len)
 {
 	std::string::size_type p = buf.find("\r\n\r\n");
 	if (p == std::string::npos)
@@ -76,8 +69,8 @@
 // markers to decide next actions.
 
 bool CGIStreamer::beginCgi(const CgiSpec &spec,
-								const std::string &script_path,
-								const std::vector<std::string> &envv)
+						   const std::string &script_path,
+						   const std::vector<std::string> &envv)
 {
 	// --- argv = [bin, script, NULL] ---
 	std::vector<char *> argvv;
@@ -129,11 +122,15 @@ bool CGIStreamer::beginCgi(const CgiSpec &spec,
 
 	// (If your EventLoop API requires explicit registration, do it here)
 	// Example:
-	// EventLoop& loop = server->loop();
 	// if (cgi_in_fd  >= 0) loop.addFD(cgi_in_fd,  /*read*/false, /*write*/true,  this);
 	// if (cgi_out_fd >= 0) loop.addFD(cgi_out_fd, /*read*/true,  /*write*/false, this);
 
 	return true; // success, CGI is now active and will be serviced by onReadable/onWritable
+}
+
+void CGIStreamer::resetDeadlineForWrite()
+{
+	cgi_deadline = CgiProcess::nowMs() + WRITE_TIMEOUT_MS;
 }
 
 void CGIStreamer::onCgiWritable(int fd)
@@ -147,7 +144,7 @@ void CGIStreamer::onCgiWritable(int fd)
 		std::ifstream ifs(path.c_str(), std::ios::in | std::ios::binary);
 		if (!ifs)
 		{
-			// nothing we can do; close stdin
+			// nothing we can do; close stdingi
 			proc.closeIn();
 			cgi_in_fd = -1;
 			return;

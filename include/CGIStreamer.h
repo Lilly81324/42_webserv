@@ -1,58 +1,66 @@
-#if !defined(CGI_STREAMER_H)
-#define CGI_STREAMER_H
+#ifndef CGISTREAMER_H
+#define CGISTREAMER_H
 
-#include <sys/types.h>
-#include <vector>
 #include "CgiProcess.h"
-#include "PhaseDeadline.h"
+#include "HttpRequest.h"
+#include "HttpResponse.h"
+#include "EventLoop.h"
+#include <string>
+#include <vector>
 
 class CGIStreamer
 {
-
-private:
-	bool parseCgiHeaders(std::string &buf, int &status, long &content_len);
-
-	// After headers parsed, serialize HTTP head and push to out (once).
-	void emitHttpHead(ChainBuf& out);
-
-	// If EOF comes before headers, synthesize a minimal head.
-	void emitFallbackHead(ChainBuf& out);
-
-	long nb_read_stdout();
-	long nb_write_stdin();
-
 public:
-	CGIStreamer();
-	~CGIStreamer();
+	// Constructor
+	CGIStreamer( HttpRequest &req, HttpResponse &res);
+
+	// Starts the CGI process
 	bool beginCgi(const CgiSpec &spec, const std::string &script_path, const std::vector<std::string> &envv);
 
+	// Event handlers for readable and writable events
 	void onCgiReadable(int fd);
 	void onCgiWritable(int fd);
 
-	void queueStdin(const char *p, std::size_t n);
-
-	bool active() const;
-	void terminate();
-
-	bool headersEmitted() const {return headers_emitted;}
-	int statusCode() const	{return status_code;}
+	int cgiStdoutFD(){return cgi_out_fd;}
+	int cgiStdinFD() {return cgi_in_fd;}
 
 private:
-	// process & fds
-	CgiProcess proc;
-	bool cgi_active;
-	int cgi_in_fd;
-	int cgi_out_fd;
-	size_t cgi_body_off;
-	std::string cgi_buf;
-	bool cgi_headers_done;
-	int cgi_status;
-	long cgi_content_len;
-	unsigned long long cgi_deadline;
-	int status_code;
-	bool headers_emitted;
-	PhaseDeadline  dl;
-	
+	// Helper to parse CGI headers
+	bool parseCgiHeaders(std::string &buf, int &status, long &content_len);
+
+	// Internal state management
+	void resetDeadlineForWrite();
+	void setReadPaused(bool paused);
+
+	// Member variables
+	// EventLoop &loop;				 // Reference to the EventLoop
+	HttpRequest &req;				 // Reference to the HTTP request
+	HttpResponse &res;				 // Reference to the HTTP response
+	CgiProcess proc;				 // Manages the CGI process
+	bool cgi_active;				 // Whether the CGI process is active
+	int cgi_in_fd;					 // File descriptor for CGI stdin
+	int cgi_out_fd;					 // File descriptor for CGI stdout
+	size_t cgi_body_off;			 // Offset for the request body
+	std::string cgi_buf;			 // Buffer for CGI output
+	bool cgi_headers_done;			 // Whether CGI headers are parsed
+	int cgi_status;					 // HTTP status code from CGI
+	long cgi_content_len;			 // Content length from CGI
+	unsigned long long cgi_deadline; // Deadline for CGI operations
+
+	// Output buffer for HTTP response
+	std::vector<char> outBuffer;
+	size_t outOffset;
+
+	// State management
+	enum State
+	{
+		READ,
+		WRITE
+	};
+	State state;
+
+	// Timeout constants
+	static const unsigned long long WRITE_TIMEOUT_MS = 5000; // 5 seconds
 };
 
-#endif //  CGI_STREAMER_H
+#endif // CGISTREAMER_H

@@ -26,8 +26,10 @@ Date: 8/10/2025
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <set>
 
 
+class ClientHandler;
 
 
 /**
@@ -73,6 +75,7 @@ class Server
 		std::map<int, std::map<std::string, int> > host_map_by_port; // port -> (host -> vs_index)
 		std::map<int, int> default_vs_by_port;						 // port -> default vs_index
 		ServerPipeline	*serverpipeline;
+		std::set<ClientHandler*> server_handlers;
 		/**
 		 * @brief Creates a raw listening socket for the specified host and port.
 		 *
@@ -173,6 +176,17 @@ class Server
 		 * @note Enables O(log n) Host header lookup during request processing.
 		 */
 		void buildHostMaps();
+
+
+		void Server::shutdownAllHandlers() {
+			std::set<ClientHandler*>::iterator it = server_handlers.begin();
+			while (it != server_handlers.end()) {
+			  ClientHandler* h = *it;
+			  ++it;
+			  delete h;
+			}
+			server_handlers.clear();
+		  }
 
 	public:
 		/**
@@ -283,6 +297,24 @@ class Server
 		const ServerConfig&	getConfig()const;
 		ServerPipeline* getPipeline() const{ return serverpipeline;};
 
+		void Server::releaseHandler(ClientHandler* h) {
+			server_handlers.erase(h);
+			delete h; 
+		  }
+
+		void Server::trackHandler(ClientHandler* h) {
+			if (h) server_handlers.insert(h);
+		  }
+		  
+		  void Server::releaseHandler(ClientHandler* h) {
+			if (!h) return;
+			std::set<ClientHandler*>::iterator it = server_handlers.find(h);
+			if (it != server_handlers.end()) server_handlers.erase(it);
+			delete h;
+		  }
+		  
+
+
 		#ifdef UNIT_TEST
 		public:
 			size_t listenerCount() const { return listeners.size(); }
@@ -291,116 +323,9 @@ class Server
 		#endif
 };
 
-class ClientHandler : public EventLoop::Handler {
-public:
-    ClientHandler(EventLoop& loop, ClientConnection* c)
-    : eventLoop(loop), clientConnection(c) {}
-
-    virtual ~ClientHandler() { delete clientConnection; }
-
-    virtual void onEvent(int fd, short revents) {
-        // --- Timer tick from EventLoop (poll timeout) ---
-        if (revents == 0) {
-            clientConnection->onTick();
-            if (clientConnection->isClosed()) { eventLoop.removeFD(fd); return; }
-
-            // Recompute interest set after tick
-            short want = 0;
-            if (clientConnection->wantsRead() && !clientConnection->isReadPaused()) want |= POLLIN;
-            if (clientConnection->hasPendingWrite())                                 want |= POLLOUT;
-            if (want == 0 && clientConnection->wantsRead())                          want  = POLLIN; // default to read if eligible
-            eventLoop.modFD(fd, want);
-            return;
-        }
-
-        // --- Error / hangup ---
-        if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            clientConnection->close();
-            eventLoop.removeFD(fd);
-            return;
-        }
-
-        // --- Readable ---
-        if (revents & POLLIN) {
-            clientConnection->onReadable();
-            if (clientConnection->isClosed()) { eventLoop.removeFD(fd); return; }
-        }
-
-        // --- Writable ---
-        if (revents & POLLOUT) {
-            clientConnection->onWritable();
-            if (clientConnection->isClosed()) { eventLoop.removeFD(fd); return; }
-        }
-
-        // --- Recompute desired events (backpressure-aware) ---
-        short want = 0;
-		if (clientConnection->wantsRead() && !clientConnection->isReadPaused()) want |= POLLIN;
-		if (clientConnection->hasPendingWrite())                                 want |= POLLOUT;
-
-		// NEW: force one more POLLOUT after full flush so onWritable() can close
-		if (!clientConnection->hasPendingWrite() && clientConnection->wantsWriteLinger())
-			want |= POLLOUT;
-
-		// Safety default: if still nothing and we’re in a read phase, at least POLLIN
-		if (want == 0 && clientConnection->wantsRead()) want = POLLIN;
-
-		eventLoop.modFD(fd, want);
-    }
-
-private:
-    EventLoop&        eventLoop;
-    ClientConnection* clientConnection; // owned
-};
 
 
 
-class AcceptorHandler : public EventLoop::Handler {
-	public:
-		AcceptorHandler(EventLoop& loop, Server& srv, Listener* L)
-		: eventLoop(loop), _srv(srv), listener(L) {}
-
-		virtual void onEvent(int fd, short revents) {
-			if (!listener || listener->getFD() != fd) return;
-
-			if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				eventLoop.removeFD(fd); // stop accepting on this listener
-				return;
-			}
-
-			if (revents & POLLIN) {
-				for (;;) {
-					struct sockaddr_storage ss;
-					socklen_t sl = sizeof(ss);
-					int cfd = ::accept(fd, (struct sockaddr*)&ss, &sl);
-					if (cfd == -1) {
-						if (errno == EINTR) continue;
-						if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-						break; // other errors: give up this turn
-					}
-					// configure client
-					try {
-
-						// disable Nagle to reduce small-write latency for tests
-						int one = 1;
-						::setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-					}
-					catch (...) { ::close(cfd); continue; }
-
-					// register client handler
-					ClientConnection* c = new ClientConnection(cfd,&_srv);
-					eventLoop.addFD(cfd, POLLIN, new ClientHandler(eventLoop, c));
-					// If the client has already sent data (common in tests that write
-					// immediately after connect), process it right away instead of
-					// waiting for the next poll cycle. Adjust poll registration if
-					// the connection now wants to write.
-				}
-			}
-		}
-	private:
-		EventLoop& eventLoop;
-		Server& _srv;
-		Listener* listener; // not owned
-};
 
 
 

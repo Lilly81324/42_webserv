@@ -2,6 +2,10 @@
 #include "ExpectContinue.h"
 #include "RequestContext.h"
 #include "ResponseFactory.h"
+#include "ChunkedReader.h"
+#include "FileBodyReader.h"
+#include "ContentLenghtReader.h"
+#include "ServerPipeline.h"
 #include "Server.h"
 #include <sstream>
 #include <netinet/in.h>
@@ -10,14 +14,16 @@ static const int HDR_TIMEOUT_MS = 10000;
 static const int BODY_TIMEOUT_MS = 45000;
 static const int WR_TIMEOUT_MS = 15000;
 static const int IDLE_TIMEOUT_MS = 30000;
+static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
 ClientConnection::ClientConnection(int fd, Server *s)
 	: state(PH_READ_HEADERS),
 	  server(s),
 	  io(fd, 64 * 1024),
 	  req(),
+	  res(),
 	  body(0),
-	  cgi(),
+	  cgi(req, res),
 	  dl(),
 	  hdr_bytes(0),
 	  max_hdr_bytes(64 * 1024),
@@ -101,10 +107,28 @@ void ClientConnection::onTick(unsigned long long now_ms)
 		break;
 	case PH_READ_BODY:
 		readBody();
+		break;
 	case PH_ROUTE:
 		routeAndBuild();
+		break;
 	case PH_WRITE:
 		finishWriteOrNext();
+		break;
+
+	case PH_CLOSE:
+		io.getFlow().setReadPaused(true);
+
+		(void)io.nb_write();
+		if (io.getChainBuf().getByteSize() != 0)
+
+			if (body)
+			{
+				delete body;
+				body = 0;
+			}
+		req.cleanupBodyFile();
+		server->releaseConnection(this);
+		return;
 	}
 }
 
@@ -147,7 +171,7 @@ void ClientConnection::selectRouteOnce()
 	plan.needs_body = false;
 	plan.max_body_bytes = 0;
 	// replace 'localhost' with HttpRequest actual domainName
-	int vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
+	vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
 
 	Preflight pr = RequestGuards::preflight(server->getConfig(),
 											vs_idx,
@@ -218,19 +242,20 @@ void ClientConnection::readBody()
 	const std::size_t avail = io.getInputRing().readAvail();
 
 	if (avail == 0)
-		return;
+		goto maybe_flush;
 
 	if (!body)
 	{
 		fail(400, "Bad Request");
 		return;
 	}
-
-	std::size_t used = body->consume(buf, avail);
-	if (used > 0)
 	{
-		io.getInputRing().consumed(used);
-		dl.reset(0, BODY_TIMEOUT_MS);
+		std::size_t used = body->consume(buf, avail);
+		if (used > 0)
+		{
+			io.getInputRing().consumed(used);
+			dl.reset(0, BODY_TIMEOUT_MS);
+		}
 	}
 
 	if (plan.max_body_bytes && body->bytes_received() > plan.max_body_bytes)
@@ -239,6 +264,17 @@ void ClientConnection::readBody()
 		return;
 	}
 
+maybe_flush:
+{
+	FileBodyReader *fr = 0;
+	// classic C++98 RTTI
+	fr = dynamic_cast<FileBodyReader *>(body);
+	if (fr)
+		(void)fr->flush_to_disk(64 * 1024); // flush up to 64 KiB per tick
+
+	if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body))
+		(void)cr->flush_to_disk(64 * 1024);
+}
 	if (!body->complete())
 		return;
 	state = PH_ROUTE;
@@ -248,17 +284,16 @@ void ClientConnection::readBody()
 void ClientConnection::routeAndBuild()
 {
 
-	HttpResponse r;
-
+	(void)ServerPipeline::processRequest(server->getConfig(), vs_idx, req, res, *ctx);
 	// Serialize → output
 	std::ostringstream os;
-	os << r;
+	os << res;
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size());
 
 	// Keep-alive vs close
-	std::string *connHdr = &req.getHeaders().get("Connection");
-	should_close = (req.getHttpVer() == "HTTP/1.0") || (connHdr && (*connHdr == "close" || *connHdr == "Close"));
+	std::string connHdr = req.getHeaders().get("Connection");
+	should_close = (req.getHttpVer() == "HTTP/1.0") || (connHdr == "close" || connHdr == "Close");
 
 	state = PH_WRITE;
 	dl.reset(0 /*now*/, WR_TIMEOUT_MS);
@@ -304,8 +339,48 @@ void ClientConnection::fail(int code, const char *reason)
 	os << r;
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size()); // ChainBuf
-	
+
 	should_close = true;
 	state = PH_WRITE;
 	dl.reset(0, WR_TIMEOUT_MS);
+}
+
+void ClientConnection::decideBodyReader()
+{
+	if (body)
+	{
+		delete body;
+		body = 0;
+	}
+
+	std::vector<char> tmp;
+
+	body = new ChunkedReader(tmp, plan.max_body_bytes, server->getConfig().servers()[vs_idx].client_body_temp_path);
+}
+
+void ClientConnection::decideBodyReader(std::size_t content_length)
+{
+	if (body)
+	{
+		delete body;
+		body = 0;
+	}
+
+	const std::size_t cap = (max_body_bytes != 0) ? max_body_bytes : (std::size_t)(~0);
+
+	const bool use_inmem =
+		(content_length > 0) &&
+		(content_length <= INMEM_BODY_LIMIT) &&
+		(content_length <= cap);
+
+	if (use_inmem)
+	{
+		body = new ContentLenghtReader(content_length, req);
+	}
+	else
+	{
+		FileBodyReader *fr = new FileBodyReader(
+			server->getConfig().servers()[vs_idx].client_body_temp_path);
+		body = fr;
+	}
 }

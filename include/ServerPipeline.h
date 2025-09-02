@@ -18,7 +18,7 @@ struct RouteDecision;
 class ServerPipeline
 {
 public:
-	bool processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res, RouteDecision &decision);
+	static bool processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res, RouteDecision &decision);
 
 private:
 };

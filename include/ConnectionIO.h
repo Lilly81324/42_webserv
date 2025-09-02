@@ -38,7 +38,7 @@ public:
 	{
 		tx_scratch.reserve(128 * 1024); // one-time reserve
 	}
-	~ConnectionIO();
+	~ConnectionIO(){};
 
 	/**
 	 * have to add :

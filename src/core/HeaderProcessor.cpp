@@ -51,12 +51,12 @@ HeaderCheck HeaderProcessor::analyze(const HttpRequest &req,
 									 std::size_t max_body_bytes_global)
 {
 	HeaderCheck hc;
-
+	(void)max_body_bytes_global;
 	// -------- Host required for HTTP/1.1 --------
 	if (req.getHttpVer() == "HTTP/1.1")
 	{
-		const std::string *host = &hdrs.get("Host");
-		if (!host || trim_copy(*host).empty())
+		const std::string &host = hdrs.get("Host");
+		if (host.empty() || trim_copy(host).empty())
 		{
 			setFail(400,"Bad Request",hc);
 			return hc;
@@ -64,10 +64,10 @@ HeaderCheck HeaderProcessor::analyze(const HttpRequest &req,
 	}
 
 	// -------- Transfer-Encoding: chunked? --------
-	const std::string *te = &hdrs.get("Transfer-Encoding");
-	if (te && !te->empty())
+	const std::string &te = hdrs.get("Transfer-Encoding");
+	if (!te.empty())
 	{
-		std::string te_l = to_lower_copy(*te);
+		std::string te_l = to_lower_copy(te);
 		// Per RFC, a TE can be a comma-separated list;only support "chunked"
 		if (te_l.find("chunked") != std::string::npos)
 		{
@@ -81,10 +81,10 @@ HeaderCheck HeaderProcessor::analyze(const HttpRequest &req,
 	}
 
 	// -------- Content-Length parsing --------
-	const std::string *cl = &hdrs.get("Content-Length");
-	if (cl && !cl->empty())
+	const std::string &cl = hdrs.get("Content-Length");
+	if (cl.empty())
 	{
-		std::string cl_trim = trim_copy(*cl);
+		std::string cl_trim = trim_copy(cl);
 		std::size_t n = 0;
 		if (!parse_size_decimal(cl_trim, n))
 		{
@@ -111,10 +111,10 @@ HeaderCheck HeaderProcessor::analyze(const HttpRequest &req,
 	// }
 
 	// -------- Expect: 100-continue --------
-	const std::string *ex = &hdrs.get("Expect");
-	if (ex && !ex->empty())
+	const std::string &ex = hdrs.get("Expect");
+	if (!ex.empty())
 	{
-		std::string e = to_lower_copy(trim_copy(*ex));
+		std::string e = to_lower_copy(trim_copy(ex));
 		if (e == "100-continue")
 			hc.expect_continue = true;
 		else

@@ -33,11 +33,11 @@ static std::string to_lower(const std::string &s)
 
 bool ExpectContinue::needed(const Headers &h)
 {
-	const std::string *ex = &h.get("Expect");
-	if (!ex || ex->empty())
+	const std::string &ex = h.get("Expect");
+	if (ex.empty())
 		return false;
 
-	std::string v = to_lower(*ex);
+	std::string v = to_lower(ex);
 	std::string::size_type start = 0;
 	while (start <= v.size())
 	{

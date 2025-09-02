@@ -22,6 +22,8 @@ class ClientHandler : public EventLoop::Handler {
 		virtual ~ClientHandler() { delete clientConnection; }
 	
 		virtual void onEvent(int fd, short revents);
+
+		ClientConnection* conn() const { return clientConnection; } 
 	
 	private:
 		EventLoop&        eventLoop;

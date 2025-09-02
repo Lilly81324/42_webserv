@@ -30,7 +30,7 @@ private:
 
 	// Internal state management
 	void resetDeadlineForWrite();
-	void setReadPaused(bool paused);
+	// void setReadPaused(bool paused);
 
 	// Member variables
 	// EventLoop &loop;				 // Reference to the EventLoop

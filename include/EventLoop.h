@@ -44,6 +44,8 @@ public:
 	void clearOwner(int fd);
 	ClientConnection *ownerOf(int fd) const;
 	int indexOfFD(int fd) const;
+	void removeOwner(ClientConnection *owner);
+
 
 private:
 

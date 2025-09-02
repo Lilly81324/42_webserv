@@ -16,7 +16,7 @@ class ChainBuf
 {
 	public:
 		ChainBuf() : blocks(), storage(), byteSize(0), max_bytes(2u * 1024u * 1024u), max_blocks(1024u) {}
-		~ChainBuf();
+		~ChainBuf(){};
 
 		// copy-in (owned)
 		bool push_copy(const void *p, std::size_t n)
@@ -102,7 +102,7 @@ class ChainBuf
 			max_blocks = max_blocks;
 		}
 
-		void attachFile(int fd, off_t off, std::size_t len);
+		// void attachFile(int fd, off_t off, std::size_t len);
 
 	private:
 		struct Block

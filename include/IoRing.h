@@ -15,7 +15,7 @@ Date: 9/1/2025
 class IoRing
 {
 public:
-	explicit IoRing(std::size_t cap = 64 * 1024);
+	explicit IoRing(std::size_t cap = 64 * 1024):buf(),r(0),w(0){buf.reserve(cap);};
 
 	char *writePtr() { return &buf[0] + w; };
 

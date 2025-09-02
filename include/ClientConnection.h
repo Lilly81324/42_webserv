@@ -36,8 +36,6 @@ class ClientConnection
 
 	private:
 
-		void flushOut();
-		void readIn();
 		void parseHeaders();
 		void selectRouteOnce();
 		void runPreflight();
@@ -52,6 +50,7 @@ class ClientConnection
 		Server* server;
 		ConnectionIO io;
 		HttpRequest req;
+		HttpResponse res;
 		IBodyReader* body;
 		CGIStreamer cgi;
 		PhaseDeadline dl;
@@ -62,6 +61,7 @@ class ClientConnection
 		bool		route_selected;
 		RoutePlan	plan;
 		int	local_port;
+		int vs_idx;
 		
 		RouteDecision* ctx;
 		Preflight pr;

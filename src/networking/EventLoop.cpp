@@ -160,3 +160,18 @@ ClientConnection *EventLoop::ownerOf(int fd) const
 	std::map<int, ClientConnection *>::const_iterator it = owners_.find(fd);
 	return (it == owners_.end() ? 0 : it->second);
 }
+
+void EventLoop::removeOwner(ClientConnection *owner)
+{
+	if (!owner)
+		return;
+	std::vector<int> fds;
+	for (std::map<int, ClientConnection *>::iterator it = owners_.begin();
+		 it != owners_.end(); ++it)
+	{
+		if (it->second == owner)
+			fds.push_back(it->first);
+	}
+	for (size_t i = 0; i < fds.size(); ++i)
+		removeFD(fds[i]);
+}

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <unistd.h>
+#include <stdlib.h>
 
 /***---------------------------CGI PROCCESSING AND EXECUTION--------------------------- ***/
 
@@ -118,7 +119,7 @@ bool CGIStreamer::beginCgi(const CgiSpec &spec,
 	cgi_deadline = CgiProcess::nowMs() + (unsigned long long)spec.timeout_ms;
 
 	// Pause socket reads while we push the request body into the CGI stdin
-	setReadPaused(true);
+	// setReadPaused(true);
 
 	// (If your EventLoop API requires explicit registration, do it here)
 	// Example:
@@ -284,7 +285,7 @@ void CGIStreamer::onCgiReadable(int fd)
 		resetDeadlineForWrite();
 
 		// Unpause socket reads for next request (if pipelining allowed)
-		setReadPaused(false);
+		// setReadPaused(false);
 
 		// Clear CGI state
 		cgi_active = false;

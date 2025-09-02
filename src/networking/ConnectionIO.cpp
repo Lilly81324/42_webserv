@@ -30,7 +30,7 @@ ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 	return n;
 }
 
-ssize_t ConnectionIO::nb_write()KK
+ssize_t ConnectionIO::nb_write()
 {
 	if (!socket.valid())
 		return -1;

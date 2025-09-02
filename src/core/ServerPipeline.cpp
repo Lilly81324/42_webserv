@@ -20,15 +20,6 @@ date: 8/10/2025
 #include <sys/stat.h>
 #include <sstream>
 
-// C++98: helper to uppercase a method cheaply
-static std::string upcase(const std::string &s)
-{
-	std::string r(s);
-	for (size_t i = 0; i < r.size(); ++i)
-		if (r[i] >= 'a' && r[i] <= 'z')
-			r[i] = r[i] - 'a' + 'A';
-	return r;
-}
 
 bool ServerPipeline::processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res, RouteDecision &decision)
 {

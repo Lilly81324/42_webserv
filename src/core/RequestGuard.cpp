@@ -28,11 +28,11 @@ static std::string upper_copy(const std::string &in)
 
 static bool header_has_chunked(const Headers &hdrs)
 {
-	const std::string *te = &hdrs.get("Transfer-Encoding");
-	if (!te)
+	const std::string &te = hdrs.get("Transfer-Encoding");
+	if (te.empty())
 		return false;
 	// cheap case-insensitive “chunked”
-	std::string s = *te;
+	std::string s = te;
 	for (std::string::size_type i = 0; i < s.size(); ++i)
 		s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
 	return s.find("chunked") != std::string::npos;
@@ -40,11 +40,11 @@ static bool header_has_chunked(const Headers &hdrs)
 
 static bool parse_content_length(const Headers &hdrs, std::size_t &out)
 {
-	const std::string *cl = &hdrs.get("Content-Length");
-	if (!cl || cl->empty())
+	const std::string &cl = hdrs.get("Content-Length");
+	if (!cl.empty())
 		return false;
 	char *endp = 0;
-	unsigned long v = std::strtoul(cl->c_str(), &endp, 10);
+	unsigned long v = std::strtoul(cl.c_str(), &endp, 10);
 	if (!endp || *endp != '\0')
 		return false;
 	out = static_cast<std::size_t>(v);

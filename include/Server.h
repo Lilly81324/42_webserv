@@ -19,6 +19,7 @@ Date: 8/10/2025
 #include "Listener.h"
 #include "ClientConnection.h"
 #include "ServerPipeline.h"
+#include "ClientHandler.h"
 #include <vector>
 #include <string>
 #include <poll.h>
@@ -29,7 +30,6 @@ Date: 8/10/2025
 #include <set>
 
 
-class ClientHandler;
 
 
 /**
@@ -178,7 +178,7 @@ class Server
 		void buildHostMaps();
 
 
-		void Server::shutdownAllHandlers() {
+		void shutdownAllHandlers() {
 			std::set<ClientHandler*>::iterator it = server_handlers.begin();
 			while (it != server_handlers.end()) {
 			  ClientHandler* h = *it;
@@ -297,22 +297,39 @@ class Server
 		const ServerConfig&	getConfig()const;
 		ServerPipeline* getPipeline() const{ return serverpipeline;};
 
-		void Server::releaseHandler(ClientHandler* h) {
-			server_handlers.erase(h);
-			delete h; 
-		  }
-
-		void Server::trackHandler(ClientHandler* h) {
+		void trackHandler(ClientHandler* h)
+		{
 			if (h) server_handlers.insert(h);
-		  }
-		  
-		  void Server::releaseHandler(ClientHandler* h) {
+		}
+			
+		void releaseHandler(ClientHandler* h) 
+		{
 			if (!h) return;
 			std::set<ClientHandler*>::iterator it = server_handlers.find(h);
 			if (it != server_handlers.end()) server_handlers.erase(it);
 			delete h;
-		  }
-		  
+		}
+
+		void releaseConnection(ClientConnection* c)
+		{
+			if (!c) return;
+
+			loop.removeOwner(c);
+
+			for (std::set<ClientHandler*>::iterator it = server_handlers.begin();
+				it != server_handlers.end(); ++it)
+			{
+				ClientHandler* h = *it;
+				if (h && h->conn() == c)
+				{
+					server_handlers.erase(it);
+					delete h;
+					return;
+				}
+			}
+
+			delete c;
+		}
 
 
 		#ifdef UNIT_TEST

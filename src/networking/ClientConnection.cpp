@@ -358,10 +358,6 @@ void ClientConnection::routeAndBuild()
 	// Serialize → output
 	std::ostringstream os;
 	os << res;
-	std::cout << " REQUEST " << std::endl;
-	std::cout << req << std::endl;
-	std::cout << " RESPONSE" << std::endl;
-	std::cout << res << std::endl;
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size());
 

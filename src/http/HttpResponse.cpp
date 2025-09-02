@@ -4,16 +4,15 @@
 author: undefined
 date: 8/10/2025
 ------------------------------------------ */
-
 #include "HttpResponse.h"
-#include <iostream>
+#include <sstream>
 
 std::ostream &operator<<(std::ostream &out, const HttpResponse &r)
 {
 	out << r.http_version << ' ' << r.status << ' ' << r.reason << "\r\n";
 
 	out << r.headers;
-	if (!r.headers.keyExists("Content-Lenght") && !r.body.empty())
+	if (!r.headers.keyExists("Content-Length") && !r.body.empty())
 		out << "Content-Length: " << r.body.size() << "\r\n";
 
 	out << "\r\n";
@@ -23,3 +22,5 @@ std::ostream &operator<<(std::ostream &out, const HttpResponse &r)
 
 	return out;
 }
+
+

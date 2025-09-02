@@ -1,6 +1,6 @@
 
 #if !defined(REQUEST_GUARDS_DEFAULT_MAX_BODY)
-#define REQUEST_GUARDS_DEFAULT_MAX_BODY 0u
+#define REQUEST_GUARDS_DEFAULT_MAX_BODY 3
 #endif // REQUEST_GUARDS_DEFAULT_MAX_BODY
 
 #include "RequestGuards.h"
@@ -56,7 +56,7 @@ static std::size_t lookup_max_body_vs(const ServerConfig &cfg, int vs_idx)
 {
 	const std::vector<VirtualServer> &v = cfg.servers();
 	if (vs_idx < 0 || vs_idx >= static_cast<int>(v.size()))
-		return 0u;
+		return REQUEST_GUARDS_DEFAULT_MAX_BODY;
 	int m = v[vs_idx].client_max_body_size; // bytes; 0 = unlimited
 	return (m <= 0) ? REQUEST_GUARDS_DEFAULT_MAX_BODY : static_cast<std::size_t>(m);
 }

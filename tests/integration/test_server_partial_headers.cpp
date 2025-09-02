@@ -29,7 +29,7 @@ TEST_CASE("ClientConnection tolerates partial header delivery", "[integration][h
     cfg.push_back(vs);
     Server s(cfg);
 
-    ClientConnection conn(sv[0], &s);
+    ClientConnection conn(sv[0], &s,1000000000);
     REQUIRE(conn.getState() == PH_READ_HEADERS);
 
     // send headers in two pieces split across CRLFCRLF

@@ -32,7 +32,7 @@ TEST_CASE("Phase deadline expiry triggers write/close flow", "[timeout]") {
     ServerConfig cfg;
     Server s(cfg);
 
-    ClientConnection conn(sv[0], &s);
+    ClientConnection conn(sv[0], &s,1000000000);
     REQUIRE(conn.state == PH_READ_HEADERS);
     REQUIRE_FALSE(conn.isClosed());
 

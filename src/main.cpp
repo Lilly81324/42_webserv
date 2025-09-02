@@ -10,8 +10,8 @@ using namespace std;
 static Server *g_srv = 0;
 static void on_sig(int)
 {
-	if (g_srv)
-		g_srv->stop();
+    if (g_srv)
+        g_srv->stop();
 }
 
 /** For now I get port from ARGV */

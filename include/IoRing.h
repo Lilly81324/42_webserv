@@ -19,7 +19,7 @@ public:
 
 	char *writePtr() { return &buf[0] + w; };
 
-	std::size_t writeAvail() const { return buf.size() - w; };
+	std::size_t writeAvail() const { return buf.capacity() - w; };
 
 	void wrote(std::size_t n) { w += n; };
 

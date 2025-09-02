@@ -1,5 +1,5 @@
-#if !defined( CLIENTCONNECTION_H)
-#define  CLIENTCONNECTION_H
+#if !defined(CLIENTCONNECTION_H)
+#define CLIENTCONNECTION_H
 
 #include <string>
 #include "ConnectionIO.h"
@@ -15,6 +15,7 @@
 #include "RouteResolver.h"
 #include "Phase.h"
 #include "RoutePlan.h"
+#include "FlowControl.h"
 // #include "RequestDecoder.h"
 
 class Server;
@@ -22,20 +23,22 @@ class Server;
 class ClientConnection
 {
 	public:
-		ClientConnection(int fd, Server * s);	
+		ClientConnection(int fd, Server *s);
 		~ClientConnection();
 
 		void onTick(unsigned long long now_ms);
 		bool isClosed() const;
-		bool wantsRead() ;
-		bool isReadPaused() ;
-		bool hasPendingWrite() ;
-		int fd() const { return io.getFD();}
+		bool wantsRead();
+		bool isReadPaused();
+		bool hasPendingWrite();
+		int fd() const { return io.getFD(); }
 
-		CGIStreamer& getCGIStreamer()  {return cgi;}
+		CGIStreamer &getCGIStreamer() { return cgi; }
+
+		Phase getState() { return state; }
+		FlowControl &getFlow() { return io.getFlow(); }
 
 	private:
-
 		void parseHeaders();
 		void selectRouteOnce();
 		void runPreflight();
@@ -47,30 +50,34 @@ class ClientConnection
 		void fail(int code, const char *reason);
 
 		Phase state;
-		Server* server;
+		Server *server;
 		ConnectionIO io;
 		HttpRequest req;
 		HttpResponse res;
-		IBodyReader* body;
+		IBodyReader *body;
 		CGIStreamer cgi;
 		PhaseDeadline dl;
 		std::size_t hdr_bytes;
 		std::size_t max_hdr_bytes;
 		std::size_t max_body_bytes;
-		bool		should_close;
-		bool		route_selected;
-		RoutePlan	plan;
-		int	local_port;
+		bool should_close;
+		bool route_selected;
+		RoutePlan plan;
+		int local_port;
 		int vs_idx;
-		
-		RouteDecision* ctx;
+
+		RouteDecision *ctx;
 		Preflight pr;
 
-	#ifdef UNIT_TEST
-		public :
-			Phase getState(){return state;}
+		std::size_t body_bytes_prev; // last observed body->bytes_received()
+		int body_no_progress_ticks;
+		int flush_no_progress_ticks;
 
-	#endif
+		enum
+		{
+			BODY_STALL_TICK_LIMIT = 30,
+			FLUSH_STALL_TICK_LIMIT = 30
+		};
 };
 
 #endif //  CLIENTCONNECTION_H

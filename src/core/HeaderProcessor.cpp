@@ -82,7 +82,7 @@ HeaderCheck HeaderProcessor::analyze(const HttpRequest &req,
 
 	// -------- Content-Length parsing --------
 	const std::string &cl = hdrs.get("Content-Length");
-	if (cl.empty())
+	if (!cl.empty())
 	{
 		std::string cl_trim = trim_copy(cl);
 		std::size_t n = 0;

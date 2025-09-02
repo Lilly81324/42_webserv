@@ -31,7 +31,10 @@ ClientConnection::ClientConnection(int fd, Server *s)
 	  should_close(false),
 	  route_selected(false),
 	  plan(),
-	  pr()
+	  pr(),
+	  body_bytes_prev(0),
+	  body_no_progress_ticks(0),
+	  flush_no_progress_ticks(0)
 {
 	ctx = new RouteDecision;
 	dl.reset(0, HDR_TIMEOUT_MS);
@@ -145,7 +148,7 @@ void ClientConnection::parseHeaders()
 	{
 		io.getInputRing().consumed(used);
 		hdr_bytes += used;
-		if (hdr_bytes > max_body_bytes)
+		if (hdr_bytes > max_hdr_bytes)
 		{
 			fail(431, "Request Header Fields to Larger");
 			return;
@@ -156,7 +159,7 @@ void ClientConnection::parseHeaders()
 	if (!req.headersDone())
 		return;
 
-	state = PH_PRECHECK;
+	state = PH_ROUTE_SELECT;
 	dl.reset(0, BODY_TIMEOUT_MS);
 }
 
@@ -231,7 +234,10 @@ void ClientConnection::runPreflight()
 		fail(411, "Length Required");
 		return;
 	}
-
+	
+	body_bytes_prev = 0;
+	body_no_progress_ticks = 0;
+	flush_no_progress_ticks = 0;
 	state = PH_READ_BODY;
 	dl.reset(0, BODY_TIMEOUT_MS);
 }
@@ -241,45 +247,82 @@ void ClientConnection::readBody()
 	const char *buf = io.getInputRing().readPtr();
 	const std::size_t avail = io.getInputRing().readAvail();
 
-	if (avail == 0)
-		goto maybe_flush;
-
-	if (!body)
-	{
+	if (!body) {
 		fail(400, "Bad Request");
 		return;
 	}
-	{
-		std::size_t used = body->consume(buf, avail);
-		if (used > 0)
-		{
+
+	const std::size_t before = body->bytes_received();
+
+	// 1) Try to consume whatever arrived this tick
+	if (avail != 0) {
+		const std::size_t used = body->consume(buf, avail);
+		if (used > 0) {
 			io.getInputRing().consumed(used);
 			dl.reset(0, BODY_TIMEOUT_MS);
 		}
 	}
 
-	if (plan.max_body_bytes && body->bytes_received() > plan.max_body_bytes)
-	{
-		fail(413, "Payload Too Larger");
+	const std::size_t after = body->bytes_received();
+
+	// 2) Enforce max-body guard (runtime, affects chunked too)
+	if (max_body_bytes && after > max_body_bytes) {
+		fail(413, "Payload Too Large");
+		return; // do not attempt to flush
+	}
+
+	// 3) Progress watchdog for reading (no advance across ticks)
+	if (after == before && avail == 0) {
+		// nothing new consumed, and no new bytes visible in ring
+		++body_no_progress_ticks;
+	} else {
+		body_no_progress_ticks = 0;
+	}
+	body_bytes_prev = after;
+
+	// 4) If we’re file-backed, attempt a bounded flush to disk each tick
+	//    and watch for persistent no-progress when there IS pending data.
+	std::size_t pending_before = 0;
+	std::size_t flushed = 0;
+
+	if (FileBodyReader *fr = dynamic_cast<FileBodyReader*>(body)) {
+		pending_before = fr->pending_size();
+		if (pending_before)
+			flushed = fr->flush_to_disk(64 * 1024);
+	} else if (ChunkedReader *cr = dynamic_cast<ChunkedReader*>(body)) {
+		pending_before = cr->pending_size();
+		if (pending_before)
+			flushed = cr->flush_to_disk(64 * 1024);
+	}
+
+	if (pending_before > 0 && flushed == 0) {
+		++flush_no_progress_ticks;
+	} else {
+		flush_no_progress_ticks = 0;
+	}
+
+	// 5) Stall policies
+	if (body_no_progress_ticks >= BODY_STALL_TICK_LIMIT) {
+		// We’ve been called many times with no read progress → timeout
+		fail(408, "Request Timeout");
+		return;
+	}
+	if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT) {
+		// We had bytes staged for disk but couldn’t make any progress
+		// (don’t branch on errno; treat as storage/IO exhaustion class)
+		fail(507, "Insufficient Storage");
 		return;
 	}
 
-maybe_flush:
-{
-	FileBodyReader *fr = 0;
-	// classic C++98 RTTI
-	fr = dynamic_cast<FileBodyReader *>(body);
-	if (fr)
-		(void)fr->flush_to_disk(64 * 1024); // flush up to 64 KiB per tick
-
-	if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body))
-		(void)cr->flush_to_disk(64 * 1024);
-}
+	// 6) Completion check
 	if (!body->complete())
 		return;
+
+	// Body done → continue pipeline
 	state = PH_ROUTE;
 	dl.reset(0, WR_TIMEOUT_MS);
 }
+
 
 void ClientConnection::routeAndBuild()
 {
@@ -343,6 +386,7 @@ void ClientConnection::fail(int code, const char *reason)
 	should_close = true;
 	state = PH_WRITE;
 	dl.reset(0, WR_TIMEOUT_MS);
+	finishWriteOrNext();
 }
 
 void ClientConnection::decideBodyReader()

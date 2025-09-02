@@ -3,6 +3,8 @@
 #include <sys/time.h>
 #include <poll.h>
 
+#define PHASE_PUMP_CAP 30
+
 void ClientHandler::onEvent(int fd, short revents)
 {
 	const unsigned long long now = nowMs();
@@ -12,7 +14,22 @@ void ClientHandler::onEvent(int fd, short revents)
 	{
 		// We don't branch on errno; connection decides using readiness + deadlines.
 		(void)revents; // onTick pulls as needed (read/write) based on phase & backpressure
-		clientConnection->onTick(now);
+		if ((revents & POLLOUT) != 0)
+			clientConnection->onTick(now);
+
+		// If readable (or not paused), tick; otherwise we’ll still pump phases below.
+		if ((revents & POLLIN) != 0 || (!clientConnection->getFlow().isReadPaused()))
+			clientConnection->onTick(now);
+
+		// bounded pump
+		for (int steps = 0; steps < PHASE_PUMP_CAP; ++steps)
+		{
+			clientConnection->onTick(now);
+			if (clientConnection->getState() == PH_CLOSE)
+				return;
+		}
+
+		updateInterests();
 	}
 	// 2) CGI stdout → stream into ChainBuf
 	else if (fd == clientConnection->getCGIStreamer().cgiStdoutFD())
@@ -75,5 +92,4 @@ void ClientHandler::updateInterests()
 		else
 			eventLoop.modFD(cgiIn, POLLOUT);
 	}
-
 }

@@ -22,12 +22,12 @@ class PhaseDeadline
 		{
 			if (!active_)
 				return false;
-			return now_ms >= deadline_ms_;
+			return now_ms < deadline_ms_;
 		}
 
 		unsigned long long remaining(unsigned long long now_ms) const
 		{
-			if (!active_ || now_ms >= deadline_ms_)
+			if (!active_ || now_ms < deadline_ms_)
 				return 0ULL;
 			return deadline_ms_ - now_ms;
 		}

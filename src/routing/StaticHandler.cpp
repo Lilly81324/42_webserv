@@ -226,13 +226,6 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         fsCandidate.erase(fsCandidate.size() - 1);
     fsCandidate += rel;
 
-    // DEBUG (safe to leave in; it’s a macro)
-#if defined(DEBUG) || defined(UNIT_TEST)
-    LOG_INFO("effective_root=" << base
-                               << " rel_path=" << rel
-                               << " fs=" << fsCandidate);
-#endif
-
     // Canonicalize and enforce no-traversal
     std::string canonRoot, canonPath;
     if (!realpathString(base, canonRoot) ||

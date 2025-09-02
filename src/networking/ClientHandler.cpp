@@ -14,33 +14,46 @@ void ClientHandler::onEvent(int fd, short revents)
 	{
 		Phase prev = clientConnection->getState();
 		clientConnection->onTick(now);
-		if (clientConnection->getState() == PH_CLOSE) return;
-	
-		for (int i = 0; i < PHASE_PUMP_CAP; ++i) {
+		if (clientConnection->getState() == PH_CLOSE && clientConnection->isReadyToClose())
+		{
+			clientConnection->close();
+			return;
+		}
+
+		for (int i = 0; i < PHASE_PUMP_CAP; ++i)
+		{
 			Phase was = clientConnection->getState();
-			if (was == prev) break;   // no phase change → stop
+			if (was == prev)
+				break; // no phase change → stop
 			prev = was;
 			clientConnection->onTick(now);
-			if (clientConnection->getState() == PH_CLOSE) return;
+			if (clientConnection->getState() == PH_CLOSE && clientConnection->isReadyToClose())
+			{
+				clientConnection->close();
+				return;
+			}
 		}
-	
+
 		// Compute desired interest mask
 		short ev = 0;
 		if (clientConnection->wantsRead() &&
 			!clientConnection->getFlow().isReadPaused())
 			ev |= POLLIN;
-	
+
 		if (clientConnection->hasPendingWrite() > 0)
 			ev |= POLLOUT;
-	
+
 		const int fd = clientConnection->fd(); // use your accessor
-	
+
 		// First registration vs subsequent updates
-		if (eventLoop.indexOfFD(fd) < 0) {
+		if (eventLoop.indexOfFD(fd) < 0)
+		{
 			eventLoop.addFD(fd, ev, clientConnection);
 			eventLoop.setOwner(fd, clientConnection);
-		} else {
-			eventLoop.modFD(fd, ev);       // ← keep using this to “steer” interest
+		}
+		else
+		{
+			eventLoop.modFD(fd, ev); // ← keep using this to “steer” interest
 		}
 
 		updateInterests();

@@ -15,7 +15,6 @@
 #include "RouteResolver.h"
 #include "Phase.h"
 #include "RoutePlan.h"
-#include "FlowControl.h"
 // #include "RequestDecoder.h"
 
 class Server;
@@ -23,7 +22,7 @@ class Server;
 class ClientConnection
 {
 	public:
-		ClientConnection(int fd, Server *s);
+		ClientConnection(int fd, Server *s, unsigned long long nowMs);
 		~ClientConnection();
 
 		void onTick(unsigned long long now_ms);
@@ -37,7 +36,14 @@ class ClientConnection
 
 		Phase getState() { return state; }
 		FlowControl &getFlow() { return io.getFlow(); }
+		void resetDeadline(int ms){	dl.reset(now_cached_ms, ms);};
 
+		bool isReadyToClose() { return ready_to_close; }
+
+		void close();
+
+		int getFD() {return io.getFD();}
+		
 	private:
 		void parseHeaders();
 		void selectRouteOnce();
@@ -48,7 +54,7 @@ class ClientConnection
 		void routeAndBuild();
 		void finishWriteOrNext();
 		void fail(int code, const char *reason);
-
+ 		
 		Phase state;
 		Server *server;
 		ConnectionIO io;
@@ -72,6 +78,8 @@ class ClientConnection
 		std::size_t body_bytes_prev; // last observed body->bytes_received()
 		int body_no_progress_ticks;
 		int flush_no_progress_ticks;
+		unsigned long long now_cached_ms;
+		bool ready_to_close;
 
 		enum
 		{

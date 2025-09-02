@@ -324,10 +324,10 @@ class Server
 				{
 					server_handlers.erase(it);
 					delete h;
-					return;
+					break;
 				}
 			}
-
+			loop.removeFD(c->getFD());
 			delete c;
 		}
 

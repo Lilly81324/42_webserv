@@ -19,7 +19,7 @@ class ClientHandler : public EventLoop::Handler {
 		ClientHandler(EventLoop& loop, ClientConnection* c)
 		: eventLoop(loop), clientConnection(c) {}
 	
-		virtual ~ClientHandler() { delete clientConnection; }
+		virtual ~ClientHandler() { clientConnection = 0; }
 	
 		virtual void onEvent(int fd, short revents);
 

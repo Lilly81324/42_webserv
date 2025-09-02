@@ -16,7 +16,7 @@ static const int WR_TIMEOUT_MS = 15000;
 static const int IDLE_TIMEOUT_MS = 30000;
 static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
-ClientConnection::ClientConnection(int fd, Server *s)
+ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	: state(PH_READ_HEADERS),
 	  server(s),
 	  io(fd, 64 * 1024),
@@ -34,10 +34,12 @@ ClientConnection::ClientConnection(int fd, Server *s)
 	  pr(),
 	  body_bytes_prev(0),
 	  body_no_progress_ticks(0),
-	  flush_no_progress_ticks(0)
+	  flush_no_progress_ticks(0),
+	  now_cached_ms(nowMs),
+	  ready_to_close(false)
 {
 	ctx = new RouteDecision;
-	dl.reset(0, HDR_TIMEOUT_MS);
+	resetDeadline(HDR_TIMEOUT_MS);
 	struct sockaddr_storage ss;
 	socklen_t sl = sizeof(ss);
 	local_port = -1;
@@ -56,13 +58,20 @@ ClientConnection::ClientConnection(int fd, Server *s)
 
 ClientConnection::~ClientConnection()
 {
+	if(server)
+		server = 0;
 	if (ctx)
+	{
 		delete ctx;
+		ctx = 0;
+	}
+	
 }
 
 bool ClientConnection::isClosed() const { return state == PH_CLOSE; }
 bool ClientConnection::hasPendingWrite() { return io.getChainBuf().getByteSize() != 0; }
 bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
+void ClientConnection::close() { server->releaseConnection(this); }
 
 bool ClientConnection::wantsRead()
 {
@@ -73,6 +82,7 @@ bool ClientConnection::wantsRead()
 void ClientConnection::onTick(unsigned long long now_ms)
 {
 	const std::size_t outbytes = io.getChainBuf().getByteSize();
+	now_cached_ms = now_ms;
 
 	if (io.getFlow().shouldPauseRead(outbytes))
 		io.getFlow().setReadPaused(true);
@@ -81,7 +91,7 @@ void ClientConnection::onTick(unsigned long long now_ms)
 
 	(void)io.nb_write();
 
-	if (dl.expired(now_ms))
+	if (dl.expired(now_ms) && state != PH_CLOSE)
 	{
 		if (state == PH_READ_HEADERS || state == PH_READ_BODY || state == PH_PRECHECK || state == PH_ROUTE_SELECT)
 		{
@@ -130,7 +140,8 @@ void ClientConnection::onTick(unsigned long long now_ms)
 				body = 0;
 			}
 		req.cleanupBodyFile();
-		server->releaseConnection(this);
+		ready_to_close = true;
+		// server->releaseConnection(this);
 		return;
 	}
 }
@@ -155,14 +166,14 @@ void ClientConnection::parseHeaders()
 			fail(431, "Request Header Fields to Larger");
 			return;
 		}
-		dl.reset(0, HDR_TIMEOUT_MS);
+		resetDeadline(HDR_TIMEOUT_MS);
 	}
 
 	if (!req.headersDone())
 		return;
 
 	state = PH_ROUTE_SELECT;
-	dl.reset(0, BODY_TIMEOUT_MS);
+	resetDeadline(BODY_TIMEOUT_MS);
 }
 
 void ClientConnection::selectRouteOnce()
@@ -181,12 +192,12 @@ void ClientConnection::selectRouteOnce()
 	Preflight pr = RequestGuards::preflight(server->getConfig(),
 											vs_idx,
 											req.getMethod(),
-											req.getUri(),
+											req.getPath(),
 											req.getHeaders(),
 											ctx);
 	route_selected = true;
 	state = PH_PRECHECK;
-	dl.reset(0, BODY_TIMEOUT_MS);
+	resetDeadline(BODY_TIMEOUT_MS);
 }
 
 void ClientConnection::runPreflight()
@@ -241,7 +252,7 @@ void ClientConnection::runPreflight()
 	body_no_progress_ticks = 0;
 	flush_no_progress_ticks = 0;
 	state = PH_READ_BODY;
-	dl.reset(0, BODY_TIMEOUT_MS);
+	resetDeadline(BODY_TIMEOUT_MS);
 }
 
 void ClientConnection::readBody()
@@ -264,7 +275,7 @@ void ClientConnection::readBody()
 		if (used > 0)
 		{
 			io.getInputRing().consumed(used);
-			dl.reset(0, BODY_TIMEOUT_MS);
+			resetDeadline(BODY_TIMEOUT_MS);
 		}
 	}
 
@@ -337,7 +348,7 @@ void ClientConnection::readBody()
 
 	// Body done → continue pipeline
 	state = PH_ROUTE;
-	dl.reset(0, WR_TIMEOUT_MS);
+	resetDeadline(WR_TIMEOUT_MS);
 }
 
 void ClientConnection::routeAndBuild()
@@ -347,6 +358,10 @@ void ClientConnection::routeAndBuild()
 	// Serialize → output
 	std::ostringstream os;
 	os << res;
+	std::cout << " REQUEST " << std::endl;
+	std::cout << req << std::endl;
+	std::cout << " RESPONSE" << std::endl;
+	std::cout << res << std::endl;
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size());
 
@@ -355,7 +370,7 @@ void ClientConnection::routeAndBuild()
 	should_close = (req.getHttpVer() == "HTTP/1.0") || (connHdr == "close" || connHdr == "Close");
 
 	state = PH_WRITE;
-	dl.reset(0 /*now*/, WR_TIMEOUT_MS);
+	resetDeadline(WR_TIMEOUT_MS);
 }
 
 void ClientConnection::finishWriteOrNext()
@@ -379,30 +394,31 @@ void ClientConnection::finishWriteOrNext()
 	}
 	plan = RoutePlan();
 	ctx->reset();
+	req = HttpRequest();
+	res = HttpResponse();
 	route_selected = false;
 
 	state = PH_READ_HEADERS;
-	dl.reset(0, HDR_TIMEOUT_MS);
+	resetDeadline(HDR_TIMEOUT_MS);
 
 	if (io.getInputRing().readAvail() > 0)
-	{
 		parseHeaders();
-	}
 }
 
 void ClientConnection::fail(int code, const char *reason)
 {
 
-	HttpResponse r = ResponseFactory::makeText(code, "", reason ? reason : "", /*close*/ true);
+	res = ResponseFactory::makeText(code, "", reason ? reason : "", /*close*/ true);
 
 	std::ostringstream os;
-	os << r;
+	os << res;
+	std::cout << res << std::endl;
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size()); // ChainBuf
 
 	should_close = true;
 	state = PH_WRITE;
-	dl.reset(0, WR_TIMEOUT_MS);
+	resetDeadline(WR_TIMEOUT_MS);
 	finishWriteOrNext();
 }
 

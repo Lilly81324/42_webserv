@@ -80,6 +80,10 @@ struct RouteDecision
 		rel_path.erase();
 		effective_root.erase();
 	}
+	~RouteDecision(){
+		vs =0;
+		loc = 0;
+	};
 };
 
 class RouteResolver

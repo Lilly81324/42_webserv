@@ -406,13 +406,9 @@ std::ostream &operator<<(std::ostream &out, const HttpRequest &target)
 	out << \
 	target.getMethod() << " " << \
 	target.getPath() << " " << \
-	target.getHttpVer() << std::endl << \
-	"-----------" << std::endl;
-	out << target.getHeaders() << std::endl << \
-	"-----------" << std::endl;
+	target.getHttpVer() << std::endl; 
+	out << target.getHeaders() << std::endl; 
 	out.write(target.getBody().data(), target.getBody().size());
-	out << std::endl << \
-	"-----------";
 	return (out);
 }
 

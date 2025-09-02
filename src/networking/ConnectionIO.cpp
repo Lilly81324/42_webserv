@@ -43,7 +43,7 @@ ssize_t ConnectionIO::nb_write()
 	if (n_to_send == 0)
 		return 0;
 
-	ssize_t n = ::send(socket.get(), &tx_scratch[0], (int)n_to_send, 0);
+	ssize_t n = ::send(socket.get(), &tx_scratch[0], (int)n_to_send, MSG_NOSIGNAL);
 
 	if (n > 0)
 	{

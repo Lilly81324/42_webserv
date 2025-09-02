@@ -9,6 +9,14 @@
 #include "Server.h"
 
 class AcceptorHandler : public EventLoop::Handler {
+
+	private:
+	unsigned long long nowMs() const
+		{
+			struct timeval tv; gettimeofday(&tv, 0);
+			return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
+		}
+		
 	public:
 		AcceptorHandler(EventLoop& loop, Server& srv, Listener* L)
 		: eventLoop(loop), _srv(srv), listener(L) {}
@@ -41,8 +49,9 @@ class AcceptorHandler : public EventLoop::Handler {
 					catch (...) { ::close(cfd); continue; }
 
 					// register client handler
-					ClientConnection* c = new ClientConnection(cfd,&_srv);
+					ClientConnection* c = new ClientConnection(cfd,&_srv, nowMs());
 					ClientHandler *h = new ClientHandler(eventLoop,c);
+					std::cout<<"Added new Connection fd:"<<cfd<<std::endl;
 					_srv.trackHandler(h);
 					eventLoop.addFD(cfd, POLLIN, h);
 					// If the client has already sent data (common in tests that write

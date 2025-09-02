@@ -70,12 +70,6 @@ static bool parseCgiHeaders(std::string &buf, int &status, long &content_len)
 	return true;
 }
 
-u_int64_t ClientConnection::nowMs()
-{
-	struct timeval tv;
-	gettimeofday(&tv, 0);
-	return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)tv.tv_usec / 1000ULL;
-}
 
 // Analyze parsed headers and set internal markers for future enforcement.
 // We keep this minimal: detect Content-Length, Transfer-Encoding: chunked,

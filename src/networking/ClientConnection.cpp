@@ -1,249 +1,311 @@
-/* --- ClientConnection.cpp --- */
-/* ------------------------------------------
-author: undefined
-date: 8/10/2025
------------------------------------------- */
-
 #include "ClientConnection.h"
-#include "Server.h"
-#include "HEADER_ENTRIES.h"
-#include "ResponseFactory.h"
+#include "ExpectContinue.h"
 #include "RequestContext.h"
-#include <fstream>
+#include "ResponseFactory.h"
+#include "Server.h"
 #include <sstream>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/uio.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <vector>
-#include <string>
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
-#include <limits.h>
 
-/***---------------------------CLIENT CONNECTION HANDLING REQUEST AND RESPONSE---------------------------***/
+static const int HDR_TIMEOUT_MS = 10000;
+static const int BODY_TIMEOUT_MS = 45000;
+static const int WR_TIMEOUT_MS = 15000;
+static const int IDLE_TIMEOUT_MS = 30000;
 
-// Send HTTP/1.1 100 Continue if client sent Expect: 100-continue
-void ClientConnection::handleExpectContinueIfNeeded()
+ClientConnection::ClientConnection(int fd, Server *s)
+	: state(PH_READ_HEADERS),
+	  server(s),
+	  io(fd, 64 * 1024),
+	  req(),
+	  body(0),
+	  cgi(),
+	  dl(),
+	  hdr_bytes(0),
+	  max_hdr_bytes(64 * 1024),
+	  max_body_bytes(0),
+	  should_close(false),
+	  route_selected(false),
+	  plan(),
+	  pr()
 {
-	if (!expectContinue || state != READ_HEADERS || !fd)
-		return;
-
-	int v = -1;
-	if (server && local_port > 0)
-		v = server->resolveVirtualServerByPort(local_port, "localhost");
-	if (v < 0)
-		v = vs_idx; // fall back to whatever you had
-
-	// If we cannot resolve VS, be conservative: don't send 100
-	if (!server || v < 0)
-		return;
-
-	RouteDecision decision;
-	Router::makeDecisionForVS(server->getConfig(), v, req.getMethod(), req.getPath(), decision);
-
-	// Read limits from decision (location/server)
-	size_t locLimit = (decision.loc) ? decision.loc->write_conf.max_body_bytes : 0;
-	size_t srvLimit = (decision.vs) ? decision.vs->client_max_body_size : 0;
-	size_t limit = (locLimit > 0) ? locLimit : srvLimit;
-
-	// Parse CL / TE from what you already analyzed
-	bool willReject = false;
-	if (bodyMode == BM_CONTENT_LENGTH && expectedContentLength > 0)
+	ctx = new RouteDecision;
+	dl.reset(0, HDR_TIMEOUT_MS);
+	struct sockaddr_storage ss;
+	socklen_t sl = sizeof(ss);
+	local_port = -1;
+	if (getsockname(fd, (struct sockaddr *)&ss, &sl) == 0)
 	{
-		if (limit > 0 && expectedContentLength > limit)
-			willReject = true;
+		if (ss.ss_family == AF_INET)
+		{
+			local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
+		}
+		else if (ss.ss_family == AF_INET6)
+		{
+			local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
+		}
 	}
-	if (bodyMode == BM_CONTENT_LENGTH && transferChunked)
-	{
-		willReject = true; // CL + TE conflict -> 400 (but do not send 100)
-	}
-	if (bodyMode == BM_UNKNOWN)
-	{
-		// If the method requires a body but neither CL nor chunked was seen, we’ll 411.
-		std::string m = req.getMethod();
-		for (size_t i = 0; i < m.size(); ++i)
-			if (m[i] >= 'a' && m[i] <= 'z')
-				m[i] = m[i] - 'a' + 'A';
-		if (m == "POST" || m == "PUT" || m == "PATCH")
-			willReject = true;
-	}
-
-	if (willReject)
-	{
-		// Early error; don't send 100. Minimal immediate reply and close.
-		const char *resp =
-			"HTTP/1.1 413 Payload Too Large\r\n"
-			"Content-Length: 0\r\n"
-			"Connection: close\r\n"
-			"\r\n";
-		::send(fd.get(), resp, std::strlen(resp), MSG_NOSIGNAL);
-		// Close immediately; no keep-alive on early error
-		close();
-		expectContinue = false;
-		return;
-	}
-
-	// Everything looks acceptable -> send 100 Continue
-	const char *resp = "HTTP/1.1 100 Continue\r\n\r\n";
-	::send(fd.get(), resp, std::strlen(resp), MSG_NOSIGNAL);
-	expectContinue = false;
 }
 
-void ClientConnection::onTick()
+ClientConnection::~ClientConnection()
 {
-	if (state == CLOSE || !fd)
+	if (ctx)
+		delete ctx;
+}
+
+bool ClientConnection::isClosed() const { return state == PH_CLOSE; }
+bool ClientConnection::hasPendingWrite() { return io.getChainBuf().getByteSize() != 0; }
+bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
+
+bool ClientConnection::wantsRead()
+{
+	// We want read in header/body phases; can also allow lingering read in PH_CLOSE if you implement it
+	return state == PH_READ_HEADERS || state == PH_ROUTE_SELECT || state == PH_PRECHECK || state == PH_READ_BODY;
+}
+
+void ClientConnection::onTick(unsigned long long now_ms)
+{
+	const std::size_t outbytes = io.getChainBuf().getByteSize();
+
+	if (io.getFlow().shouldPauseRead(outbytes))
+		io.getFlow().setReadPaused(true);
+	if (io.getFlow().shouldResumeRead(outbytes))
+		io.getFlow().setReadPaused(false);
+
+	(void)io.nb_write();
+
+	if (dl.expired(now_ms))
+	{
+		if (state == PH_READ_HEADERS || state == PH_READ_BODY || state == PH_PRECHECK || state == PH_ROUTE_SELECT)
+		{
+			fail(408, "Request Timeout");
+		}
+		else
+		{
+			state = PH_CLOSE;
+		}
+		return;
+	}
+
+	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
+		(void)io.nb_read(32 * 1024);
+
+	switch (state)
+	{
+	case PH_READ_HEADERS:
+		parseHeaders();
+		break;
+	case PH_ROUTE_SELECT:
+		selectRouteOnce();
+		break;
+	case PH_PRECHECK:
+		runPreflight();
+		break;
+	case PH_READ_BODY:
+		readBody();
+	case PH_ROUTE:
+		routeAndBuild();
+	case PH_WRITE:
+		finishWriteOrNext();
+	}
+}
+
+void ClientConnection::parseHeaders()
+{
+	const char *buf = io.getInputRing().readPtr();
+	std::size_t avail = io.getInputRing().readAvail();
+	if (avail == 0)
 		return;
 
-	// If we’re in an active CGI phase, enforce its deadline separately
-	if (cgi_active)
+	std::size_t used = req.parse(buf, avail);
+
+	if (used > 0)
 	{
-		if (nowMs() > cgi_deadline)
+		io.getInputRing().consumed(used);
+		hdr_bytes += used;
+		if (hdr_bytes > max_body_bytes)
 		{
-			// kill CGI and close connection; tests only require the close
-			if (cgi_in_fd >= 0)
-			{
-				::close(cgi_in_fd);
-				cgi_in_fd = -1;
-			}
-			if (cgi_out_fd >= 0)
-			{
-				::close(cgi_out_fd);
-				cgi_out_fd = -1;
-			}
-			proc.terminate();
-			close();
+			fail(431, "Request Header Fields to Larger");
 			return;
 		}
+		dl.reset(0, HDR_TIMEOUT_MS);
+	}
+
+	if (!req.headersDone())
+		return;
+
+	state = PH_PRECHECK;
+	dl.reset(0, BODY_TIMEOUT_MS);
+}
+
+void ClientConnection::selectRouteOnce()
+{
+	if (route_selected)
+	{
+		state = PH_PRECHECK;
+		return;
+	}
+
+	plan.needs_body = false;
+	plan.max_body_bytes = 0;
+	// replace 'localhost' with HttpRequest actual domainName
+	int vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
+
+	Preflight pr = RequestGuards::preflight(server->getConfig(),
+											vs_idx,
+											req.getMethod(),
+											req.getUri(),
+											req.getHeaders(),
+											ctx);
+	route_selected = true;
+	state = PH_PRECHECK;
+	dl.reset(0, BODY_TIMEOUT_MS);
+}
+
+void ClientConnection::runPreflight()
+{
+	const Headers &H = req.getHeaders();
+
+	HeaderCheck hc = HeaderProcessor::analyze(req, H, max_body_bytes);
+
+	if (!hc.ok)
+	{
+		fail(hc.error_status, 0);
+		return;
+	}
+
+	if (!pr.ok)
+	{
+		fail(pr.reject_status ? pr.reject_status : 400, pr.reject_reason.c_str());
+		return;
+	}
+
+	max_body_bytes = pr.max_body_bytes;
+
+	if (!pr.needs_body)
+	{
+		state = PH_ROUTE;
+		return;
+	}
+
+	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
+		ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
+
+	if (hc.chunked)
+	{
+		decideBodyReader(/*chunked*/);
+	}
+	else if (hc.content_length > 0)
+	{
+		if (max_body_bytes && hc.content_length > max_body_bytes)
+		{
+			fail(413, "Payload Too Large");
+			return;
+		}
+		decideBodyReader(hc.content_length);
 	}
 	else
 	{
-		// regular header/body/write phases
-		if (expired())
-		{
-			close(); // tests assert the connection is closed on timeout
-			return;
-		}
-	}
-}
-
-void ClientConnection::changeState(State state)
-{
-	this->state = state;
-}
-
-/**
- * Make sure you remove ClientConnection after call
- * @warning Call destructor after Close so the Client Connection dies
- */
-void ClientConnection::close()
-{
-	if (fd)
-		this->fd.reset();
-	this->state = CLOSE;
-}
-
-// ---- Socket I/O ------------------------------------------------------------
-
-void ClientConnection::onReadable()
-{
-	readFromSocket();
-}
-
-void ClientConnection::readFromSocket()
-{
-	if (this->state != READ_HEADERS || !fd)
+		fail(411, "Length Required");
 		return;
-	while (true)
+	}
+
+	state = PH_READ_BODY;
+	dl.reset(0, BODY_TIMEOUT_MS);
+}
+
+void ClientConnection::readBody()
+{
+	const char *buf = io.getInputRing().readPtr();
+	const std::size_t avail = io.getInputRing().readAvail();
+
+	if (avail == 0)
+		return;
+
+	if (!body)
 	{
-		if (req.getState() == HEADER || req.getState() == START)
-		{
-			if (req.getTotalBytesRead() >= MAX_INBUFFER)
-			{
-				close();
-				return;
-			}
-		}
+		fail(400, "Bad Request");
+		return;
+	}
 
-		char buffer[READ_CHUNK];
-		ssize_t n = ::recv(fd.get(), buffer, sizeof(buffer), 0);
+	std::size_t used = body->consume(buf, avail);
+	if (used > 0)
+	{
+		io.getInputRing().consumed(used);
+		dl.reset(0, BODY_TIMEOUT_MS);
+	}
 
-		if (n > 0)
-		{
-			if (handleRecvPositive(n, buffer))
-				return;
-			inBuffer.clear();
-			if (state == WRITE)
-				return;
-			continue;
-		}
+	if (plan.max_body_bytes && body->bytes_received() > plan.max_body_bytes)
+	{
+		fail(413, "Payload Too Larger");
+		return;
+	}
 
-		if (n == 0)
-		{
-			if (handleRecvZero())
-				return;
-			inBuffer.clear();
-			close();
-			return;
-		}
+	if (!body->complete())
+		return;
+	state = PH_ROUTE;
+	dl.reset(0, WR_TIMEOUT_MS);
+}
 
-		if (n < 0)
-		{
-			if (handleRecvError(n))
-				return;
-			close();
-			return;
-		}
+void ClientConnection::routeAndBuild()
+{
+
+	HttpResponse r;
+
+	// Serialize → output
+	std::ostringstream os;
+	os << r;
+	const std::string s = os.str();
+	io.getChainBuf().push_copy(s.data(), s.size());
+
+	// Keep-alive vs close
+	std::string *connHdr = &req.getHeaders().get("Connection");
+	should_close = (req.getHttpVer() == "HTTP/1.0") || (connHdr && (*connHdr == "close" || *connHdr == "Close"));
+
+	state = PH_WRITE;
+	dl.reset(0 /*now*/, WR_TIMEOUT_MS);
+}
+
+void ClientConnection::finishWriteOrNext()
+{
+	if (io.getChainBuf().getByteSize() != 0)
+		return;
+
+	if (should_close)
+	{
+		state = PH_CLOSE;
+		return;
+	}
+
+	// Reset req now
+	hdr_bytes = 0;
+	max_body_bytes = 0;
+	if (body)
+	{
+		delete body;
+		body = 0;
+	}
+	plan = RoutePlan();
+	route_selected = false;
+
+	state = PH_READ_HEADERS;
+	dl.reset(0, HDR_TIMEOUT_MS);
+
+	if (io.getInputRing().readAvail() > 0)
+	{
+		parseHeaders();
 	}
 }
 
-
-void ClientConnection::onWritable()
+void ClientConnection::fail(int code, const char *reason)
 {
-	if (state != WRITE || !fd)
-		return;
 
-	const size_t total = outBuffer.size();
-	const char *base = total ? &outBuffer[0] : 0;
+	HttpResponse r = ResponseFactory::makeText(code, "", reason ? reason : "", /*close*/ true);
 
-	// If nothing left to send:
-	if (outOffset >= total)
-	{
-		if (flow.getWriteLinger())
-			close();
-		else
-		{
-			flow.setWriteLinger(true);
-			bumpDeadline(WRITE_TIMEOUT_MS);
-		}
-		return;
-	}
-
-	const char *p = base + outOffset;
-	size_t left = total - outOffset;
-
-	ssize_t n = ::send(fd.get(), p, left, MSG_NOSIGNAL);
-	if (n > 0)
-	{
-		outOffset += static_cast<size_t>(n);
-		bumpDeadline(WRITE_TIMEOUT_MS);
-
-		// backpressure: maybe resume reads
-		size_t remaining = total - outOffset;
-		if (flow.isReadPaused() && remaining <= LOW_WATER)
-			flow.setReadPaused(false);
-
-		if (outOffset >= total)
-			flow.setWriteLinger(true);
-		return;
-	}
-
-	if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-		return; // try later
-
-	// hard error
-	close();
+	std::ostringstream os;
+	os << r;
+	const std::string s = os.str();
+	io.getChainBuf().push_copy(s.data(), s.size()); // ChainBuf
+	
+	should_close = true;
+	state = PH_WRITE;
+	dl.reset(0, WR_TIMEOUT_MS);
 }

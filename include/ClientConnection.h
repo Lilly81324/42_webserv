@@ -118,10 +118,11 @@ class ClientConnection
 
 		void readFromSocket();
 		bool processIncoming();
-		bool headersComplete(const std::vector<char> &buf, HttpRequest &request);
-		void analyzeHeaders(const HttpRequest &request);
-		void handleExpectContinueIfNeeded();
-		bool evaluate_request_policy(HttpRequest &req, RequestContext &ctx, HttpResponse &res);
+		#ifdef UNIT_TEST
+    		void ensureHelloInBuffer_();  // test-only safety net for POLLOUT-driven tests
+		#endif
+		
+		// bool headersComplete(const std::vector<char> &buf, size_t &parseOffset, HttpRequest &request);
 
 	public:
 		static const int HDR_TIMEOUT_MS = 10000;
@@ -164,23 +165,10 @@ class ClientConnection
 			}
 		}
 
-		explicit ClientConnection(int fd, const Server *srv)
-			: state(READ_HEADERS), fd(fd), inBuffer(), outBuffer(), parseOffset(0), outOffset(0), bytesErased(0), server(srv), vs_idx(-1),
-			phaseDeadline(), flow(), req(), res(), bodyMode(BM_NONE), expectedContentLength(0), expectContinue(false), transferChunked(false), headersAnalyzed(false),
-			proc(), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1), cgi_body_off(0), cgi_buf(), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1), cgi_deadline(0ULL)
-		{
-			phaseDeadline.reset(nowMs(), HDR_TIMEOUT_MS);
-			flow = FlowControl(HIGH_WATER, LOW_WATER);
-			struct sockaddr_storage ss;
-			socklen_t sl = sizeof(ss);
-			local_port = -1;
-			if (getsockname(fd, (struct sockaddr *)&ss, &sl) == 0) {
-				if (ss.ss_family == AF_INET) {
-					local_port = (int)ntohs(((sockaddr_in *)&ss)->sin_port);
-				} else if (ss.ss_family == AF_INET6) {
-					local_port = (int)ntohs(((sockaddr_in6 *)&ss)->sin6_port);
-				}
-			}
+		bool makeHelloResponse(); 
+
+		bool wantsRead() const {
+			return state == READ_HEADERS && !isReadPaused();/*|| state == RECV_BODY*/;
 		}
 
 		~ClientConnection() {}

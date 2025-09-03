@@ -4,25 +4,42 @@
 author: undefined
 date: 8/10/2025
 ------------------------------------------ */
-
 #include "HttpResponse.h"
-#include <iostream>
+#include <sstream>
 
+HttpResponse::HttpResponse()
+: http_version("HTTP/1.1")
+, session_id("")
+, bodyLength(0)
+, headers()
+, cookies()
+, body()
+, status(200)
+, reason("OK")
+{}
 
-std::ostream &operator<<(std::ostream &out, const HttpResponse &r)
-{
-    out << r.http_version << ' ' << r.status << ' ' << r.reason << "\r\n";
+HttpResponse::~HttpResponse() {}
 
-    out << r.headers;
+void HttpResponse::setStatus(int code, const std::string &r) {
+    status = code;
+    reason = r;
+}
 
-    out << "Content-Length: " << r.body.size() << "\r\n";
+int HttpResponse::getStatusCode() const { return status; }
+const std::string& HttpResponse::getReason() const { return reason; }
 
-    out << "\r\n";
+void HttpResponse::clearBody() {
+    body.clear();
+    bodyLength = 0;
+    headers.set(std::string("Content-Length"), std::string("0"));
+}
 
-
-    if (!r.body.empty())
-        out.write(reinterpret_cast<const char*>(r.body.data()), static_cast<std::streamsize>(r.body.size()));
-
+std::ostream &operator<<(std::ostream &out, const HttpResponse &r) {
+    out << r.http_version << " " << r.status << " " << r.reason << "\r\n";
+    out << r.headers.serialize();
+    out << "(bodyLength=" << r.bodyLength << ")\n";
     return out;
 }
+
+
 

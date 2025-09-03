@@ -10,46 +10,38 @@ Date: 8/10/2025
 
 #include <string>
 #include <vector>
-#include <errno.h>
+#include <ostream>
 #include "Headers.h"
 #include "CookieJar.h"
 
-using namespace std;
-
-/**
- * @brief Class that represents a full Http Response
- * ---------------------------------------------------
- */
-class HttpResponse
-{
+class HttpResponse {
 public:
-	string http_version;
-	string session_id;
-	size_t bodyLength;
-	Headers headers;
-	CookieJar cookies;
-	vector<char> body;
-	int status;
-	std::string reason;
-	int exit_code;
-	HttpResponse() : http_version("HTTP/1.1"),
-					 session_id(""),
-					 bodyLength(0),
-					 status(200),
-					 reason("OK")
-	{
-	}
-	~HttpResponse(){};
+    std::string  http_version;
+    std::string  session_id;
+    size_t       bodyLength;
+    Headers      headers;
+    CookieJar    cookies;
+    std::vector<char> body;
+
+    // >>> Keep legacy public names <<<
+    int          status;       // e.g. 200
+    std::string  reason;       // e.g. "OK"
+
+    HttpResponse();
+    ~HttpResponse();
+
+    // Optional helpers (used by newer code paths)
+    void setStatus(int code, const std::string& r);
+    int  getStatusCode() const;
+    const std::string& getReason() const;
+
+    // Handy helper some code uses
+    void clearBody();
 };
 
-/**
- * DANGER
- * PLACEHOLDER
- * USES THE ostream.write external function
- * which isnt allowed
- * DELETE LATER
- * ...or keep it for debugging
- */
-std::ostream &operator<<(std::ostream &out, const HttpResponse &target);
+// Debug/trace helper (safe)
+std::ostream& operator<<(std::ostream& out, const HttpResponse& r);
 
 #endif // HTTPRESPONSE_H
+
+

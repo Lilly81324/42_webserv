@@ -140,10 +140,9 @@ void HttpResponse::ensureDefaultHeaders()
 		headers.set("Connection", "close");
 }
 
-std::ostream &operator<<(std::ostream &out, const HttpResponse &r)
-{
-	out << r.http_version << " " << r.status << " " << r.reason << "\r\n";
-	out << r.headers.serialize();
-	out << r.body.data();
-	return out;
+std::ostream& operator<<(std::ostream& out, const HttpResponse& r) {
+    out << r.http_version << " " << r.status << " " << r.reason << "\r\n";
+    out << r.headers.serialize();
+    out << r.body.data();
+    return out;
 }

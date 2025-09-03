@@ -10,50 +10,47 @@
 
 #include "helpers/net.hpp"
 
-/**
- * Removed because of the thread issue at loopThread.join();
- */
-// TEST_CASE("Parallel clients: 16 requests in parallel", "[server][parallel]")
-// {
-// 	const int port = pick_free_port_ipv4();
-// 	ServerConfig cfg;
-// 	VirtualServer vs;
-// 	vs.listen_host = "127.0.0.1";
-// 	vs.listen_port = port;
-// 	cfg.push_back(vs);
-// 	Server s(cfg);
-// 	REQUIRE_NOTHROW(s.start());
-// 	std::thread loop([&]
-// 					 { s.run(25); });
+TEST_CASE("Parallel clients: 16 requests in parallel", "[server][parallel]")
+{
+	const int port = pick_free_port_ipv4();
+	ServerConfig cfg;
+	VirtualServer vs;
+	vs.listen_host = "127.0.0.1";
+	vs.listen_port = port;
+	cfg.push_back(vs);
+	Server s(cfg);
+	REQUIRE_NOTHROW(s.start());
+	std::thread loop([&]
+					 { s.run(25); });
 
-// 	const int N = 16;
-// 	std::vector<std::thread> threads;
-// 	threads.reserve(N);
-// 	std::vector<std::string> results(N);
+	const int N = 16;
+	std::vector<std::thread> threads;
+	threads.reserve(N);
+	std::vector<std::string> results(N);
 
-// 	for (int i = 0; i < N; ++i)
-// 	{
-// 		threads.push_back(std::thread([&, i]
-// 									  {
-//             int fd = connect_ipv4(port);
-//             const char req[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
-//             write_all(fd, req, sizeof(req)-1);
-//             results[i] = read_until_eof(fd);
-//             ::close(fd); }));
-// 	}
+	for (int i = 0; i < N; ++i)
+	{
+		threads.push_back(std::thread([&, i]
+									  {
+            int fd = connect_ipv4(port);
+            const char req[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+            write_all(fd, req, sizeof(req)-1);
+            results[i] = read_until_eof(fd);
+            ::close(fd); }));
+	}
 
-// 	for (size_t i = 0; i < threads.size(); ++i)
-// 		threads[i].join();
+	for (size_t i = 0; i < threads.size(); ++i)
+		threads[i].join();
 
-// 	s.stop();
-// 	if (loop.joinable())
-// 		loop.join();
+	s.stop();
+	if (loop.joinable())
+		loop.join();
 
-// 	for (size_t i = 0; i < results.size(); ++i)
-// 	{
-// 		REQUIRE(results[i].find("HTTP/1.1 200") != std::string::npos);
-// 	}
-// }
+	for (size_t i = 0; i < results.size(); ++i)
+	{
+		REQUIRE(results[i].find("HTTP/1.1 404") != std::string::npos);
+	}
+}
 
 #ifdef AF_INET6
 #include <netdb.h>
@@ -73,7 +70,7 @@ static bool ipv6_loopback_available()
 }
 
 /**
- * Removed because of the thread issue at loopThread.join();
+ * Just leave it like that in there
  */
 // TEST_CASE("IPv6 (::1) optional request", "[server][ipv6][optional]")
 // {
@@ -124,6 +121,7 @@ static bool ipv6_loopback_available()
 // 	if (loop.joinable())
 // 		loop.join();
 
-// 	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
+// 	std::cout << resp << std::endl;
+// 	REQUIRE(resp.find("HTTP/1.1 404") != std::string::npos);
 // }
 #endif

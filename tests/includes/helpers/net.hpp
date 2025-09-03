@@ -111,12 +111,7 @@ inline std::string read_until_eof(int fd, size_t guard = (1u << 20))
 
 	for (;;)
 	{
-		std::cout << "Started receiving" << std::endl;
 		ssize_t r = ::recv(fd, buf, sizeof(buf),0);
-		if (r > 0)
-			std::cout << "Received: ["<<std::string(buf, r)<<"]" << std::endl;
-		else
-			std::cout << "Received ERROR" << std::endl;
 		if (r == 0)
 			break; // peer sent FIN: clean EOF
 		if (r < 0)

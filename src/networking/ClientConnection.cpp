@@ -151,7 +151,6 @@ void ClientConnection::parseHeaders()
 {
 	const char *buf = io.getInputRing().readPtr();
 	std::size_t avail = io.getInputRing().readAvail();
-	// std::cout<<buf<<std::endl;
 	if (avail == 0)
 	return;
 	

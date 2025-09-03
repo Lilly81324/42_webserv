@@ -132,15 +132,29 @@ static bool isValidVSIndex(const ServerConfig &cfg, int vs_idx)
 // Helper: Check allowed methods (except PUT/PATCH)
 static bool isMethodAllowed(const Location *L, const std::string &method)
 {
-	if (!L || L->allowed_methods.empty() || method == "PUT" || method == "PATCH")
-		return true;
-	for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin(); it != L->allowed_methods.end(); ++it)
-	{
-		if (*it == method)
-			return true;
-	}
-	return false;
+    if (!L || L->allowed_methods.empty() || method == "PUT" || method == "PATCH")
+        return true;
+
+    // Treat HEAD as allowed when GET is allowed
+    if (method == "HEAD") {
+        for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin();
+             it != L->allowed_methods.end(); ++it)
+        {
+            if (*it == "HEAD" || *it == "GET")
+                return true;
+        }
+        return false;
+    }
+
+    for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin();
+         it != L->allowed_methods.end(); ++it)
+    {
+        if (*it == method)
+            return true;
+    }
+    return false;
 }
+
 
 // Helper: Check PUT/PATCH allowed
 static bool isPutPatchAllowed(const Location *L, const std::string &method)

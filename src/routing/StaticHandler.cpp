@@ -16,6 +16,8 @@ date: 8/10/2025
 #include "HttpResponse.h"
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
+#include "HttpPreconditions.h"
+
 
 #include <sys/stat.h>
 #include <dirent.h>
@@ -52,6 +54,19 @@ static std::string extOf(const std::string &p)
         return "";
     return toLower(p.substr(dot + 1));
 }
+
+
+// RFC 7231 IMF-fixdate (e.g., "Wed, 21 Oct 2015 07:28:00 GMT")
+static std::string httpDate(time_t t)
+{
+    char buf[64];
+    struct tm g = *::gmtime(&t);
+    if (std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &g))
+        return std::string(buf);
+    return std::string();
+}
+
+
 
 static std::string guessMime(const std::string &path, const ServerConfig *cfg)
 {
@@ -373,26 +388,41 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
     }
 
     if (S_ISREG(st.st_mode)) {
-        std::vector<char> file;
-        if (!readWholeFile(canonPath, file)) {
-            // Failed to read: 404 page fallback (or empty)
-            return serveErrorPage_(404, ctx, res, is_head);
-        }
+    // Build ETag and Last-Modified first (we’ll need them for 304)
+    const std::string et = makeEtag(st);
+    const std::string lm = httpDate(st.st_mtime);
 
+    // Conditional GET handling
+    if (HttpPreconditions::isNotModified(req, et, st.st_mtime)) {
+        res.setStatus(304);
         res.body.clear();
-        if (!is_head) res.body.assign(file.begin(), file.end());
-
-        res.headers.set(HDR_CONTENT_TYPE, guessMime(canonPath, ctx.cfg));
-        const std::string et = makeEtag(st);
         res.headers.set(HDR_ETAG, et);
-
-        // We DO NOT emit 304 here (serializer always emits 200).
-
-        std::ostringstream cl; cl << (unsigned long)file.size();
-        res.headers.set(HDR_CONTENT_LENGTH, cl.str());
-        res.bodyLength = file.size();
+        if (!lm.empty()) res.headers.set(HDR_LAST_MODIFIED, lm);
+        res.headers.set(HDR_CONTENT_LENGTH, "0");
+        res.bodyLength = 0;
         return true;
     }
+
+    // Normal 200 body
+    std::vector<char> file;
+    if (!readWholeFile(canonPath, file)) {
+        // Failed to read: 404 page fallback (or empty)
+        return serveErrorPage_(404, ctx, res, is_head);
+    }
+
+    res.body.clear();
+    if (!is_head) res.body.assign(file.begin(), file.end());
+
+    res.headers.set(HDR_CONTENT_TYPE, guessMime(canonPath, ctx.cfg));
+    res.headers.set(HDR_ETAG, et);
+    if (!lm.empty()) res.headers.set(HDR_LAST_MODIFIED, lm);
+
+    std::ostringstream cl; cl << (unsigned long)file.size();
+    res.headers.set(HDR_CONTENT_LENGTH, cl.str());
+    res.bodyLength = file.size();
+    return true;
+}
+
 
     // Not a dir or regular file -> 404 page if available
     return serveErrorPage_(404, ctx, res, is_head);

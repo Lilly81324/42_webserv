@@ -54,7 +54,7 @@ TEST_CASE("ClientConnection starts in PH_READ_HEADERS and tolerates partial head
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,25);
 	REQUIRE(conn.getState() == PH_READ_HEADERS);
 
 	const std::string h1 = "GET / HTTP/1.1\r\nHost: example\r\nUser-Agent: te";
@@ -80,7 +80,7 @@ TEST_CASE("Oversized headers trigger 431 and close flow", "[conn][headers][431]"
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,25);
 
 	// Make header limit tiny
 	conn.max_hdr_bytes = 64;
@@ -109,7 +109,7 @@ TEST_CASE("Content-Length small body parses and responds 200; keep-alive allows 
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,400);
 
 	// First request
 	std::string req1 = "POST /echo HTTP/1.1\r\nHost: ex\r\nContent-Length: 5\r\n\r\nhello";
@@ -142,7 +142,7 @@ TEST_CASE("Expect: 100-continue pre-response is emitted before body", "[conn][ex
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,25);
 
 	// Send headers with Expect: 100-continue and small body coming
 	const std::string h = "POST /u HTTP/1.1\r\nHost: ex\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n";
@@ -173,7 +173,7 @@ TEST_CASE("413 Payload Too Large: reject known CL before reading body", "[conn][
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,25);
 	conn.max_body_bytes = 8; // tiny cap
 
 	// Advertise bigger than allowed
@@ -198,7 +198,7 @@ TEST_CASE("Runtime size enforcement for chunked: 413 once bytes_received exceeds
 	cfg.push_back(vs);
 	Server server(cfg);
 
-	ClientConnection conn(sv[0], &server,1000000000);
+	ClientConnection conn(sv[0], &server,25);
 	conn.max_body_bytes = 6; // cap lower than incoming body
 
 	// chunked with total 9 bytes (Wikipedia)

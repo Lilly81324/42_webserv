@@ -23,14 +23,6 @@ class ConnectionIO
 private:
 	ConnectionIO(const ConnectionIO &);
 	ConnectionIO &operator=(const ConnectionIO &);
-	ssize_t read(char *buffer, size_t size)
-	{
-		return ::read(socket.get(), buffer, size);
-	}
-	ssize_t write(const char *buffer, size_t size)
-	{
-		return ::write(socket.get(), buffer, size);
-	}
 
 public:
 	explicit ConnectionIO(int fd = -1, std::size_t inCap = 64 * 1024)

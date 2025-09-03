@@ -10,6 +10,9 @@ date: 8/10/2025
 #include <sstream>
 #include <fstream>
 
+
+static unsigned long long BUFFERLIMIT = 128 * 1048 ;
+
 /**
  * Wether given Method is a valid one
  * @returns true if it is
@@ -285,6 +288,12 @@ bool HttpRequest::parse(const char *data, size_t n)
 
 	if (this->state == ERROR || this->state == OVER || n < 1)
 		return (false);
+	if (this->buffer.size() + n > BUFFERLIMIT )
+	{
+		this->state = ERROR;
+		errno = HTTP_BAD_REQUEST;
+		return (false);
+	}
 	newInput = string(data, n);
 	this->buffer += newInput;
 	this->totalBytesRead += newInput.size();

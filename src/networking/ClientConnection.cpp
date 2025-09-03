@@ -71,7 +71,12 @@ ClientConnection::~ClientConnection()
 bool ClientConnection::isClosed() const { return state == PH_CLOSE; }
 bool ClientConnection::hasPendingWrite() { return io.getChainBuf().getByteSize() != 0; }
 bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
-void ClientConnection::close() { server->releaseConnection(this); }
+void ClientConnection::close() 
+
+{
+	std::cout<<"This connection got TIMED OUT  fd:"<<getFD()<<std::endl; 
+	server->releaseConnection(this); 
+}
 
 bool ClientConnection::wantsRead()
 {
@@ -105,7 +110,8 @@ void ClientConnection::onTick(unsigned long long now_ms)
 	}
 
 	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
-		(void)io.nb_read(32 * 1024);
+		if(io.nb_read(32 * 1024) > 0 )
+			state = PH_CLOSE;
 
 	switch (state)
 	{
@@ -150,17 +156,19 @@ void ClientConnection::parseHeaders()
 {
 	const char *buf = io.getInputRing().readPtr();
 	std::size_t avail = io.getInputRing().readAvail();
+	// std::cout<<buf<<std::endl;
 	if (avail == 0)
-		return;
-
+	return;
+	
 	if(!req.parse(buf, avail))
 	{
 		if(errno == HTTP_BAD_REQUEST || errno == HTTP_HEADER_TOO_BIG)
 			fail(errno,"");
 	}
-
-	std::size_t used = req.getBytesHandledLast();
-
+	
+	std::size_t used = avail;
+	
+	// std::cout<<avail<<" used: "<<used<<std::endl;
 	if (used > 0)
 	{
 		io.getInputRing().consumed(used);

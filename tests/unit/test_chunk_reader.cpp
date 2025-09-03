@@ -27,6 +27,9 @@ static std::string slurp(const std::string &p)
 	return s;
 }
 
+/**
+ * Chunk reading fails
+ */
 TEST_CASE("chunked: immediate spill (threshold==0), completes after trailers", "[chunked][spill]")
 {
 	std::vector<char> mem;

@@ -138,7 +138,8 @@ TEST_CASE("Expect: 100-continue pre-response is emitted before body", "[conn][ex
 	set_nonblock(sv[0]); set_nonblock(sv[1]);
 
 	ServerConfig cfg;
-	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	VirtualServer vs;
+	vs.client_body_temp_path = "/tmp";
 	cfg.push_back(vs);
 	Server server(cfg);
 
@@ -191,6 +192,9 @@ TEST_CASE("413 Payload Too Large: reject known CL before reading body", "[conn][
 	::close(sv[1]);
 }
 
+/**
+ * Somethings wrong with the setup of the virtual servers, and we get an fd of -1
+ */
 TEST_CASE("Runtime size enforcement for chunked: 413 once bytes_received exceeds cap", "[conn][chunked][413]") {
 	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
 	set_nonblock(sv[0]); set_nonblock(sv[1]);

@@ -10,48 +10,53 @@ Date: 8/10/2025
 
 #include <string>
 #include <vector>
-#include <errno.h>
+#include <ostream>
 #include "Headers.h"
 #include "CookieJar.h"
 
-using namespace std;
-
-/**
- * @brief Class that represents a full Http Response
- * ---------------------------------------------------
- */
-class HttpResponse
-{
+class HttpResponse {
 public:
-	string http_version;
-	string session_id;
-	size_t bodyLength;
-	Headers headers;
-	CookieJar cookies;
-	vector<char> body;
-	int status;
-	std::string reason;
-	int exit_code;
-	HttpResponse() : http_version("HTTP/1.1"),
-					 session_id(""),
-					 bodyLength(0),
-					 status(200),
-					 reason("OK")
-	{
-	}
-	~HttpResponse(){};
+    // Wire metadata
+    std::string       http_version;   // e.g. "HTTP/1.1"
+    std::string       session_id;
+
+    // Body bookkeeping
+    size_t            bodyLength;     // if 0, serializer should use body.size()
+    std::vector<char> body;
+
+    // Headers & cookies
+    Headers           headers;
+    CookieJar         cookies;
+
+    // Legacy names for compatibility
+    int               status;         // e.g. 200
+    std::string       reason;         // e.g. "OK"
+
+    HttpResponse();
+    ~HttpResponse();
+
+    // Helpers
+    void setStatus(int code);                       // infers reason
+    void setStatus(int code, const std::string& r); // explicit reason
+    int  getStatusCode() const;
+    const std::string& getReason() const;
+
+    void setBody(const std::string& s);
+    void clearBody();
+
+    Headers& headersRef() { return headers; }
+    const Headers& headersRef() const { return headers; }
+
+    // Ensures Date, Server, Content-Length, Connection defaults.
+    void ensureDefaultHeaders();
 };
 
-/**
- * DANGER
- * PLACEHOLDER
- * USES THE ostream.write external function
- * which isnt allowed
- * DELETE LATER
- * ...or keep it for debugging
- */
-std::ostream &operator<<(std::ostream &out, const HttpResponse &target);
+// Debug/trace helper (does NOT print the actual body bytes)
+std::ostream& operator<<(std::ostream& out, const HttpResponse& r);
 
 #endif // HTTPRESPONSE_H
+
+
+
 
 

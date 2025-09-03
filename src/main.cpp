@@ -15,7 +15,7 @@ static void on_sig(int)
 }
 
 /** For now I get port from ARGV */
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
 	try
 	{

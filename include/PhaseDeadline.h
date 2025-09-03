@@ -2,6 +2,8 @@
 #ifndef PHASEDEADLINE_H
 #define PHASEDEADLINE_H
 
+#include "Timeout.h"
+
 class PhaseDeadline
 {
 public:

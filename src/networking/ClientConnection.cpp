@@ -10,10 +10,6 @@
 #include <sstream>
 #include <netinet/in.h>
 
-static const int HDR_TIMEOUT_MS = 10000;
-static const int BODY_TIMEOUT_MS = 45000;
-static const int WR_TIMEOUT_MS = 15000;
-static const int IDLE_TIMEOUT_MS = 30000;
 static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
 ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)

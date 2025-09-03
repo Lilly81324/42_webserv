@@ -366,6 +366,8 @@ void ClientConnection::routeAndBuild()
 {
 
 	(void)ServerPipeline::processRequest(server->getConfig(), vs_idx, req, res, *ctx);
+
+	res.ensureDefaultHeaders();
 	// Serialize → output
 	std::ostringstream os;
 	os << res;

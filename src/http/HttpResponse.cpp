@@ -140,9 +140,15 @@ void HttpResponse::ensureDefaultHeaders()
 		headers.set("Connection", "close");
 }
 
-std::ostream& operator<<(std::ostream& out, const HttpResponse& r) {
+// HttpResponse.cpp
+std::ostream& operator<<(std::ostream& out, const HttpResponse& r)
+{
     out << r.http_version << " " << r.status << " " << r.reason << "\r\n";
     out << r.headers.serialize();
-    out << r.body.data();
+
+    if (!r.body.empty())
+        out.write(&r.body[0], std::streamsize(r.body.size())); // ✅ write exact bytes
+
     return out;
 }
+

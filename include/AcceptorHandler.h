@@ -51,7 +51,6 @@ class AcceptorHandler : public EventLoop::Handler {
 					// register client handler
 					ClientConnection* c = new ClientConnection(cfd,&_srv, nowMs());
 					ClientHandler *h = new ClientHandler(eventLoop,c);
-					std::cout<<"Added new Connection fd:"<<cfd<<std::endl;
 					_srv.trackHandler(h);
 					eventLoop.addFD(cfd, POLLIN, h);
 					// If the client has already sent data (common in tests that write

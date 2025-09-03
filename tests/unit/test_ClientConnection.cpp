@@ -169,19 +169,21 @@ TEST_CASE("413 Payload Too Large: reject known CL before reading body", "[conn][
 	set_nonblock(sv[0]); set_nonblock(sv[1]);
 
 	ServerConfig cfg;
-	VirtualServer vs; vs.client_body_temp_path = "/tmp";
-	cfg.push_back(vs);
+	cfg.parseFile("tests/unit/config/with_locations.conf");
+	
 	Server server(cfg);
 
+	server.start();
 	ClientConnection conn(sv[0], &server,25);
 	conn.max_body_bytes = 8; // tiny cap
 
 	// Advertise bigger than allowed
-	std::string req = "POST /u HTTP/1.1\r\nHost: ex\r\nContent-Length: 200000000000000\r\n\r\n";
+	std::string req = "POST /localhost8080/api HTTP/1.1\r\nHost:ex \r\nContent-Length: 200000000000000\r\n\r\n";
 	REQUIRE(::send(sv[1], req.data(), (int)req.size(), 0) == (ssize_t)req.size());
 
 	drive_ticks(conn, 13);
 	std::string out = recv_all_now(sv[1]);
+	std::cout << "[" << out << "]" << std::endl;
 	REQUIRE(out.find(" 413 ") != std::string::npos);
 	bool ok = conn.getState() == PH_WRITE || conn.getState() == PH_CLOSE;
 	REQUIRE(ok == true);

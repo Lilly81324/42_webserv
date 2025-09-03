@@ -2,9 +2,9 @@
  #define TIMEOUT_H
 
 
-# define HDR_TIMEOUT_MS 1000u
-# define BODY_TIMEOUT_MS 4500
-# define WR_TIMEOUT_MS 1500
-# define IDLE_TIMEOUT_MS 3000
+# define HDR_TIMEOUT_MS 10000u
+# define BODY_TIMEOUT_MS 45000
+# define WR_TIMEOUT_MS 15000
+# define IDLE_TIMEOUT_MS 30000
 
 #endif // TIMEOUT_H

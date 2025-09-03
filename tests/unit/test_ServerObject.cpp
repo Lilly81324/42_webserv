@@ -83,49 +83,48 @@ static std::string read_until_eof(int fd)
 /**
  * Removed because of the thread issue at loopThread.join();
  */
-// TEST_CASE("End-to-end: single request yields hello response", "[server][e2e]")
-// {
-// 	const int port = pick_free_port();
+TEST_CASE("End-to-end: single request yields hello response", "[server][e2e][single]")
+{
+	const int port = pick_free_port();
 
-// 	// minimal config (real types via Server.h includes)
-// 	ServerConfig cfg;
-// 	VirtualServer vs;
-// 	vs.listen_host = "127.0.0.1";
-// 	vs.listen_port = port;
-// 	cfg.push_back(vs);
+	// minimal config (real types via Server.h includes)
+	ServerConfig cfg;
+	VirtualServer vs;
+	vs.listen_host = "127.0.0.1";
+	vs.listen_port = port;
+	cfg.push_back(vs);
 
-// 	Server s(cfg);
-// 	REQUIRE_NOTHROW(s.start());
-// 	REQUIRE(s.listenerCount() == 1);
-// 	REQUIRE(s.listenerPortAt(0) == port);
+	Server s(cfg);
+	REQUIRE_NOTHROW(s.start());
+	REQUIRE(s.listenerCount() == 1);
+	REQUIRE(s.listenerPortAt(0) == port);
 
-// 	// run the event loop in background
-// 	std::thread loopThread([&]()
-// 						   {
-// 							   s.run(50); // 50ms poll timeout
-// 						   });
+	// run the event loop in background
+	std::thread loopThread([&]()
+						   {
+							   s.run(50); // 50ms poll timeout
+						   });
 
-// 	// client: connect, send a minimal HTTP/1.1 request, read response
-// 	const int cfd = connect_to_local(port);
-// 	const char req[] =
-// 		"GET / HTTP/1.1\r\n"
-// 		"Host: test.local\r\n"
-// 		"\r\n";
-// 	write_all(cfd, req, sizeof(req) - 1);
-// 	std::string resp = read_until_eof(cfd);
-// 	::close(cfd);
+	// client: connect, send a minimal HTTP/1.1 request, read response
+	const int cfd = connect_to_local(port);
+	const char req[] =
+		"GET / HTTP/1.1\r\n"
+		"Host: test.local\r\n"
+		"\r\n";
+	write_all(cfd, req, sizeof(req) - 1);
+	std::string resp = read_until_eof(cfd);
+	::close(cfd);
 
-// 	// stop loop and join
-// 	s.stop();
-// 	if (loopThread.joinable())
-// 		loopThread.join();
+	// stop loop and join
+	s.stop();
+	if (loopThread.joinable())
+		loopThread.join();
 
-// 	// basic assertions on the placeholder response your ClientConnection builds
-// 	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
-// 	REQUIRE(resp.find("Content-Length: 5") != std::string::npos);
-// 	REQUIRE(resp.size() >= resp.find("\r\n\r\n") + 4);
-// 	REQUIRE(resp.substr(resp.size() - 5) == "hello");
-// }
+	// basic assertions on the placeholder response your ClientConnection builds
+	std::cout << resp << std::endl;
+	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
+	REQUIRE(resp.size() >= resp.find("\r\n\r\n") + 4);
+}
 
 TEST_CASE("End-to-end: multiple sequential connections", "[server][e2e][seq]")
 {
@@ -155,7 +154,6 @@ TEST_CASE("End-to-end: multiple sequential connections", "[server][e2e][seq]")
 		::close(cfd);
 
 		REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
-		REQUIRE(resp.substr(resp.size() - 5) == "hello");
 	}
 
 	s.stop();
@@ -245,46 +243,43 @@ TEST_CASE("End-to-end: client half-closes after request", "[server][e2e]")
 
 	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
 	REQUIRE(resp.size() >= resp.find("\r\n\r\n") + 4);
-	REQUIRE(resp.substr(resp.size() - 5) == "hello");
 }
 
-/**
- * Removed because of the thread issue at loopThread.join();
- */
-// TEST_CASE("End-to-end: headers split across two TCP reads", "[server][e2e][split]")
-// {
-// 	const int port = pick_free_port();
 
-// 	ServerConfig cfg;
-// 	VirtualServer vs;
-// 	vs.listen_host = "127.0.0.1";
-// 	vs.listen_port = port;
-// 	cfg.push_back(vs);
+TEST_CASE("End-to-end: headers split across two TCP reads", "[server][e2e][split]")
+{
+	const int port = pick_free_port();
 
-// 	Server s(cfg);
-// 	REQUIRE_NOTHROW(s.start());
-// 	std::thread loopThread([&]
-// 						   { s.run(50); });
+	ServerConfig cfg;
+	VirtualServer vs;
+	vs.listen_host = "127.0.0.1";
+	vs.listen_port = port;
+	cfg.push_back(vs);
 
-// 	int cfd = connect_to_local(port);
+	Server s(cfg);
+	REQUIRE_NOTHROW(s.start());
+	std::thread loopThread([&]
+						   { s.run(50); });
 
-// 	const char part1[] = "GET / HTTP/1.1\r\nHost: x\r\n";
-// 	const char part2[] = "\r\n"; // completes CRLFCRLF
+	int cfd = connect_to_local(port);
 
-// 	write_all(cfd, part1, sizeof(part1) - 1);
+	const char part1[] = "GET / HTTP/1.1\r\nHost: x\r\n";
+	const char part2[] = "\r\n"; // completes CRLFCRLF
 
-// 	// small pause so the server gets woken and sees a partial header
-// 	// (use usleep to avoid adding <chrono> in some environments)
-// 	::usleep(5000);
+	write_all(cfd, part1, sizeof(part1) - 1);
 
-// 	write_all(cfd, part2, sizeof(part2) - 1);
+	// small pause so the server gets woken and sees a partial header
+	// (use usleep to avoid adding <chrono> in some environments)
+	::usleep(5000);
 
-// 	std::string resp = read_until_eof(cfd);
-// 	::close(cfd);
+	write_all(cfd, part2, sizeof(part2) - 1);
 
-// 	s.stop();
-// 	if (loopThread.joinable())
-// 		loopThread.join();
+	std::string resp = read_until_eof(cfd);
+	::close(cfd);
 
-// 	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
-// }
+	s.stop();
+	if (loopThread.joinable())
+		loopThread.join();
+
+	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
+}

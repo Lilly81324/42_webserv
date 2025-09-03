@@ -19,7 +19,7 @@ ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 		space = maxBytes;
 
 	char *dst = in.writePtr();
-	ssize_t n = ::recv(socket.get(), dst, (int)space, MSG_NOSIGNAL);
+	ssize_t n = ::recv(socket.get(), dst, (int)space, MSG_DONTWAIT);
 
 	if (n > 0)
 	{
@@ -43,7 +43,7 @@ ssize_t ConnectionIO::nb_write()
 	if (n_to_send == 0)
 		return 0;
 
-	ssize_t n = ::send(socket.get(), &tx_scratch[0], (int)n_to_send, MSG_NOSIGNAL);
+	ssize_t n = ::send(socket.get(), &tx_scratch[0], (int)n_to_send, MSG_DONTWAIT);
 
 	if (n > 0)
 	{

@@ -70,7 +70,6 @@ bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
 void ClientConnection::close() 
 
 {
-	std::cout<<"This connection got TIMED OUT  fd:"<<getFD()<<std::endl; 
 	server->releaseConnection(this); 
 }
 
@@ -197,12 +196,13 @@ void ClientConnection::selectRouteOnce()
 	// replace 'localhost' with HttpRequest actual domainName
 	vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
 
-	Preflight pr = RequestGuards::preflight(server->getConfig(),
+	pr = RequestGuards::preflight(server->getConfig(),
 											vs_idx,
 											req.getMethod(),
 											req.getPath(),
 											req.getHeaders(),
 											ctx);
+	
 	route_selected = true;
 	state = PH_PRECHECK;
 	resetDeadline(BODY_TIMEOUT_MS);
@@ -229,18 +229,21 @@ void ClientConnection::runPreflight()
 	max_body_bytes = pr.max_body_bytes;
 
 	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
-	ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
+		ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
+
 	if (!pr.needs_body)
 	{
 		state = PH_ROUTE;
 		return;
 	}
+
 	if (hc.chunked)
 	{
 		decideBodyReader(/*chunked*/);
 	}
 	else if (hc.content_length > 0)
 	{
+	
 		if (max_body_bytes && hc.content_length > max_body_bytes)
 		{
 			fail(413, "Payload Too Large");
@@ -253,6 +256,8 @@ void ClientConnection::runPreflight()
 		fail(411, "Length Required");
 		return;
 	}
+
+	
 
 	body_bytes_prev = 0;
 	body_no_progress_ticks = 0;

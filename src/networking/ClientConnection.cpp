@@ -366,23 +366,33 @@ void ClientConnection::readBody()
 
 void ClientConnection::routeAndBuild()
 {
+    // Build the response for the current request
+    (void)ServerPipeline::processRequest(server->getConfig(), vs_idx, req, res, *ctx);
 
-	(void)ServerPipeline::processRequest(server->getConfig(), vs_idx, req, res, *ctx);
+    // Decide keep-alive vs close (HTTP/1.1 keeps alive by default unless client asks to close)
+    const std::string connHdr = req.getHeaders().get("Connection");
+    should_close = (req.getHttpVer() == "HTTP/1.0") ||
+                   (connHdr == "close" || connHdr == "Close");
 
-	res.ensureDefaultHeaders();
-	// Serialize → output
-	std::ostringstream os;
-	os << res;
-	const std::string s = os.str();
-	io.getChainBuf().push_copy(s.data(), s.size());
+    // Advertise the chosen policy in the response
+    if (should_close)
+        res.headers.set("Connection", "close");
+    else
+        res.headers.set("Connection", "keep-alive");
 
-	// Keep-alive vs close
-	std::string connHdr = req.getHeaders().get("Connection");
-	should_close = (req.getHttpVer() == "HTTP/1.0") || (connHdr == "close" || connHdr == "Close");
+    // Fill in defaults (Date, Server, Content-Length if applicable, etc.)
+    res.ensureDefaultHeaders();
 
-	state = PH_WRITE;
-	resetDeadline(WR_TIMEOUT_MS);
+    // Serialize → output buffer
+    std::ostringstream os;
+    os << res;
+    const std::string s = os.str();
+    io.getChainBuf().push_copy(s.data(), s.size());
+
+    state = PH_WRITE;
+    resetDeadline(WR_TIMEOUT_MS);
 }
+
 
 void ClientConnection::finishWriteOrNext()
 {

@@ -1,256 +1,252 @@
-// tests_client_connection.cpp  (build with -std=c++17 or newer)
-#define CATCH_CONFIG_MAIN
+// tests/unit/test_ClientConnection.cpp
 #include <catch2/catch_all.hpp>
 
+#define private public          // allow white-box access to getState()/deadlines for assertions
 #include "ClientConnection.h"
+#include "PhaseDeadline.h"
+#undef private
 
-#include <sys/types.h>
+#include "Server.h"
+#include "ServerConfig.h"
+#include "VirtualServer.h"
+
 #include <sys/socket.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <cerrno>
-#include <cstdio>
-#include <cstring>
-#include <vector>
+#include <fcntl.h>
 #include <string>
 
-// --- helpers --------------------------------------------------------------
+// ---------------- helpers ----------------
 
-static void set_nonblock(int fd)
-{
+static void set_nonblock(int fd) {
 	int fl = ::fcntl(fd, F_GETFL, 0);
 	REQUIRE(fl >= 0);
 	REQUIRE(::fcntl(fd, F_SETFL, fl | O_NONBLOCK) == 0);
 }
 
-static std::pair<int, int> make_socketpair()
-{
-	int fds[2];
-	REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
-	return std::make_pair(fds[0], fds[1]);
+static std::string recv_all_now(int fd) {
+	std::string s;
+	char buf[4096];
+	for (;;) {
+		ssize_t n = ::recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+		if (n <= 0) break;
+		s.append(buf, buf + n);
+	}
+	return s;
 }
 
-static ssize_t write_all(int fd, const void *buf, size_t n)
-{
-	const char *p = static_cast<const char *>(buf);
-	size_t off = 0;
-	for (;;)
-	{
-		ssize_t r = ::write(fd, p + off, n - off);
-		if (r > 0)
-		{
-			off += size_t(r);
-			if (off == n)
-				return off;
-			continue;
-		}
-		if (r < 0 && (errno == EINTR))
-			continue;
-		// allow partial on EAGAIN etc.
-		return (ssize_t)off; 
-	}
+static void drive_ticks(ClientConnection &c, int iters = 8) {
+	for (int i = 0; i < iters; ++i) c.onTick(0);
 }
 
-static std::string read_available(int fd)
-{
-	std::string out;
-	char tmp[4096];
-	for (;;)
-	{
-		ssize_t r = ::read(fd, tmp, sizeof(tmp));
-		if (r > 0)
-		{
-			out.append(tmp, tmp + r);
-			continue;
-		}
-		if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			break;
-		if (r == 0)
-			break;
-		break;
-	}
-	return out;
+// Minimal server with one vserver at /tmp for body temp files
+static void build_min_server(ServerConfig &cfg, Server &srv_out) {
+	(void)srv_out; // only signature convenience
 }
 
-// spin a few iterations calling onReadable/onWritable like a toy loop
-static void pump(ClientConnection &conn, int iterations = 50)
-{
-	for (int i = 0; i < iterations && conn.getState() != CLOSE; ++i)
-	{
-		if (conn.getState() == READ_HEADERS)
-			conn.onReadable();
-		if (conn.getState() == WRITE)
-			conn.onWritable();
-		// tiny backoff
-		usleep(1000);
-	}
+// ---------------- test cases ----------------
+
+TEST_CASE("ClientConnection starts in PH_READ_HEADERS and tolerates partial headers", "[conn][headers][partial]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
+
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
+
+	ClientConnection conn(sv[0], &server,25);
+	REQUIRE(conn.getState() == PH_READ_HEADERS);
+
+	const std::string h1 = "GET / HTTP/1.1\r\nHost: example\r\nUser-Agent: te";
+	REQUIRE(::send(sv[1], h1.data(), (int)h1.size(), 0) == (ssize_t)h1.size());
+	conn.onTick(0);
+	REQUIRE(conn.getState() == PH_READ_HEADERS); // no CRLFCRLF yet
+
+	const std::string h2 = "st\r\n\r\n";
+	REQUIRE(::send(sv[1], h2.data(), (int)h2.size(), 0) == (ssize_t)h2.size());
+	conn.onTick(0);
+	REQUIRE(conn.getState() != PH_READ_HEADERS);
+
+	::shutdown(sv[1], SHUT_RDWR);
+	::close(sv[1]);
 }
 
-// --- tests ---------------------------------------------------------------
+TEST_CASE("Oversized headers trigger 431 and close flow", "[conn][headers][431]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
 
-TEST_CASE("Headers across two reads switch to WRITE and send hello", "[io]")
-{
-	// server side = connFd; client side = peer
-	int peer, connFd;
-	{
-		std::pair<int, int> p = make_socketpair();
-		peer = p.first;
-		connFd = p.second;
-	}
-	set_nonblock(connFd);
-	set_nonblock(peer);
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
 
-	ClientConnection conn(connFd);
-	REQUIRE(conn.getState() == READ_HEADERS);
+	ClientConnection conn(sv[0], &server,25);
 
-	// send request in two chunks, splitting CRLFCRLF boundary
-	const char *part1 = "GET / HTTP/1.1\r\nHost: x\r\nUser-Agent: t\r\n";
-	const char *part2 = "\r\n"; // completes the empty line after headers
-	REQUIRE(write_all(peer, part1, std::strlen(part1)) == (ssize_t)std::strlen(part1));
+	// Make header limit tiny
+	conn.max_hdr_bytes = 64;
 
-	// first pump: not enough for CRLFCRLF => still reading
-	pump(conn, 5);
-	REQUIRE(conn.getState() == READ_HEADERS);
+	std::string huge = "GET / HTTP/1.1\r\nHost: x\r\nUser-Agent: ";
+	huge.append(4096, 'A');
+	huge += "\r\n\r\n";
+	REQUIRE(::send(sv[1], huge.data(), (int)huge.size(), 0) == (ssize_t)huge.size());
 
-	REQUIRE(write_all(peer, part2, std::strlen(part2)) == (ssize_t)std::strlen(part2));
+	drive_ticks(conn, 6);
 
-	// second pump should parse headers, switch to WRITE, send, then CLOSE
-	pump(conn, 50);
+	const std::string out = recv_all_now(sv[1]);
+	REQUIRE(out.find(" 431 ") != std::string::npos); // "HTTP/1.1 431 ..."
+	bool ok = (conn.getState() == PH_WRITE || conn.getState() == PH_CLOSE);
+	REQUIRE(ok == true);
 
-	std::string resp = read_available(peer);
-	// Expect a minimal HTTP response with "hello"
-	REQUIRE(resp.find("HTTP/1.1 200 OK") != std::string::npos);
-	REQUIRE(resp.find("\r\n\r\nhello") != std::string::npos);
-
-	// connection should be closed by server side
-	REQUIRE(conn.getState() == CLOSE);
-
-	::close(peer);
+	::close(sv[1]);
 }
 
-TEST_CASE("No premature switch on partial headers", "[parse]")
-{
-	int peer, connFd;
-	{
-		std::pair<int, int> p = make_socketpair();
-		peer = p.first;
-		connFd = p.second;
+TEST_CASE("Content-Length small body parses and responds 200; keep-alive allows second request", "[conn][content-length][keepalive]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
+
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
+
+	ClientConnection conn(sv[0], &server,400);
+
+	// First request
+	std::string req1 = "POST /echo HTTP/1.1\r\nHost: ex\r\nContent-Length: 5\r\n\r\nhello";
+	REQUIRE(::send(sv[1], req1.data(), (int)req1.size(), 0) == (ssize_t)req1.size());
+
+	// Drive: should parse, read body, route (200 OK placeholder), and write
+	drive_ticks(conn, 8);
+	std::string out1 = recv_all_now(sv[1]);
+	REQUIRE(out1.find("HTTP/1.1 ") != std::string::npos);
+	REQUIRE(out1.find(" 200 ") != std::string::npos);
+
+	// Connection should either close or reset for next request based on should_close flag.
+	// By default, our placeholder uses keep-alive → send a second request.
+	if (conn.getState() != PH_CLOSE) {
+		std::string req2 = "GET / HTTP/1.1\r\nHost: ex\r\n\r\n";
+		REQUIRE(::send(sv[1], req2.data(), (int)req2.size(), 0) == (ssize_t)req2.size());
+		drive_ticks(conn, 6);
+		std::string out2 = recv_all_now(sv[1]);
+		REQUIRE(out2.find("HTTP/1.1 ") != std::string::npos);
 	}
-	set_nonblock(connFd);
-	set_nonblock(peer);
-
-	ClientConnection conn(connFd);
-
-	// No blank line
-	const char *partial = "GET / HTTP/1.1\r\nHost: x\r\n";
-	REQUIRE(write_all(peer, partial, std::strlen(partial)) == (ssize_t)std::strlen(partial));
-
-	pump(conn, 10);
-	// Should still be Reading
-	REQUIRE(conn.getState() == READ_HEADERS); 
-
-	::close(peer); 
+	::close(sv[1]);
 }
 
-TEST_CASE("Peer closes early => server closes", "[io][close]")
-{
-	int peer, connFd;
-	{
-		std::pair<int, int> p = make_socketpair();
-		peer = p.first;
-		connFd = p.second;
-	}
-	set_nonblock(connFd);
-	set_nonblock(peer);
+TEST_CASE("Expect: 100-continue pre-response is emitted before body", "[conn][expect][100]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
 
-	ClientConnection conn(connFd);
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
 
-	// Send a bit then close peer
-	const char *p1 = "GET / H";
-	REQUIRE(write_all(peer, p1, std::strlen(p1)) == (ssize_t)std::strlen(p1));
-	::close(peer);
+	ClientConnection conn(sv[0], &server,25);
 
-	pump(conn, 20);
-	REQUIRE(conn.getState() == CLOSE);
+	// Send headers with Expect: 100-continue and small body coming
+	const std::string h = "POST /u HTTP/1.1\r\nHost: ex\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n";
+	REQUIRE(::send(sv[1], h.data(), (int)h.size(), 0) == (ssize_t)h.size());
+
+	// Tick once or twice: should queue 100 Continue on the wire
+	drive_ticks(conn, 3);
+	std::string pre = recv_all_now(sv[1]);
+	REQUIRE(pre.find("100 Continue") != std::string::npos);
+
+	// Now send the body
+	REQUIRE(::send(sv[1], "hello", 5, 0) == 5);
+	drive_ticks(conn, 8);
+
+	// Final response should show up
+	std::string fin = recv_all_now(sv[1]);
+	REQUIRE(fin.find("HTTP/1.1 ") != std::string::npos);
+
+	::close(sv[1]);
 }
 
-TEST_CASE("Large outBuffer causes partial send and eventually completes", "[send][eagain]")
-{
-	int peer, connFd;
-	{
-		std::pair<int, int> p = make_socketpair();
-		peer = p.first;
-		connFd = p.second;
-	}
-	set_nonblock(connFd);
-	set_nonblock(peer);
+TEST_CASE("413 Payload Too Large: reject known CL before reading body", "[conn][413]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
 
-	ClientConnection conn(connFd);
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
 
-	// Send a normal request to trigger WRITE
-	const char *req = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
-	REQUIRE(write_all(peer, req, std::strlen(req)) == (ssize_t)std::strlen(req));
+	ClientConnection conn(sv[0], &server,25);
+	conn.max_body_bytes = 8; // tiny cap
 
-	// Pump once so processIncoming() runs and sets response ("hello")
-	pump(conn, 5);
-	bool connCheck = ((conn.getState() == WRITE) || (conn.getState() == CLOSE) );
-	REQUIRE(connCheck);
+	// Advertise bigger than allowed
+	std::string req = "POST /u HTTP/1.1\r\nHost: ex\r\nContent-Length: 20\r\n\r\n";
+	REQUIRE(::send(sv[1], req.data(), (int)req.size(), 0) == (ssize_t)req.size());
 
-	// Now, to force partial EAGAIN a huge payload.
-	for (int i = 0; i < 100 && conn.getState() != CLOSE; ++i)
-	{
-		conn.onWritable();
-		// Drain a bit intermittently to allow progress
-		if (i % 5 == 0)
-			(void)read_available(peer);
-		usleep(1000);
-	}
+	drive_ticks(conn, 6);
+	std::string out = recv_all_now(sv[1]);
+	REQUIRE(out.find(" 413 ") != std::string::npos);
+	bool ok = conn.getState() == PH_WRITE || conn.getState() == PH_CLOSE;
+	REQUIRE(ok == true);
 
-	// Finally drain everything the server wrote and ensure response contains hello.
-	std::string resp = read_available(peer);
-	REQUIRE(resp.find("hello") != std::string::npos);
-
-	// The server should close after finishing the small hello response.
-	REQUIRE(conn.getState() == CLOSE);
-
-	::close(peer);
+	::close(sv[1]);
 }
 
-TEST_CASE("Wait for full Content-Length before responding", "[io][bodywait]")
-{
-	int peer, connFd;
-	{
-		std::pair<int, int> p = make_socketpair();
-		peer = p.first;
-		connFd = p.second;
-	}
-	set_nonblock(connFd);
-	set_nonblock(peer);
+TEST_CASE("Runtime size enforcement for chunked: 413 once bytes_received exceeds cap", "[conn][chunked][413]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
 
-	ClientConnection conn(connFd);
-	REQUIRE(conn.getState() == READ_HEADERS);
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
 
-	// Send headers with Content-Length:10 and only 5 bytes of body for now
-	const char *part1 = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n12345";
-	REQUIRE(write_all(peer, part1, std::strlen(part1)) == (ssize_t)std::strlen(part1));
+	ClientConnection conn(sv[0], &server,25);
+	conn.max_body_bytes = 6; // cap lower than incoming body
 
-	// Pump a few iterations: server should still be in READ_HEADERS while
-	// waiting for the remaining body bytes (so onReadable continues to be
-	// called by the test harness).
-	pump(conn, 10);
-	REQUIRE(conn.getState() == READ_HEADERS);
+	// chunked with total 9 bytes (Wikipedia)
+	const std::string h = "POST /u HTTP/1.1\r\nHost: ex\r\nTransfer-Encoding: chunked\r\n\r\n";
+	REQUIRE(::send(sv[1], h.data(), (int)h.size(), 0) == (ssize_t)h.size());
+	drive_ticks(conn, 3);
 
-	// Send remaining body bytes
-	const char *rest = "67890";
-	REQUIRE(write_all(peer, rest, std::strlen(rest)) == (ssize_t)std::strlen(rest));
+	const std::string c1 = "4\r\nWiki\r\n";
+	REQUIRE(::send(sv[1], c1.data(), (int)c1.size(), 0) == (ssize_t)c1.size());
+	drive_ticks(conn, 2);
 
-	// Pump to allow server to process full body and respond
-	pump(conn, 50);
+	// After first chunk (4), still under cap. Send next chunk to exceed.
+	const std::string c2 = "5\r\npedia\r\n";
+	REQUIRE(::send(sv[1], c2.data(), (int)c2.size(), 0) == (ssize_t)c2.size());
 
-	std::string resp = read_available(peer);
-	REQUIRE(resp.find("HTTP/1.1 200 OK") != std::string::npos);
-	REQUIRE(resp.find("hello") != std::string::npos);
+	drive_ticks(conn, 6);
+	std::string out = recv_all_now(sv[1]);
 
-	REQUIRE(conn.getState() == CLOSE);
-	::close(peer);
+	std::cout << out << std::endl;
+	REQUIRE(out.find(" 413 ") != std::string::npos);
+
+	::close(sv[1]);
+}
+
+TEST_CASE("Deadline expiry -> write then close", "[conn][timeout]") {
+	int sv[2]; REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	set_nonblock(sv[0]); set_nonblock(sv[1]);
+
+	ServerConfig cfg;
+	VirtualServer vs; vs.client_body_temp_path = "/tmp";
+	cfg.push_back(vs);
+	Server server(cfg);
+
+	ClientConnection conn(sv[0], &server,10);
+	REQUIRE(conn.getState() == PH_READ_HEADERS);
+
+	// Force deadline to the past
+	conn.dl.deadline_ms_ = 1; // in the past relative to onTick(0) logic
+	conn.onTick(0);
+
+	// It should pivot toward write/close path
+	bool ok = conn.getState() == PH_WRITE || conn.getState() == PH_CLOSE;
+	REQUIRE(ok == true);
+
+	// Drive until PH_CLOSE
+	for (int i = 0; i < 10 && conn.getState() != PH_CLOSE; ++i)
+		conn.onTick(0);
+
+	REQUIRE(conn.getState() == PH_CLOSE);
+	::close(sv[1]);
 }

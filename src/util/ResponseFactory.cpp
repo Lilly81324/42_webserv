@@ -58,7 +58,7 @@ static void addCommonHeaders(HttpResponse &r, bool close)
 
 // --- builders ---
 
-HttpResponse ResponseFactory::makeErorr(int code,const std::string & reasons,bool close, const std::string& bodyText)
+HttpResponse ResponseFactory::makeError(int code,const std::string & reasons,bool close, const std::string& bodyText)
 {
 	HttpResponse r;
 	r.status = code;

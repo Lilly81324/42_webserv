@@ -32,6 +32,8 @@ class UniqueFD
 
 	public:
 		int get() const { return fd; }
+		
+		bool valid() const { return fd >= 0 ;}
 
 		operator bool() const { return fd != -1; }
 

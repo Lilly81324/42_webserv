@@ -216,9 +216,9 @@ int CgiProcess::waitNonBlocking(int *raw_status)
         code = 128 + WTERMSIG(st); // common convention
     }
 
-    _pid = -1;
-    closeBoth();
-    return code > 0 ? code : 1; // >0 means finished; return a positive number
+	_pid = -1;
+	closeBoth();
+	return code > 0 ? code : 1; // >0 means finished; return a positive number
 }
 
 void CgiProcess::terminate()

@@ -10,6 +10,9 @@ date: 8/10/2025
 #include <sstream>
 #include <fstream>
 
+
+static unsigned long long BUFFERLIMIT = 128 * 1048 ;
+
 /**
  * Wether given Method is a valid one
  * @returns true if it is
@@ -285,6 +288,12 @@ bool HttpRequest::parse(const char *data, size_t n)
 
 	if (this->state == ERROR || this->state == OVER || n < 1)
 		return (false);
+	if (this->buffer.size() + n > BUFFERLIMIT )
+	{
+		this->state = ERROR;
+		errno = HTTP_BAD_REQUEST;
+		return (false);
+	}
 	newInput = string(data, n);
 	this->buffer += newInput;
 	this->totalBytesRead += newInput.size();
@@ -389,11 +398,13 @@ std::vector<char> HttpRequest::readBodyToVector(void) const
 		return this->body;
 	std::vector<char> out;
 	std::ifstream ifs(this->body_tmp_path.c_str(), std::ios::in | std::ios::binary);
-	if (!ifs) return out;
+	if (!ifs)
+		return out;
 	ifs.seekg(0, std::ios::end);
 	std::streamoff sz = ifs.tellg();
 	ifs.seekg(0, std::ios::beg);
-	if (sz <= 0) return out;
+	if (sz <= 0)
+		return out;
 	out.resize(static_cast<size_t>(sz));
 	ifs.read(&out[0], sz);
 	return out;
@@ -433,13 +444,9 @@ size_t HttpRequest::getBytesHandledLast(void) const
 
 std::ostream &operator<<(std::ostream &out, const HttpRequest &target)
 {
-	out << target.getMethod() << " " << target.getPath() << " " << target.getHttpVer() << std::endl
-		<< "-----------" << std::endl;
-	out << target.getHeaders() << std::endl
-		<< "-----------" << std::endl;
+	out << target.getMethod() << " " << target.getPath() << " " << target.getHttpVer() << std::endl;
+	out << target.getHeaders() << std::endl;
 	out.write(target.getBody().data(), target.getBody().size());
-	out << std::endl
-		<< "-----------";
 	return (out);
 }
 

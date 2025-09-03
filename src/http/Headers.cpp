@@ -133,6 +133,7 @@ size_t Headers::getByteSize(void) const
 
 std::ostream &operator<<(std::ostream &out, const Headers &target)
 {
-	target.show(out);
+	// target.show(out);
+	 out << target.serialize();
 	return (out);
 }

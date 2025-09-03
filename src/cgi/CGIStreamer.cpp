@@ -1,31 +1,25 @@
-
-#include "ClientConnection.h"
-#include "HttpRequest.h"
-#include "HttpResponse.h"
-#include "CgiProcess.h"
+#include "CGIStreamer.h"
 #include <fstream>
 #include <sstream>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/uio.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <vector>
-#include <string>
 #include <cstring>
-#include <cstdio>
-#include <cstdlib>
-
-
-
+#include <stdexcept>
+#include <unistd.h>
+#include <stdlib.h>
 
 /***---------------------------CGI PROCCESSING AND EXECUTION--------------------------- ***/
 
+CGIStreamer::CGIStreamer( HttpRequest& req, HttpResponse& res)
+    : req(req), res(res), cgi_active(false), cgi_in_fd(-1), cgi_out_fd(-1),
+      cgi_body_off(0), cgi_headers_done(false), cgi_status(200), cgi_content_len(-1),
+      cgi_deadline(0), outOffset(0), state(READ) {
+    // Initialize the output buffer
+    outBuffer.clear();
+}
+
 // Parse CGI headers from buf. On success, removes headers from buf,
 // sets status (default 200), and sets content_len (or -1 if unknown).
-// ---- keep this near the top of ClientConnection.cpp ----
-static bool parseCgiHeaders(std::string &buf, int &status, long &content_len)
+// ---- keep this near the top of CGIStreamer.cpp ----
+bool CGIStreamer::parseCgiHeaders(std::string &buf, int &status, long &content_len)
 {
 	std::string::size_type p = buf.find("\r\n\r\n");
 	if (p == std::string::npos)
@@ -70,21 +64,14 @@ static bool parseCgiHeaders(std::string &buf, int &status, long &content_len)
 	return true;
 }
 
-u_int64_t ClientConnection::nowMs()
-{
-	struct timeval tv;
-	gettimeofday(&tv, 0);
-	return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)tv.tv_usec / 1000ULL;
-}
-
 // Analyze parsed headers and set internal markers for future enforcement.
 // We keep this minimal: detect Content-Length, Transfer-Encoding: chunked,
 // and Expect: 100-continue. Do not change state here; callers use these
 // markers to decide next actions.
 
-bool ClientConnection::beginCgi(const CgiSpec &spec,
-								const std::string &script_path,
-								const std::vector<std::string> &envv)
+bool CGIStreamer::beginCgi(const CgiSpec &spec,
+						   const std::string &script_path,
+						   const std::vector<std::string> &envv)
 {
 	// --- argv = [bin, script, NULL] ---
 	std::vector<char *> argvv;
@@ -132,18 +119,22 @@ bool ClientConnection::beginCgi(const CgiSpec &spec,
 	cgi_deadline = CgiProcess::nowMs() + (unsigned long long)spec.timeout_ms;
 
 	// Pause socket reads while we push the request body into the CGI stdin
-	setReadPaused(true);
+	// setReadPaused(true);
 
 	// (If your EventLoop API requires explicit registration, do it here)
 	// Example:
-	// EventLoop& loop = server->loop();
 	// if (cgi_in_fd  >= 0) loop.addFD(cgi_in_fd,  /*read*/false, /*write*/true,  this);
 	// if (cgi_out_fd >= 0) loop.addFD(cgi_out_fd, /*read*/true,  /*write*/false, this);
 
 	return true; // success, CGI is now active and will be serviced by onReadable/onWritable
 }
 
-void ClientConnection::onCgiWritable(int fd)
+void CGIStreamer::resetDeadlineForWrite()
+{
+	cgi_deadline = CgiProcess::nowMs() + WRITE_TIMEOUT_MS;
+}
+
+void CGIStreamer::onCgiWritable(int fd)
 {
 	if (!cgi_active || fd != cgi_in_fd)
 		return;
@@ -154,7 +145,7 @@ void ClientConnection::onCgiWritable(int fd)
 		std::ifstream ifs(path.c_str(), std::ios::in | std::ios::binary);
 		if (!ifs)
 		{
-			// nothing we can do; close stdin
+			// nothing we can do; close stdingi
 			proc.closeIn();
 			cgi_in_fd = -1;
 			return;
@@ -226,7 +217,7 @@ void ClientConnection::onCgiWritable(int fd)
 	}
 }
 
-void ClientConnection::onCgiReadable(int fd)
+void CGIStreamer::onCgiReadable(int fd)
 {
 	if (!cgi_active || fd != cgi_out_fd)
 		return;
@@ -294,7 +285,7 @@ void ClientConnection::onCgiReadable(int fd)
 		resetDeadlineForWrite();
 
 		// Unpause socket reads for next request (if pipelining allowed)
-		setReadPaused(false);
+		// setReadPaused(false);
 
 		// Clear CGI state
 		cgi_active = false;

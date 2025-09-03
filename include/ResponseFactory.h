@@ -13,7 +13,7 @@ Date: 8/27/2025
 class ResponseFactory {
 
 	public:
-		static HttpResponse makeErorr(int code,const std::string & reasons ="",bool close= true, const std::string& bodyText= "");
+		static HttpResponse makeError(int code,const std::string & reasons ="",bool close= true, const std::string& bodyText= "");
 		static HttpResponse makeText(int code,const std::string& text,const std::string & reasons ="",bool close= false);
 
 

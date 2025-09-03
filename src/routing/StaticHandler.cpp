@@ -16,7 +16,6 @@ date: 8/10/2025
 #include "HttpResponse.h"
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
-#include "Logger.h"
 
 #include <sys/stat.h>
 #include <dirent.h>

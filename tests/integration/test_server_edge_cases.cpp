@@ -59,6 +59,8 @@ TEST_CASE("Headers fragmented into tiny writes => still responds", "[server][fra
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 	std::string resp = read_until_eof(cfd);
+
+	std::cout<< resp << std::endl;
 	::close(cfd);
 
 	s.stop();
@@ -98,7 +100,7 @@ TEST_CASE("MAX_INBUFFER overflow: >1MB without terminator => drop connection", "
 	if (loop.joinable())
 		loop.join();
 
-	REQUIRE(resp.find("400") != string::npos);
+	REQUIRE(resp.find("431") != string::npos);
 }
 
 TEST_CASE("Client closes right after complete headers => server handles send error", "[server][rst]")

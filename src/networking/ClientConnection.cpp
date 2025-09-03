@@ -179,7 +179,6 @@ void ClientConnection::parseHeaders()
 
 	if (!req.headersDone())
 		return;
-	std::cout<<req<<std::endl;
 
 	state = PH_ROUTE_SELECT;
 	resetDeadline(BODY_TIMEOUT_MS);
@@ -229,15 +228,13 @@ void ClientConnection::runPreflight()
 
 	max_body_bytes = pr.max_body_bytes;
 
+	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
+	ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
 	if (!pr.needs_body)
 	{
 		state = PH_ROUTE;
 		return;
 	}
-
-	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
-		ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
-
 	if (hc.chunked)
 	{
 		decideBodyReader(/*chunked*/);
@@ -405,9 +402,9 @@ void ClientConnection::finishWriteOrNext()
 
 	state = PH_READ_HEADERS;
 	resetDeadline(HDR_TIMEOUT_MS);
-
-	if (io.getInputRing().readAvail() > 0)
+	if (io.getInputRing().readAvail() > 0){
 		parseHeaders();
+	}
 }
 
 void ClientConnection::fail(int code, const char *reason)

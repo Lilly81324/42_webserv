@@ -46,7 +46,7 @@ TEST_CASE("partial headers are tolerated (remain in PH_READ_HEADERS until CRLFCR
 	cfg.push_back(vs);
 	Server s(cfg);
 
-	ClientConnection conn(sv[0], &s,1000000000);
+	ClientConnection conn(sv[0], &s, 1000000000);
 	REQUIRE(conn.state == PH_READ_HEADERS);
 
 	const std::string h1 = "GET / HTTP/1.1\r\nHost: example\r\nUser-Agent: x";
@@ -76,7 +76,7 @@ TEST_CASE("oversized headers -> 431 and close", "[integration][headers][431]")
 	cfg.push_back(vs);
 	Server s(cfg);
 
-	ClientConnection conn(sv[0], &s,1000000000);
+	ClientConnection conn(sv[0], &s, 1000000000);
 	// make the limit tiny for the test
 	conn.max_hdr_bytes = 64;
 

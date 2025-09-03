@@ -10,10 +10,6 @@
 #include <sstream>
 #include <netinet/in.h>
 
-static const int HDR_TIMEOUT_MS = 10000;
-static const int BODY_TIMEOUT_MS = 45000;
-static const int WR_TIMEOUT_MS = 15000;
-static const int IDLE_TIMEOUT_MS = 30000;
 static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
 ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
@@ -74,7 +70,6 @@ bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
 void ClientConnection::close() 
 
 {
-	std::cout<<"This connection got TIMED OUT  fd:"<<getFD()<<std::endl; 
 	server->releaseConnection(this); 
 }
 
@@ -109,17 +104,11 @@ void ClientConnection::onTick(unsigned long long now_ms)
 		return;
 	}
 
-	if (!io.getFlow().isReadPaused() &&
-		(state == PH_READ_HEADERS || state == PH_READ_BODY))
-	{
-		ssize_t r = io.nb_read(32 * 1024);
-		if (r == 0) {
-			// peer closed cleanly → move to close
+	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
+		if(io.nb_read(32 * 1024) == 0 ){
 			state = PH_CLOSE;
 			return;
 		}
-		// r < 0 → EAGAIN or transient; do NOT close, just continue
-	}
 
 	switch (state)
 	{
@@ -164,7 +153,6 @@ void ClientConnection::parseHeaders()
 {
 	const char *buf = io.getInputRing().readPtr();
 	std::size_t avail = io.getInputRing().readAvail();
-	// std::cout<<buf<<std::endl;
 	if (avail == 0)
 	return;
 	
@@ -176,7 +164,6 @@ void ClientConnection::parseHeaders()
 	
 	std::size_t used = avail;
 	
-	// std::cout<<avail<<" used: "<<used<<std::endl;
 	if (used > 0)
 	{
 		io.getInputRing().consumed(used);
@@ -191,7 +178,6 @@ void ClientConnection::parseHeaders()
 
 	if (!req.headersDone())
 		return;
-	std::cout<<req<<std::endl;
 
 	state = PH_ROUTE_SELECT;
 	resetDeadline(BODY_TIMEOUT_MS);
@@ -210,12 +196,13 @@ void ClientConnection::selectRouteOnce()
 	// replace 'localhost' with HttpRequest actual domainName
 	vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
 
-	Preflight pr = RequestGuards::preflight(server->getConfig(),
+	pr = RequestGuards::preflight(server->getConfig(),
 											vs_idx,
 											req.getMethod(),
 											req.getPath(),
 											req.getHeaders(),
 											ctx);
+	
 	route_selected = true;
 	state = PH_PRECHECK;
 	resetDeadline(BODY_TIMEOUT_MS);
@@ -241,14 +228,14 @@ void ClientConnection::runPreflight()
 
 	max_body_bytes = pr.max_body_bytes;
 
+	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
+		ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
+
 	if (!pr.needs_body)
 	{
 		state = PH_ROUTE;
 		return;
 	}
-
-	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
-		ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
 
 	if (hc.chunked)
 	{
@@ -256,6 +243,7 @@ void ClientConnection::runPreflight()
 	}
 	else if (hc.content_length > 0)
 	{
+	
 		if (max_body_bytes && hc.content_length > max_body_bytes)
 		{
 			fail(413, "Payload Too Large");
@@ -268,6 +256,8 @@ void ClientConnection::runPreflight()
 		fail(411, "Length Required");
 		return;
 	}
+
+	
 
 	body_bytes_prev = 0;
 	body_no_progress_ticks = 0;
@@ -364,7 +354,7 @@ void ClientConnection::readBody()
 	}
 
 	// 6) Completion check
-	if (!body->complete())
+	if (!body->complete() && req.getState() != OVER )
 		return;
 
 	// Body done → continue pipeline
@@ -428,10 +418,10 @@ void ClientConnection::finishWriteOrNext()
 	route_selected = false;
 
 	state = PH_READ_HEADERS;
-	resetDeadline(HDR_TIMEOUT_MS);
-
-	if (io.getInputRing().readAvail() > 0)
+	resetDeadline(IDLE_TIMEOUT_MS);
+	if (io.getInputRing().readAvail() > 0){
 		parseHeaders();
+	}
 }
 
 void ClientConnection::fail(int code, const char *reason)
@@ -457,10 +447,7 @@ void ClientConnection::decideBodyReader()
 		delete body;
 		body = 0;
 	}
-
-	std::vector<char> tmp;
-
-	body = new ChunkedReader(tmp, plan.max_body_bytes, server->getConfig().servers()[vs_idx].client_body_temp_path);
+	body = new ChunkedReader(io.getTmp(), plan.max_body_bytes, server->getConfig().servers()[vs_idx].client_body_temp_path);
 }
 
 void ClientConnection::decideBodyReader(std::size_t content_length)

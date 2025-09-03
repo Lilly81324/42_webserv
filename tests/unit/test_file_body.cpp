@@ -48,6 +48,8 @@ TEST_CASE("FileBodyReader: staged consume + bounded flush", "[filebody]")
 	REQUIRE(::stat(path.c_str(), &st) == 0);
 	REQUIRE(fr.bytes_received() == (std::size_t)st.st_size);
 	REQUIRE(slurp(path) == "hello world");
+	REQUIRE(::unlink(path.c_str()) == 0);
+
 }
 
 TEST_CASE("FileBodyReader: multiple small chunks + compaction", "[filebody][pending]")
@@ -65,4 +67,5 @@ TEST_CASE("FileBodyReader: multiple small chunks + compaction", "[filebody][pend
 	fr.set_done(true);
 	REQUIRE(fr.complete());
 	REQUIRE(flushed > 0);
+	REQUIRE(::unlink(fr.getBodyFilePath().c_str()) == 0);
 }

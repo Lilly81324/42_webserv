@@ -27,10 +27,13 @@ static std::string slurp(const std::string &p)
 	return s;
 }
 
+/**
+ * Chunk reading fails
+ */
 TEST_CASE("chunked: immediate spill (threshold==0), completes after trailers", "[chunked][spill]")
 {
 	std::vector<char> mem;
-	ChunkedReader cr(mem, /*spill_threshold*/ 0, /*tmp_dir*/ "/tmp");
+	ChunkedReader cr(mem, /*spill_threshold*/ 1, /*tmp_dir*/ "/tmp");
 
 	// 4 + "Wiki" + CRLF, 5 + "pedia" + CRLF, 0 + CRLF CRLF
 	const std::string p1 = "4\r\nWiki\r\n";
@@ -42,6 +45,7 @@ TEST_CASE("chunked: immediate spill (threshold==0), completes after trailers", "
 
 	REQUIRE(cr.consume(p2.data(), p2.size()) == p2.size());
 	(void)cr.flush_to_disk(64 * 1024);
+	REQUIRE(cr.consume(p2.data(), p2.size()) == p2.size());
 
 	REQUIRE(cr.complete());
 	REQUIRE(cr.isBodyOnDisk());
@@ -53,6 +57,7 @@ TEST_CASE("chunked: immediate spill (threshold==0), completes after trailers", "
 	REQUIRE(::stat(path.c_str(), &st) == 0);
 	REQUIRE((unsigned long long)st.st_size == 9ULL);
 	REQUIRE(slurp(path) == "Wikipedia");
+	REQUIRE(::unlink(path.c_str()) == 0);
 }
 
 TEST_CASE("chunked: kept in memory when threshold >> body", "[chunked][inmem]")
@@ -66,6 +71,7 @@ TEST_CASE("chunked: kept in memory when threshold >> body", "[chunked][inmem]")
 		"0\r\n\r\n";
 
 	REQUIRE(cr.consume(body.data(), body.size()) == body.size());
+	REQUIRE(cr.consume(body.data(), body.size()) == body.size());
 	REQUIRE(cr.complete());
 	REQUIRE_FALSE(cr.isBodyOnDisk());
 	REQUIRE(cr.getBodyLength() == 5);
@@ -78,7 +84,7 @@ TEST_CASE("chunked: size line split across buffers & with extension", "[chunked]
 {
 	std::vector<char> mem;
 	ChunkedReader cr(mem, /*spill_threshold*/ 0, "/tmp");
-
+	
 	const std::string p1 = "a;foo=bar\r\n012345";
 	const std::string p2 = "6789\r\n0\r\n\r\n";
 
@@ -88,6 +94,7 @@ TEST_CASE("chunked: size line split across buffers & with extension", "[chunked]
 
 	REQUIRE(cr.consume(p2.data(), p2.size()) == p2.size());
 	(void)cr.flush_to_disk(1 << 20);
+	REQUIRE(cr.consume(p2.data(), p2.size()) == p2.size());
 	REQUIRE(cr.complete());
 	REQUIRE(cr.getBodyLength() == 10);
 }

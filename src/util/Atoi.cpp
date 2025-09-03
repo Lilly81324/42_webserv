@@ -82,7 +82,10 @@ int	Atoi::atoiHttpReq(const char *in, bool &error)
 		result = (result * 10) + (in[i] - '0');
 		i++;
 		if (result > (long)MAX_INT)
-			return (0);
+		{
+			error = false;
+			return (MAX_INT);
+		}
 	}
 	if (in[i])
 		return (0);

@@ -105,8 +105,10 @@ void ClientConnection::onTick(unsigned long long now_ms)
 	}
 
 	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
-		if(io.nb_read(32 * 1024) == 0 )
+		if(io.nb_read(32 * 1024) == 0 ){
 			state = PH_CLOSE;
+			return;
+		}
 
 	switch (state)
 	{

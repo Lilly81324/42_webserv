@@ -142,7 +142,6 @@ TEST_CASE("Content-Length small body parses and responds 200; keep-alive allows 
 	// Drive: should parse, read body, route (200 OK placeholder), and write
 	drive_ticks(conn, 13);
 	std::string out1 = recv_all_now(cli_fd);
-	std::cout<<out1<<std::endl;
 	REQUIRE(out1.find("HTTP/1.1 ") != std::string::npos);
 	REQUIRE(out1.find(" 200 ") != std::string::npos);
 

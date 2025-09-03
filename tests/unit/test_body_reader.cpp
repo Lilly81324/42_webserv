@@ -55,4 +55,5 @@ TEST_CASE("FileBodyReader consumes and flushes to disk without blocking", "[file
 	REQUIRE(::stat(path.c_str(), &st) == 0);
 	REQUIRE(fr.bytes_received() == (std::size_t)st.st_size);
 	REQUIRE(slurp(path) == "hello world");
+	REQUIRE(::unlink(path.c_str()) == 0);
 }

@@ -59,6 +59,8 @@ TEST_CASE("Headers fragmented into tiny writes => still responds", "[server][fra
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 	std::string resp = read_until_eof(cfd);
+
+	std::cout<< resp << std::endl;
 	::close(cfd);
 
 	s.stop();

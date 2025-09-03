@@ -183,6 +183,7 @@ void ClientConnection::parseHeaders()
 
 	if (!req.headersDone())
 		return;
+	std::cout<<req<<std::endl;
 
 	state = PH_ROUTE_SELECT;
 	resetDeadline(BODY_TIMEOUT_MS);

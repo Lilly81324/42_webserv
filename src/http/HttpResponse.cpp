@@ -144,7 +144,6 @@ std::ostream &operator<<(std::ostream &out, const HttpResponse &r)
 {
 	out << r.http_version << " " << r.status << " " << r.reason << "\r\n";
 	out << r.headers.serialize();
-	out << "(bodyLength=" << r.bodyLength << ")\n";
 	out << r.body.data();
 	return out;
 }

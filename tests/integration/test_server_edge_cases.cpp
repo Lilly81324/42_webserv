@@ -98,7 +98,7 @@ TEST_CASE("MAX_INBUFFER overflow: >1MB without terminator => drop connection", "
 	if (loop.joinable())
 		loop.join();
 
-	REQUIRE(resp.find("400") != string::npos);
+	REQUIRE(resp.find("431") != string::npos);
 }
 
 TEST_CASE("Client closes right after complete headers => server handles send error", "[server][rst]")

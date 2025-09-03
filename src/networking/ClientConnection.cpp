@@ -105,7 +105,7 @@ void ClientConnection::onTick(unsigned long long now_ms)
 	}
 
 	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
-		if(io.nb_read(32 * 1024) < 0 )
+		if(io.nb_read(32 * 1024) == 0 )
 			state = PH_CLOSE;
 
 	switch (state)
@@ -408,6 +408,7 @@ void ClientConnection::finishWriteOrNext()
 
 	state = PH_READ_HEADERS;
 	resetDeadline(HDR_TIMEOUT_MS);
+	(void)io.nb_read(32 *1024);
 	if (io.getInputRing().readAvail() > 0){
 		parseHeaders();
 	}

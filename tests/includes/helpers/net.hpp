@@ -7,6 +7,96 @@
 #include <unistd.h>
 #include <cstring>
 #include <string>
+#include <string.h>
+
+#include "VirtualServer.h"
+
+inline int get_local_port_fd(int fd)
+{
+	struct sockaddr_storage ss;
+	socklen_t sl = (socklen_t)sizeof(ss);
+	memset(&ss, 0, sizeof(ss));
+	if (fd < 0)
+		return -1;
+	if (::getsockname(fd, (struct sockaddr *)&ss, &sl) != 0)
+		return -1;
+	if (ss.ss_family == AF_INET)
+	{
+		const struct sockaddr_in *sin = (const struct sockaddr_in *)&ss;
+		return (int)ntohs(sin->sin_port);
+	}
+	else if (ss.ss_family == AF_INET6)
+	{
+		const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *)&ss;
+		return (int)ntohs(sin6->sin6_port);
+	}
+	return -1; // AF_UNIX: no port
+}
+
+inline int create_loopback_tcp_pair(int &out_srv, int &out_cli, int &out_port)
+{
+	out_srv = -1;
+	out_cli = -1;
+	out_port = -1;
+
+	int ls = ::socket(AF_INET, SOCK_STREAM, 0);
+	if (ls < 0)
+		return -1;
+
+	int yes = 1;
+	::setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, (socklen_t)sizeof(yes));
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
+	addr.sin_port = htons(0);					   // ephemeral
+
+	if (::bind(ls, (struct sockaddr *)&addr, (socklen_t)sizeof(addr)) != 0)
+	{
+		::close(ls);
+		return -1;
+	}
+	if (::listen(ls, 1) != 0)
+	{
+		::close(ls);
+		return -1;
+	}
+
+	struct sockaddr_in bound;
+	socklen_t blen = (socklen_t)sizeof(bound);
+	if (::getsockname(ls, (struct sockaddr *)&bound, &blen) != 0)
+	{
+		::close(ls);
+		return -1;
+	}
+	out_port = (int)ntohs(bound.sin_port);
+
+	int cli = ::socket(AF_INET, SOCK_STREAM, 0);
+	if (cli < 0)
+	{
+		::close(ls);
+		return -1;
+	}
+	if (::connect(cli, (struct sockaddr *)&bound, blen) != 0)
+	{
+		::close(cli);
+		::close(ls);
+		return -1;
+	}
+
+	int srv = ::accept(ls, 0, 0);
+	::close(ls);
+	if (srv < 0)
+	{
+		::close(cli);
+		return -1;
+	}
+
+	out_srv = srv;
+	out_cli = cli;
+	return 0;
+}
 
 inline int pick_free_port_ipv4()
 {
@@ -63,31 +153,40 @@ inline std::string read_until_eof(int fd, size_t guard = (1u << 20))
 	bool connection_close = false;
 
 	// helper: try to parse headers if we have them
-	auto try_parse_headers = [&]() {
-		if (headers_parsed) return;
+	auto try_parse_headers = [&]()
+	{
+		if (headers_parsed)
+			return;
 		std::string s = out;
 		size_t pos = s.find("\r\n\r\n");
-		if (pos == std::string::npos) return;
+		if (pos == std::string::npos)
+			return;
 		headers_parsed = true;
 		std::string hdrs = s.substr(0, pos + 4);
 		// simple header search for Content-Length and Connection
 		size_t cl = hdrs.find("Content-Length:");
-		if (cl != std::string::npos) {
+		if (cl != std::string::npos)
+		{
 			cl += strlen("Content-Length:");
-			while (cl < hdrs.size() && (hdrs[cl] == ' ' || hdrs[cl] == '\t')) ++cl;
+			while (cl < hdrs.size() && (hdrs[cl] == ' ' || hdrs[cl] == '\t'))
+				++cl;
 			size_t eol = hdrs.find('\r', cl);
-			if (eol != std::string::npos) {
+			if (eol != std::string::npos)
+			{
 				std::string v = hdrs.substr(cl, eol - cl);
 				content_length = (size_t)atoi(v.c_str());
 				has_content_length = true;
 			}
 		}
 		size_t cc = hdrs.find("Connection:");
-		if (cc != std::string::npos) {
+		if (cc != std::string::npos)
+		{
 			cc += strlen("Connection:");
-			while (cc < hdrs.size() && (hdrs[cc] == ' ' || hdrs[cc] == '\t')) ++cc;
+			while (cc < hdrs.size() && (hdrs[cc] == ' ' || hdrs[cc] == '\t'))
+				++cc;
 			size_t eol = hdrs.find('\r', cc);
-			if (eol != std::string::npos) {
+			if (eol != std::string::npos)
+			{
 				std::string v = hdrs.substr(cc, eol - cc);
 				if (v.find("close") != std::string::npos || v.find("Close") != std::string::npos)
 					connection_close = true;
@@ -111,29 +210,34 @@ inline std::string read_until_eof(int fd, size_t guard = (1u << 20))
 
 	for (;;)
 	{
-		ssize_t r = ::recv(fd, buf, sizeof(buf),0);
+		ssize_t r = ::recv(fd, buf, sizeof(buf), 0);
 		if (r == 0)
 			break; // peer sent FIN: clean EOF
 		if (r < 0)
 		{
 			if (errno == EINTR)
 				continue; // retry
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
 				// no data available now
-				if (headers_parsed && has_content_length) {
+				if (headers_parsed && has_content_length)
+				{
 					// wait until body arrives
 					int rc = ::poll(&pfd, 1, 200); // 200ms
-					if (rc <= 0) break;
+					if (rc <= 0)
+						break;
 					continue;
 				}
 				// if no content-length, wait a short while for more data then return
 				int rc = ::poll(&pfd, 1, 200);
-				if (rc <= 0) break;
+				if (rc <= 0)
+					break;
 				continue;
 			}
 			if (errno == ECONNRESET)
 				break; // peer reset is acceptable in some flows
-			if (errno == EPIPE) break;
+			if (errno == EPIPE)
+				break;
 			REQUIRE(
 				r >= 0); // other errors -> fail
 			break;
@@ -149,21 +253,24 @@ inline std::string read_until_eof(int fd, size_t guard = (1u << 20))
 				if (hdr_end != std::string::npos)
 				{
 					size_t body_bytes = out.size() - (hdr_end + 4);
-					if (body_bytes >= content_length) break;
+					if (body_bytes >= content_length)
+						break;
 				}
 			}
 			else if (connection_close)
 			{
 				// server intends to close connection; wait a short while for EOF
 				int rc = ::poll(&pfd, 1, 200); // 200ms
-				if (rc <= 0) break; // no activity -> assume server finished
+				if (rc <= 0)
+					break; // no activity -> assume server finished
 				continue;
 			}
 			else
 			{
 				// no content-length and no connection: close — use short inactivity
 				int rc = ::poll(&pfd, 1, 50); // 50ms
-				if (rc <= 0) break;
+				if (rc <= 0)
+					break;
 			}
 
 			if (out.size() > guard)

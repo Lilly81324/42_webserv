@@ -1,6 +1,6 @@
 
 #if !defined(REQUEST_GUARDS_DEFAULT_MAX_BODY)
-#define REQUEST_GUARDS_DEFAULT_MAX_BODY 3
+#define REQUEST_GUARDS_DEFAULT_MAX_BODY 2000
 #endif // REQUEST_GUARDS_DEFAULT_MAX_BODY
 
 #include "RequestGuards.h"
@@ -41,7 +41,7 @@ static bool header_has_chunked(const Headers &hdrs)
 static bool parse_content_length(const Headers &hdrs, std::size_t &out)
 {
 	const std::string &cl = hdrs.get("Content-Length");
-	if (!cl.empty())
+	if (cl.empty())
 		return false;
 	char *endp = 0;
 	unsigned long v = std::strtoul(cl.c_str(), &endp, 10);
@@ -106,7 +106,7 @@ Preflight RequestGuards::preflight(const ServerConfig &cfg,
 	const bool chunked = header_has_chunked(hdrs);
 	std::size_t cl = 0;
 	const bool hasCL = parse_content_length(hdrs, cl);
-
+	std::cout<<hdrs<<std::endl;
 	if (pr.needs_body)
 	{
 		// 411 if neither CL nor chunked provided

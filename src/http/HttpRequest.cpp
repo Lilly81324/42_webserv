@@ -19,11 +19,12 @@ static unsigned long long BUFFERLIMIT = 128 * 1048 ;
  */
 bool isMethodValid(const std::string &in)
 {
-	if (in == "GET" || in == "PUT" || in == "PATCH" || in == "DELETE" ||
-		in == "POST")
-		return (true);
-	return (false);
+    if (in == "GET" || in == "HEAD" || in == "PUT" || in == "PATCH" ||
+        in == "DELETE" || in == "POST")
+        return (true);
+    return (false);
 }
+
 
 /**
  * Wether given Path is a valid one

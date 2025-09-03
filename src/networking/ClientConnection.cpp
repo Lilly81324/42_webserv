@@ -109,9 +109,17 @@ void ClientConnection::onTick(unsigned long long now_ms)
 		return;
 	}
 
-	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
-		if(io.nb_read(32 * 1024) < 0 )
+	if (!io.getFlow().isReadPaused() &&
+		(state == PH_READ_HEADERS || state == PH_READ_BODY))
+	{
+		ssize_t r = io.nb_read(32 * 1024);
+		if (r == 0) {
+			// peer closed cleanly → move to close
 			state = PH_CLOSE;
+			return;
+		}
+		// r < 0 → EAGAIN or transient; do NOT close, just continue
+	}
 
 	switch (state)
 	{

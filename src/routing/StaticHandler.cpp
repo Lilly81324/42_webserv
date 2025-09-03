@@ -191,6 +191,9 @@ static bool serveErrorPage_(int code,
                             HttpResponse& res,
                             bool is_head)
 {
+    // Always set the status line for the error
+    res.setStatus(code);
+
     // 1) Resolve mapped URI from the *server* (VirtualServer) only
     std::string uri;
     if (ctx.vs) {
@@ -223,7 +226,7 @@ static bool serveErrorPage_(int code,
         !realpathString(fs, canonErr) ||
         !isSubPath(canonBase, canonErr))
     {
-        // Give up; return empty body (keeps tests happy)
+        // Fallback: empty body, plain text
         res.body.clear();
         res.headers.set(HDR_CONTENT_TYPE, "text/plain");
         res.headers.set(HDR_CONTENT_LENGTH, "0");
@@ -234,7 +237,6 @@ static bool serveErrorPage_(int code,
     // 4) Read and emit the error file
     struct stat st;
     if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        // Missing error file -> empty response
         res.body.clear();
         res.headers.set(HDR_CONTENT_TYPE, "text/plain");
         res.headers.set(HDR_CONTENT_LENGTH, "0");
@@ -252,16 +254,19 @@ static bool serveErrorPage_(int code,
     }
 
     res.body.clear();
-    if (!is_head) res.body.assign(file.begin(), file.end());
+    if (!is_head)
+        res.body.assign(file.begin(), file.end());
 
     res.headers.set(HDR_CONTENT_TYPE, guessMime(canonErr, ctx.cfg));
     res.headers.set(HDR_ETAG, makeEtag(st));
 
-    std::ostringstream cl; cl << (unsigned long)file.size();
+    std::ostringstream cl;
+    cl << static_cast<unsigned long>(file.size());
     res.headers.set(HDR_CONTENT_LENGTH, cl.str());
     res.bodyLength = file.size();
     return true;
 }
+
 
 
 // ---------------- constructors (linker needed these) ----------------

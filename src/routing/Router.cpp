@@ -196,6 +196,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	std::string matched_prefix;
 	const Location *L = RouteResolver::matchLocation(vs, path, matched_prefix);
 	out.loc = L;
+	
 
 	// populate routing helper fields
 	out.matched_prefix = matched_prefix;

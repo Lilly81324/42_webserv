@@ -8,6 +8,17 @@
 #include <cstdlib>
 #include <set>
 #include <climits> // INT_MAX
+#include <limits.h>   // PATH_MAX
+#include <stdlib.h>   // realpath
+
+
+
+static std::string makeAbsolute(const std::string &path) {
+    char buf[PATH_MAX];
+    if (::realpath(path.c_str(), buf))
+        return std::string(buf);
+    return path; // fallback if resolution fails
+}
 
 // ---------- tiny helpers (only those we use) ----------
 static bool parseUnsigned(const std::string &s, int &out)
@@ -465,7 +476,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
                 {
                     if (i >= N)
                         throw std::runtime_error("root expects path");
-                    vs.root = tok[i++];
+                    vs.root = makeAbsolute(tok[i++]);
                     if (i >= N || tok[i] != ";")
                         throw std::runtime_error("expected ';' after root");
                     ++i;
@@ -496,7 +507,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
                 {
                     if (i >= N)
                         throw std::runtime_error("client_body_temp_path <path>");
-                    vs.client_body_temp_path = tok[i++];
+                    vs.client_body_temp_path = makeAbsolute(tok[i++]); 
                     if (i < N && tok[i] == ";")
                         ++i;
                     continue;
@@ -619,7 +630,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
 
                         if (lkw == "root")
                         {
-                            loc.root = expectWord(i, tok);
+                           loc.root = makeAbsolute(expectWord(i, tok));
                             if (i >= N || tok[i] != ";")
                                 throw std::runtime_error("expected ';' after root");
                             ++i;
@@ -663,7 +674,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
                         }
                         if (lkw == "upload_dir")
                         {
-                            loc.upload_dir = expectWord(i, tok);
+                            loc.upload_dir = makeAbsolute(expectWord(i, tok)); 
                             if (i < N && tok[i] == ";")
                                 ++i;
                             continue;

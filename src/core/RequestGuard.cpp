@@ -106,7 +106,6 @@ Preflight RequestGuards::preflight(const ServerConfig &cfg,
 	const bool chunked = header_has_chunked(hdrs);
 	std::size_t cl = 0;
 	const bool hasCL = parse_content_length(hdrs, cl);
-	std::cout<<hdrs<<std::endl;
 	if (pr.needs_body)
 	{
 		// 411 if neither CL nor chunked provided

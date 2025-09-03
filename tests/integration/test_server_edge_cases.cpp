@@ -47,7 +47,10 @@ TEST_CASE("Headers fragmented into tiny writes => still responds", "[server][fra
 {
 	const int port = pick_free_port_ipv4();
 	ServerConfig svcfg;
-	VirtualServer vs;
+	ServerConfig cfg;
+	cfg.parseFile("tests/unit/config/with_locations.conf");
+	VirtualServer vs = cfg.servers()[0];
+	vs.client_body_temp_path = "/tmp";
 	vs.listen_host = "127.0.0.1";
 	vs.listen_port = port;
 	svcfg.push_back(vs);
@@ -62,17 +65,15 @@ TEST_CASE("Headers fragmented into tiny writes => still responds", "[server][fra
 	{
 		write_all(cfd, &req[i], 1);
 		// minimal delay is optional; uncomment to stress scheduling
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 	std::string resp = read_until_eof(cfd);
 	::close(cfd);
 	s.stop();
 	if (loop.joinable())
 	{
-		std::cout << "Before joining" << std::endl;
 		loop.join();
 	}
-	std::cout << "After joining" << std::endl;
 	REQUIRE(resp.find("HTTP/1.1 200") != std::string::npos);
 	REQUIRE(resp.size() >= resp.find("\r\n\r\n") + 4);
 }

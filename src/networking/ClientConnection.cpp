@@ -162,7 +162,6 @@ void ClientConnection::parseHeaders()
 	
 	std::size_t used = avail;
 	
-	// std::cout<<avail<<" used: "<<used<<std::endl;
 	if (used > 0)
 	{
 		io.getInputRing().consumed(used);
@@ -353,7 +352,7 @@ void ClientConnection::readBody()
 	}
 
 	// 6) Completion check
-	if (!body->complete())
+	if (!body->complete() && req.getState() != OVER )
 		return;
 
 	// Body done → continue pipeline
@@ -407,8 +406,7 @@ void ClientConnection::finishWriteOrNext()
 	route_selected = false;
 
 	state = PH_READ_HEADERS;
-	resetDeadline(HDR_TIMEOUT_MS);
-	(void)io.nb_read(32 *1024);
+	resetDeadline(IDLE_TIMEOUT_MS);
 	if (io.getInputRing().readAvail() > 0){
 		parseHeaders();
 	}
@@ -437,10 +435,7 @@ void ClientConnection::decideBodyReader()
 		delete body;
 		body = 0;
 	}
-
-	std::vector<char> tmp;
-
-	body = new ChunkedReader(tmp, plan.max_body_bytes, server->getConfig().servers()[vs_idx].client_body_temp_path);
+	body = new ChunkedReader(io.getTmp(), plan.max_body_bytes, server->getConfig().servers()[vs_idx].client_body_temp_path);
 }
 
 void ClientConnection::decideBodyReader(std::size_t content_length)

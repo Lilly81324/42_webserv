@@ -8,8 +8,16 @@
 #include <cstring>
 #include <string>
 #include <string.h>
+#include <fcntl.h>
 
 #include "VirtualServer.h"
+
+inline void set_nonblock(int fd)
+{
+	int fl = ::fcntl(fd, F_GETFL, 0);
+	REQUIRE(fl >= 0);
+	REQUIRE(::fcntl(fd, F_SETFL, fl | O_NONBLOCK) == 0);
+}
 
 inline int get_local_port_fd(int fd)
 {

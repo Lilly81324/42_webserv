@@ -51,12 +51,15 @@ public:
 	ssize_t nb_read(std::size_t max_bytes);
 	ssize_t nb_write();
 
+	std::vector<char>& getTmp(){return tmp;}
+
 private:
 	UniqueFD socket;
 	IoRing in;
 	ChainBuf out;
 	FlowControl flow;
 	std::vector<char> tx_scratch;
+	std::vector<char> tmp;
 };
 
 #endif // CONNECTIONIO_H

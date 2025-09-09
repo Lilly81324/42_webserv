@@ -22,10 +22,11 @@ class HttpRequest;
  *  - Weak ETags (W/...) are compared verbatim (no special handling).
  */
 namespace HttpPreconditions {
+	bool checkIfNoneMatch(const std::string &inm, const std::string &etag);
     bool isNotModified(const HttpRequest& req,
                        const std::string& etag,
                        std::time_t mtime);
-	bool	isMatchingEtag(const HttpRequest &req, const std::string &etag);
+	bool	checkIfMatch(const HttpRequest &req, const std::string &etag);
 }
 
 #endif // HTTP_PRECONDITIONS_H

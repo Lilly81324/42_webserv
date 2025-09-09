@@ -395,9 +395,12 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 
 	// Check if If-Match Header is set and invalid
 	const std::string etag = ETagUtil::generate(st);
-	if (!HttpPreconditions::isMatchingEtag(req, etag))
+	if (!HttpPreconditions::checkIfMatch(req, etag))
 		return (createFailResponse(res, HTTP_PRECON_FAIL));
-	
+	// APPARENTLY WRONG GOTTA FIX
+	// if (HttpPreconditions::checkIfNoneMatch(req.getHeaders().get(HDR_IF_NONE_MATCH), etag))
+	// 	return (createFailResponse(res, HTTP_PRECON_FAIL));
+
 	// Run the method
 	if (req.getMethod() == "PUT")
 		status = handle_put(path, req, res, ctx);

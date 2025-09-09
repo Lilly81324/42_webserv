@@ -83,32 +83,44 @@ static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out) {
 // ---- public API -----------------------------------------------------
 
 /**
- * @returns true if inm == *
- * @returns true if given ETag matches one from the comma seperated HDR_IF_NONE_MATCH Header field
- * @returns true if No specified ETag found (or none specified) AND
- *          No Modifications to file after or at HDR_IF_MODIFIED_SINCE
+ * @brief Checks the If-None-Match Header
+ * @param inm Value of the Header Field for If-None-Match
+ * @param etag Current ETag
+ * @returns true, if inm is "*" and etag is empty
+ * @returns true, if Given ETag matches one of the entries in inm
+ * @returns false otherwise
+ */
+bool HttpPreconditions::checkIfNoneMatch(const std::string &inm, const std::string &etag)
+{
+	if (inm.empty())
+		return (false);
+	if (inm == "*")
+		return (etag.empty());
+	std::vector<std::string> etags;
+	split_commas(inm, etags);
+	for (std::vector<std::string>::size_type i = 0; i < etags.size(); ++i)
+	{
+		if (ETagUtil::weakComp(trim_ws(etags[i]), etag))
+			return true;
+	}
+	return (false);
+}
+
+/**
+ * @brief Checks if file was modified or is not matching the etag
+ * @returns true if Header field IF-None-Match is "*" AND etag is empty
+ * @returns true if given ETag HDR_IF_NONE_MATCH Header field is true
+ * @returns true if the resource has NOT been modified according to headers
  */
 bool HttpPreconditions::isNotModified(const HttpRequest& req,
                                       const std::string& etag,
                                       std::time_t mtime)
 {
     const Headers& h = req.getHeaders();
-
-    const std::string inm = h.get(HDR_IF_NONE_MATCH);
-    if (!inm.empty()) {
-        if (inm == "*") {
-            return true; // any representation matches
-        }
-        std::vector<std::string> etags;
-        split_commas(inm, etags);
-        for (std::vector<std::string>::size_type i = 0; i < etags.size(); ++i) {
-            const std::string candidate = trim_ws(etags[i]);
-            if (candidate == etag)
-                return true;
-        }
-        // If-None-Match present but no match -> treat as not satisfied; fall through.
-    }
-
+	const std::string & inm = h.get(HDR_IF_NONE_MATCH);
+	// 1) If-None-Match
+	if (!inm.empty())
+		return (HttpPreconditions::checkIfNoneMatch(inm, etag));
     // 2) If-Modified-Since
     const std::string ims = h.get(HDR_IF_MODIFIED_SINCE);
     if (!ims.empty()) {
@@ -118,7 +130,6 @@ bool HttpPreconditions::isNotModified(const HttpRequest& req,
                 return true; // not modified since IMS
         }
     }
-
     return false;
 }
 
@@ -141,7 +152,7 @@ bool HttpPreconditions::isNotModified(const HttpRequest& req,
  * A true return means that the request should be handled as usual
  * For further information: RFC 9110 §13.1.2.
  */
-bool HttpPreconditions::isMatchingEtag(const HttpRequest &req, const std::string &givenEtag)
+bool HttpPreconditions::checkIfMatch(const HttpRequest &req, const std::string &givenEtag)
 {
 	std::vector<std::string> etagArray;
 	const Headers &h = req.getHeaders();

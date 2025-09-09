@@ -18,6 +18,21 @@ PutPatchHandler::~PutPatchHandler()
 }
 
 /**
+ * @brief Sets the Response to be a failure
+ * @param code Http Error Code to set it to
+ * @returns false
+ */
+bool	createFailResponse(HttpResponse &res, int code)
+{
+	res.setStatus(code);
+	res.clearBody();
+	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+	res.headers.set(HDR_CONTENT_LENGTH, "0");
+	res.bodyLength = 0;
+	return (false);
+}
+
+/**
  * @brief Opens File with mode as a stream
  * 
  * Differs flags based on modes
@@ -357,18 +372,41 @@ int	PutPatchHandler::handle_patch(const char *path, HttpRequest &req, HttpRespon
 	return (HTTP_INV_MEDIA);
 }
 
-
 bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
+	int status;
+	struct stat st;
+
+	// Check if method is invalid
+	if (req.getMethod() != "PUT" && req.getMethod() != "PATCH")
+		return (createFailResponse(res, HTTP_BAD_REQUEST));
+
+	// Get target file
 	std::string pathStr = ctx.effective_root + ctx.rel_path;
 	const char *path = pathStr.c_str();
 
-	errno = HTTP_OK;
+	// Check if target not accesible
+	if (stat(path, &st) != 0)
+		return (createFailResponse(res, HTTP_BAD_REQUEST));
+	
+	// Check if target is not a file
+	if (!S_ISREG(st.st_mode))
+		return (createFailResponse(res, HTTP_BAD_REQUEST));
+
+	// Check if If-Match Header is set and invalid
+	const std::string etag = ETagUtil::generate(st);
+	if (!HttpPreconditions::isMatchingEtag(req, etag))
+		return (createFailResponse(res, HTTP_PRECON_FAIL));
+	
+	// Run the method
 	if (req.getMethod() == "PUT")
-		errno = handle_put(path, req, res, ctx);
+		status = handle_put(path, req, res, ctx);
 	else
-		errno = handle_patch(path, req, res, ctx);
-	if (errno == HTTP_OK || errno == HTTP_FILE_CREATED)
-		return (true);
-	return (false);
+		status = handle_patch(path, req, res, ctx);
+
+	// Check if method process was not valid
+	if (!(status == HTTP_OK || status == HTTP_FILE_CREATED))
+		return (createFailResponse(res, status));
+	res.setStatus(200);
+	return (true);
 }

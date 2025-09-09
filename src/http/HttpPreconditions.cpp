@@ -9,6 +9,11 @@
 
 // ---- tiny helpers ---------------------------------------------------
 
+/**
+ * @brief Returns given string stripped at front and end of spaces and tabs
+ * @param s String to strip
+ * @returns the result of stripping
+ */
 static std::string trim_ws(const std::string& s) {
     std::string::size_type a = 0, b = s.size();
     while (a < b && (s[a] == ' ' || s[a] == '\t')) ++a;
@@ -16,6 +21,10 @@ static std::string trim_ws(const std::string& s) {
     return s.substr(a, b - a);
 }
 
+/**
+ * Splits string into substrings, based on commas
+ * Removes spaces and tabs before and after commas
+ */
 static void split_commas(const std::string& s, std::vector<std::string>& out) {
     out.clear();
     std::string cur;
@@ -73,13 +82,18 @@ static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out) {
 
 // ---- public API -----------------------------------------------------
 
+/**
+ * @returns true if inm == *
+ * @returns true if given ETag matches one from the comma seperated HDR_IF_NONE_MATCH Header field
+ * @returns true if No specified ETag found (or none specified) AND
+ *          No Modifications to file after or at HDR_IF_MODIFIED_SINCE
+ */
 bool HttpPreconditions::isNotModified(const HttpRequest& req,
                                       const std::string& etag,
                                       std::time_t mtime)
 {
     const Headers& h = req.getHeaders();
 
-    // 1) If-None-Match (strong precedence)
     const std::string inm = h.get(HDR_IF_NONE_MATCH);
     if (!inm.empty()) {
         if (inm == "*") {
@@ -106,4 +120,54 @@ bool HttpPreconditions::isNotModified(const HttpRequest& req,
     }
 
     return false;
+}
+
+/**
+ * @brief Checks if the specified ETag matches the one in the request Header
+ * @note Should only handle strong ETags (no W/"blablabla")
+ * @param req HttpRequest which holds Header fields to check
+ * @param etag String that should be a newly created ETag for the target file
+ * @returns true if no HDR_IF_MATCH Header field exists
+ * @returns true if field is set to "*" and givenEtag is valid
+ * @returns true if givenEtag matches one of the fields specified ETags
+ * @returns false otherwise
+ * 
+ * Use Case:
+ * Mainly for PUT, PATCH and DELETE
+ * Interpretation:
+ * A false value means that the Etag is not matching, but should be
+ * this means there is an error, the status code should be set to 412,
+ * and the request should not be processed further
+ * A true return means that the request should be handled as usual
+ * For further information: RFC 9110 §13.1.2.
+ */
+bool HttpPreconditions::isMatchingEtag(const HttpRequest &req, const std::string &givenEtag)
+{
+	std::vector<std::string> etagArray;
+	const Headers &h = req.getHeaders();
+	const std::string &storedEtags = h.get(HDR_IF_MATCH);
+
+	// If no Key for checking Matching Etags
+	if (!h.keyExists(HDR_IF_MATCH))
+		return (true);
+	
+	// Any Matches
+	if (storedEtags == "*")
+	{
+		// If Resource is accesible, stop running (Is this also a 412? Shouldnt this be handled later?)
+		if (givenEtag.empty())
+			return (false);
+		return (true);
+	}
+
+	// Go through all etags stored in the Header
+	split_commas(storedEtags, etagArray);
+	for (std::vector<std::string>::const_iterator it = etagArray.begin(); it != etagArray.end(); it++)
+	{
+		// If one matches the one we search -> match
+		if (*it == givenEtag)
+			return (true);
+	}
+	// No match found -> Given ETag is invalid/out-of-date
+	return (false);
 }

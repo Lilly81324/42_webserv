@@ -24,6 +24,7 @@ namespace HttpPreconditions {
     bool isNotModified(const HttpRequest& req,
                        const std::string& etag,
                        std::time_t mtime);
+	bool HttpPreconditions::isMatchingEtag(const HttpRequest &req, const std::string &etag);
 }
 
 #endif // HTTP_PRECONDITIONS_H

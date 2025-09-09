@@ -408,5 +408,6 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 	if (!(status == HTTP_OK || status == HTTP_FILE_CREATED))
 		return (createFailResponse(res, status));
 	res.setStatus(200);
+	res.headers.set(HDR_ETAG, etag);
 	return (true);
 }

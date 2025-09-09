@@ -12,12 +12,30 @@ Date: 8/10/2025
 #include <string>
 #include <sys/stat.h>
 
+/**
+ * Unique Identifiers for files
+ * Source: https://www.rfc-editor.org/rfc/rfc9110.html#section-8.8.3
+ */
 class ETagUtil {
 public:
     // Strong-enough ETag for static files: size+mtime
-    static std::string generate(const struct stat& st);
+	static std::string generate(const struct stat& st);
+
+	/**
+	 * @brief Strong ETag Comparison
+	 * @returns true if neither string is a weak Etag and both are equal
+	 * @returns false otherwise
+	 * @note Logic according to https://www.rfc-editor.org/rfc/rfc9110.html#section-8.8.3.2
+	*/
 	static bool strongComp(const std::string &s1, const std::string &s2);
-    static bool weakComp(const std::string &s1, const std::string &s2);
+
+	/**
+	 * TODO: IF YOU WANT TO USE THIS, REWORK IT, THIS IS PROBABLY INSUFFICENT
+	 * @brief Weak ETag Comparison
+	 * @returns true if both strings are equal, ignoring weak/strong type
+	 * @returns false otherwise
+	*/
+	static bool weakComp(const std::string &s1, const std::string &s2);
 };
 
 #endif // ETAGUTIL_H

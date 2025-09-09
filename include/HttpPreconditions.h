@@ -1,6 +1,7 @@
 #ifndef HTTP_PRECONDITIONS_H
 #define HTTP_PRECONDITIONS_H
 
+#include "ETagUtil.h"
 #include <string>
 #include <ctime>
 

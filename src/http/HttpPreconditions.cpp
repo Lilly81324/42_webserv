@@ -165,7 +165,7 @@ bool HttpPreconditions::isMatchingEtag(const HttpRequest &req, const std::string
 	for (std::vector<std::string>::const_iterator it = etagArray.begin(); it != etagArray.end(); it++)
 	{
 		// If one matches the one we search -> match
-		if (*it == givenEtag)
+		if (ETagUtil::strongComp(*it, givenEtag))
 			return (true);
 	}
 	// No match found -> Given ETag is invalid/out-of-date

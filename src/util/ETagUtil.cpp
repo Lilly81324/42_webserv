@@ -25,3 +25,33 @@ std::string ETagUtil::generate(const struct stat &st)
     oss << "\"wsv-" << std::hex << size << "-" << msec << "\"";
     return oss.str();
 }
+
+/**
+ * @brief Strong ETag Comparison
+ * @returns true if neither string is a weak Etag and both are equal
+ * @returns false otherwise
+*/
+bool ETagUtil::strongComp(const std::string &s1, const std::string &s2)
+{
+	if (s1.substr(0, 2) == "W/")
+		return (false);
+	return (s1 == s2);
+}
+
+/**
+ * TODO: IF YOU WANT TO USE THIS, REWORK IT, THIS IS PROBABLY INSUFFICENT
+ * @brief Weak ETag Comparison
+ * @returns true if both strings are equal, ignoring weak/strong type
+ * @returns false otherwise
+*/
+bool ETagUtil::weakComp(const std::string &s1, const std::string &s2)
+{
+	std::string cpy1(s1);
+	std::string cpy2(s2);
+
+	if (s1.substr(0, 2) == "W/")
+		cpy1 = s1.substr(2, s1.length() - 2);
+	if (s2.substr(0, 2) == "W/")
+		cpy2 = s2.substr(2, s2.length() - 2);
+	return (s1 == s2);
+}

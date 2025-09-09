@@ -16,6 +16,8 @@ class ETagUtil {
 public:
     // Strong-enough ETag for static files: size+mtime
     static std::string generate(const struct stat& st);
+	static bool strongComp(const std::string &s1, const std::string &s2);
+    static bool weakComp(const std::string &s1, const std::string &s2);
 };
 
 #endif // ETAGUTIL_H

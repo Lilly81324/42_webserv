@@ -19,7 +19,7 @@ Date: 8/10/2025
 class ETagUtil {
 public:
     // Strong-enough ETag for static files: size+mtime
-	static std::string generate(const struct stat& st);
+	static std::string generate(const char *filename);
 
 	/**
 	 * @brief Strong ETag Comparison

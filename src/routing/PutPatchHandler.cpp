@@ -375,7 +375,6 @@ int	PutPatchHandler::handle_patch(const char *path, HttpRequest &req, HttpRespon
 bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
 	int status;
-	struct stat st;
 
 	// Check if method is invalid
 	if (req.getMethod() != "PUT" && req.getMethod() != "PATCH")
@@ -386,14 +385,8 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 	const char *path = pathStr.c_str();
 
 	// Generate Etag
-	st.st_size = 0;
-	struct timespec t;
-	t.tv_sec = 0;
-	t.tv_nsec = 0;
-	st.st_mtim = t;
-	std::cout << stat(path, &st) << std::endl;
-	stat(path, &st);
-	const std::string etag = ETagUtil::generate(st);
+	std::string etag = ETagUtil::generate(path);
+	std::cout << "Generated Etag: " << etag << std::endl;
 	
 	// Check Preconditions
 	if (!HttpPreconditions::putpatchPreconditons(req, etag))
@@ -405,10 +398,13 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 	else
 		status = handle_patch(path, req, res, ctx);
 
+	// Make ETag for newly created and modified version
+	etag = ETagUtil::generate(path);
+
 	// Check if method process was not valid
 	if (!(status == HTTP_OK || status == HTTP_FILE_CREATED))
 		return (createFailResponse(res, status));
-	res.setStatus(200);
+	res.setStatus(status);
 	res.headers.set(HDR_ETAG, etag);
 	return (true);
 }

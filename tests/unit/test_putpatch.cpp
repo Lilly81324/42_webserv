@@ -19,7 +19,7 @@
  * @param goal The Content that the file should have
  * @warning length and goal have to match 
  */
-void	checkFileContent(int length, const std::string &filename, const std::string &goal)
+static void	checkFileContent(int length, const std::string &filename, const std::string &goal)
 {
 		char buffer[length + 1];
 		std::ifstream in;

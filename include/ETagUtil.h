@@ -18,7 +18,15 @@ Date: 8/10/2025
  */
 class ETagUtil {
 public:
-    // Strong-enough ETag for static files: size+mtime
+    /**
+	 * @note Generate Entity Tag for file
+	 * @param filename Name for the file to generate off of
+	 * @returns the created ETag
+	 * 
+	 * Generates unique identifier for a file, based off of its last state
+	 * Meaning that if the file isnt modified, the generated ETag will always be the same result
+	 * For non-existant/inaccesible files it generates an empty string
+	 */
 	static std::string generate(const char *filename);
 
 	/**

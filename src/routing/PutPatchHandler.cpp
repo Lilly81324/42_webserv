@@ -386,7 +386,6 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 
 	// Generate Etag
 	std::string etag = ETagUtil::generate(path);
-	std::cout << "Generated Etag: " << etag << std::endl;
 	
 	// Check Preconditions
 	if (!HttpPreconditions::putpatchPreconditons(req, etag))
@@ -398,13 +397,13 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 	else
 		status = handle_patch(path, req, res, ctx);
 
-	// Make ETag for newly created and modified version
-	etag = ETagUtil::generate(path);
-
 	// Check if method process was not valid
 	if (!(status == HTTP_OK || status == HTTP_FILE_CREATED))
 		return (createFailResponse(res, status));
-	res.setStatus(status);
+
+	// Make ETag for newly created and modified version
+	etag = ETagUtil::generate(path);
 	res.headers.set(HDR_ETAG, etag);
+	res.setStatus(status);
 	return (true);
 }

@@ -385,21 +385,19 @@ bool PutPatchHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext
 	std::string pathStr = ctx.effective_root + ctx.rel_path;
 	const char *path = pathStr.c_str();
 
-	// Check if target not accesible
-	if (stat(path, &st) != 0)
-		return (createFailResponse(res, HTTP_BAD_REQUEST));
-	
-	// Check if target is not a file
-	if (!S_ISREG(st.st_mode))
-		return (createFailResponse(res, HTTP_BAD_REQUEST));
-
-	// Check if If-Match Header is set and invalid
+	// Generate Etag
+	st.st_size = 0;
+	struct timespec t;
+	t.tv_sec = 0;
+	t.tv_nsec = 0;
+	st.st_mtim = t;
+	std::cout << stat(path, &st) << std::endl;
+	stat(path, &st);
 	const std::string etag = ETagUtil::generate(st);
-	if (!HttpPreconditions::checkIfMatch(req, etag))
+	
+	// Check Preconditions
+	if (!HttpPreconditions::putpatchPreconditons(req, etag))
 		return (createFailResponse(res, HTTP_PRECON_FAIL));
-	// APPARENTLY WRONG GOTTA FIX
-	// if (HttpPreconditions::checkIfNoneMatch(req.getHeaders().get(HDR_IF_NONE_MATCH), etag))
-	// 	return (createFailResponse(res, HTTP_PRECON_FAIL));
 
 	// Run the method
 	if (req.getMethod() == "PUT")

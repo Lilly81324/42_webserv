@@ -59,6 +59,7 @@ namespace HttpPreconditions
 	 * @note https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.3
 	 */
 	bool	checkIsModifiedSince(const HttpRequest& req, std::time_t mtime);
+
 	/**
 	 * @brief Precondition check for GET method
 	 * @param req HttpRequest with Headers containing precondition fields
@@ -68,6 +69,15 @@ namespace HttpPreconditions
 	 * @returns false if a precondition fails (meaning the file hasnt changed -> 304)
 	 */
 	bool	getPreconditons(const HttpRequest &req, const std::string &etag, const std::time_t &mtime);
+
+	/**
+	 * @brief Precondition check for PUT and PATCH
+	 * @param req HttpRequest with Headers containing precondition fields
+	 * @param etag ETag for the current file to access
+	 * @returns true if all preconditions are met
+	 * @returns false if a precondition fails (meaning the file hasnt changed -> 412)
+	 */
+	bool	putpatchPreconditons(const HttpRequest &req, const std::string &etag);
 }
 
 #endif // HTTP_PRECONDITIONS_H

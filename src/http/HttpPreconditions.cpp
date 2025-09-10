@@ -180,3 +180,12 @@ bool HttpPreconditions::getPreconditons(const HttpRequest &req, const std::strin
 	}
 	return (true);
 }
+
+bool	HttpPreconditions::putpatchPreconditons(const HttpRequest &req, const std::string &etag)
+{
+	if (!HttpPreconditions::checkIfMatch(req, etag))
+		return (false);
+	if (!HttpPreconditions::checkIfNoneMatch(req, etag))
+		return (false);
+	return (true);
+}

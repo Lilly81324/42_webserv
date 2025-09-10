@@ -82,76 +82,58 @@ static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out) {
 
 // ---- public API -----------------------------------------------------
 
-/**
- * @brief Checks the If-None-Match Header
- * @param inm Value of the Header Field for If-None-Match
- * @param etag Current ETag
- * @returns true, if inm is "*" and etag is empty
- * @returns true, if Given ETag matches one of the entries in inm
- * @returns false otherwise
- */
-bool HttpPreconditions::checkIfNoneMatch(const std::string &inm, const std::string &etag)
+bool HttpPreconditions::checkIsModifiedSince(const HttpRequest& req,
+									std::time_t mtime)
 {
-	if (inm.empty())
+	const Headers &head = req.getHeaders();
+	const std::string ims = head.get(HDR_IF_MODIFIED_SINCE);
+
+	// If No such Condition Header, always true
+	if (!head.keyExists(HDR_IF_MODIFIED_SINCE))
+		return (true);
+	
+	// Get Modification Time
+	std::time_t since = 0;
+	if (!parse_http_date_rfc1123(ims, since))
 		return (false);
-	if (inm == "*")
-		return (etag.empty());
+	
+	// Check if Modification is newer then checked time
+	if (mtime > since)
+		return (false);
+	return (true);
+}
+
+bool HttpPreconditions::checkIfNoneMatch(const HttpRequest &req, const std::string &etag)
+{
+	const Headers &h = req.getHeaders();
+	const std::string &inm = h.get(HDR_IF_NONE_MATCH);
 	std::vector<std::string> etags;
+
+	// If No such Condition Header, always true
+	if (inm.empty())
+		return (true);
+	
+	// If Wildcard
+	if (inm == "*")
+	{
+		// If Resource is not accesible, Condition valid -> true
+		if (etag.empty())
+			return (true);
+		return (false);
+	}
+	
+	// Check if ETag matches the ones in the Request Header
 	split_commas(inm, etags);
 	for (std::vector<std::string>::size_type i = 0; i < etags.size(); ++i)
 	{
 		if (ETagUtil::weakComp(trim_ws(etags[i]), etag))
-			return true;
+			return (false);
 	}
-	return (false);
+
+	// No Matches for ETag with the Requests Header
+	return (true);
 }
 
-/**
- * @brief Checks if file was modified or is not matching the etag
- * @returns true if Header field IF-None-Match is "*" AND etag is empty
- * @returns true if given ETag HDR_IF_NONE_MATCH Header field is true
- * @returns true if the resource has NOT been modified according to headers
- */
-bool HttpPreconditions::isNotModified(const HttpRequest& req,
-                                      const std::string& etag,
-                                      std::time_t mtime)
-{
-    const Headers& h = req.getHeaders();
-	const std::string & inm = h.get(HDR_IF_NONE_MATCH);
-	// 1) If-None-Match
-	if (!inm.empty())
-		return (HttpPreconditions::checkIfNoneMatch(inm, etag));
-    // 2) If-Modified-Since
-    const std::string ims = h.get(HDR_IF_MODIFIED_SINCE);
-    if (!ims.empty()) {
-        std::time_t since = 0;
-        if (parse_http_date_rfc1123(ims, since)) {
-            if (mtime <= since)
-                return true; // not modified since IMS
-        }
-    }
-    return false;
-}
-
-/**
- * @brief Checks if the specified ETag matches the one in the request Header
- * @note Should only handle strong ETags (no W/"blablabla")
- * @param req HttpRequest which holds Header fields to check
- * @param etag String that should be a newly created ETag for the target file
- * @returns true if no HDR_IF_MATCH Header field exists
- * @returns true if field is set to "*" and givenEtag is valid
- * @returns true if givenEtag matches one of the fields specified ETags
- * @returns false otherwise
- * 
- * Use Case:
- * Mainly for PUT, PATCH and DELETE
- * Interpretation:
- * A false value means that the Etag is not matching, but should be
- * this means there is an error, the status code should be set to 412,
- * and the request should not be processed further
- * A true return means that the request should be handled as usual
- * For further information: RFC 9110 §13.1.2.
- */
 bool HttpPreconditions::checkIfMatch(const HttpRequest &req, const std::string &givenEtag)
 {
 	std::vector<std::string> etagArray;
@@ -165,7 +147,7 @@ bool HttpPreconditions::checkIfMatch(const HttpRequest &req, const std::string &
 	// Any Matches
 	if (storedEtags == "*")
 	{
-		// If Resource is accesible, stop running (Is this also a 412? Shouldnt this be handled later?)
+		// If Resource is not accesible, Condition invalid -> false
 		if (givenEtag.empty())
 			return (false);
 		return (true);
@@ -175,10 +157,26 @@ bool HttpPreconditions::checkIfMatch(const HttpRequest &req, const std::string &
 	split_commas(storedEtags, etagArray);
 	for (std::vector<std::string>::const_iterator it = etagArray.begin(); it != etagArray.end(); it++)
 	{
-		// If one matches the one we search -> match
+		// If one matches the one we search -> true
 		if (ETagUtil::strongComp(*it, givenEtag))
 			return (true);
 	}
-	// No match found -> Given ETag is invalid/out-of-date
+	// No match found -> Given ETag is invalid
 	return (false);
+}
+
+bool HttpPreconditions::getPreconditons(const HttpRequest &req, const std::string &etag, const std::time_t &mtime)
+{
+	// If ETag matches known one -> false, make 304
+	if (!HttpPreconditions::checkIfNoneMatch(req, etag))
+		return (false);
+
+	// If-None-Match Header should overwrite behaviour of If-Modified-Since
+	if (!req.getHeaders().keyExists(HDR_IF_NONE_MATCH))
+	{
+		// If file was not modified since check -> false, make 304
+		if (!HttpPreconditions::checkIsModifiedSince(req, mtime))
+			return (false);
+	}
+	return (true);
 }

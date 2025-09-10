@@ -393,7 +393,8 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
     const std::string lm = httpDate(st.st_mtime);
 
     // Conditional GET handling
-    if (HttpPreconditions::isNotModified(req, et, st.st_mtime)) {
+    if (!HttpPreconditions::getPreconditons(req, et, st.st_mtime))
+    {
         res.setStatus(304);
         res.body.clear();
         res.headers.set(HDR_ETAG, et);

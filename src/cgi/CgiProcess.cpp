@@ -81,7 +81,7 @@ bool CgiProcess::spawn(const CgiSpec &spec,
         envp.push_back(const_cast<char *>(it->c_str()));
     envp.push_back(0);
 
-    return spawn(spec.bin, scriptPath, &argvv[0], &envp[0], spec.timeout_ms);
+	return spawn(spec.bin, scriptPath, &argvv[0], &envp[0], spec.timeout_ms);
 }
 
 // Low-level spawn: do the actual fork/exec (stub for now; returns false)
@@ -91,8 +91,8 @@ bool CgiProcess::spawn(const std::string &bin,
                        char *const *envp,
                        int timeout_ms)
 {
-    // Clean up any previous child
-    terminate();
+	// Clean up any previous child
+	terminate();
 
     // Establish deadline
     _deadline = (timeout_ms > 0)
@@ -140,9 +140,9 @@ bool CgiProcess::spawn(const std::string &bin,
         // stderr merged to stdout
         (void)::dup2(outPipe[1], STDERR_FILENO);
 
-        // close the originals after dup
-        ::close(inPipe[0]);
-        ::close(outPipe[1]);
+		// close the originals after dup
+		::close(inPipe[0]);
+		::close(outPipe[1]);
 
         // Exec the interpreter/binary with provided argv/envp.
         // argv should look like: [bin, script, NULL]
@@ -153,23 +153,23 @@ bool CgiProcess::spawn(const std::string &bin,
         _exit(127); // exec failed
     }
 
-    // ---------------- parent ----------------
-    _pid = pid;
+	// ---------------- parent ----------------
+	_pid = pid;
 
-    // parent keeps write-end of stdin and read-end of stdout
-    ::close(inPipe[0]);
-    ::close(outPipe[1]);
+	// parent keeps write-end of stdin and read-end of stdout
+	::close(inPipe[0]);
+	::close(outPipe[1]);
 
     _in = inPipe[1];
     _out = outPipe[0];
 
-    // Make them non-blocking & close-on-exec
-    (void)setNonBlocking(_in);
-    (void)setNonBlocking(_out);
-    (void)setCloseOnExec(_in);
-    (void)setCloseOnExec(_out);
+	// Make them non-blocking & close-on-exec
+	(void)setNonBlocking(_in);
+	(void)setNonBlocking(_out);
+	(void)setCloseOnExec(_in);
+	(void)setCloseOnExec(_out);
 
-    return true;
+	return true;
 }
 
 void CgiProcess::closeIn() { 
@@ -216,9 +216,9 @@ int CgiProcess::waitNonBlocking(int *raw_status)
         code = 128 + WTERMSIG(st); // common convention
     }
 
-    _pid = -1;
-    closeBoth();
-    return code > 0 ? code : 1; // >0 means finished; return a positive number
+	_pid = -1;
+	closeBoth();
+	return code > 0 ? code : 1; // >0 means finished; return a positive number
 }
 
 void CgiProcess::terminate()

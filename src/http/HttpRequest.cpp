@@ -8,6 +8,10 @@ date: 8/10/2025
 #include "HttpRequest.h"
 #include <iostream>
 #include <sstream>
+#include <fstream>
+
+
+static unsigned long long BUFFERLIMIT = 128 * 1048 ;
 
 /**
  * Wether given Method is a valid one
@@ -15,11 +19,12 @@ date: 8/10/2025
  */
 bool isMethodValid(const std::string &in)
 {
-	if (in == "GET" || in == "PUT" || in == "PATCH" || in == "DELETE" ||
-		in == "POST")
-		return (true);
-	return (false);
+    if (in == "GET" || in == "HEAD" || in == "PUT" || in == "PATCH" ||
+        in == "DELETE" || in == "POST")
+        return (true);
+    return (false);
 }
+
 
 /**
  * Wether given Path is a valid one
@@ -89,6 +94,9 @@ HttpRequest::HttpRequest()
 	this->totalBytesHandled = 0;
 	this->bytesHandledLast = 0;
 	this->conType = true;
+	this->body_on_disk = false;
+	this->body_tmp_path.clear();
+	this->body_on_disk_bytes = 0;
 }
 
 HttpRequest::~HttpRequest()
@@ -281,6 +289,12 @@ bool HttpRequest::parse(const char *data, size_t n)
 
 	if (this->state == ERROR || this->state == OVER || n < 1)
 		return (false);
+	if (this->buffer.size() + n > BUFFERLIMIT )
+	{
+		this->state = ERROR;
+		errno = HTTP_BAD_REQUEST;
+		return (false);
+	}
 	newInput = string(data, n);
 	this->buffer += newInput;
 	this->totalBytesRead += newInput.size();
@@ -361,6 +375,54 @@ vector<char> HttpRequest::getBody(void) const
 	return (this->body);
 }
 
+void HttpRequest::enableBodyOnDisk(const std::string &path)
+{
+	// ensure we mark and store the path; caller is responsible for opening
+	// and writing to body_ofs. We only store metadata here.
+	this->body_on_disk = true;
+	this->body_tmp_path = path;
+}
+
+bool HttpRequest::isBodyOnDisk(void) const
+{
+	return this->body_on_disk;
+}
+
+std::string HttpRequest::getBodyFilePath(void) const
+{
+	return this->body_tmp_path;
+}
+
+std::vector<char> HttpRequest::readBodyToVector(void) const
+{
+	if (!this->body_on_disk)
+		return this->body;
+	std::vector<char> out;
+	std::ifstream ifs(this->body_tmp_path.c_str(), std::ios::in | std::ios::binary);
+	if (!ifs)
+		return out;
+	ifs.seekg(0, std::ios::end);
+	std::streamoff sz = ifs.tellg();
+	ifs.seekg(0, std::ios::beg);
+	if (sz <= 0)
+		return out;
+	out.resize(static_cast<size_t>(sz));
+	ifs.read(&out[0], sz);
+	return out;
+}
+
+void HttpRequest::cleanupBodyFile(void)
+{
+	if (this->body_on_disk)
+	{
+		if (!this->body_tmp_path.empty())
+			::remove(this->body_tmp_path.c_str());
+		this->body_on_disk = false;
+		this->body_tmp_path.clear();
+		this->body_on_disk_bytes = 0;
+	}
+}
+
 enum HttpRequestState HttpRequest::getState(void) const
 {
 	return (this->state);
@@ -383,17 +445,36 @@ size_t HttpRequest::getBytesHandledLast(void) const
 
 std::ostream &operator<<(std::ostream &out, const HttpRequest &target)
 {
-	out << target.getMethod() << " " << target.getPath() << " " << target.getHttpVer() << std::endl
-		<< "-----------" << std::endl;
-	out << target.getHeaders() << std::endl
-		<< "-----------" << std::endl;
+	out << target.getMethod() << " " << target.getPath() << " " << target.getHttpVer() << std::endl;
+	out << target.getHeaders() << std::endl;
 	out.write(target.getBody().data(), target.getBody().size());
-	out << std::endl
-		<< "-----------";
 	return (out);
 }
 
 void HttpRequest::setKeepAlive(bool state)
 {
 	this->conType = state;
+}
+
+void HttpRequest::reset()
+{
+	this->method.clear();
+	this->path.clear();
+	this->http_version.clear();
+	this->uri.clear();
+	this->query.clear();
+	this->session_id.clear();
+	this->bodyLength = 0;
+	this->buffer.clear();
+	this->state = START;
+	this->totalBytesRead = 0;
+	this->totalBytesHandled = 0;
+	this->bytesHandledLast = 0;
+	this->conType = true;
+	this->body_on_disk = false;
+	this->body_tmp_path.clear();
+	this->body_on_disk_bytes = 0;
+	this->body.clear();
+	this->headers.clear();
+	this->cookies.clear();
 }

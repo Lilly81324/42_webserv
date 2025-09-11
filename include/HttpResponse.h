@@ -16,32 +16,47 @@ Date: 8/10/2025
 
 class HttpResponse {
 public:
-    std::string  http_version;
-    std::string  session_id;
-    size_t       bodyLength;
-    Headers      headers;
-    CookieJar    cookies;
+    // Wire metadata
+    std::string       http_version;   // e.g. "HTTP/1.1"
+    std::string       session_id;
+
+    // Body bookkeeping
+    size_t            bodyLength;     // if 0, serializer should use body.size()
     std::vector<char> body;
 
-    // >>> Keep legacy public names <<<
-    int          status;       // e.g. 200
-    std::string  reason;       // e.g. "OK"
+    // Headers & cookies
+    Headers           headers;
+    CookieJar         cookies;
+
+    // Legacy names for compatibility
+    int               status;         // e.g. 200
+    std::string       reason;         // e.g. "OK"
 
     HttpResponse();
     ~HttpResponse();
 
-    // Optional helpers (used by newer code paths)
-    void setStatus(int code, const std::string& r);
+    // Helpers
+    void setStatus(int code);                       // infers reason
+    void setStatus(int code, const std::string& r); // explicit reason
     int  getStatusCode() const;
     const std::string& getReason() const;
 
-    // Handy helper some code uses
+    void setBody(const std::string& s);
     void clearBody();
+
+    Headers& headersRef() { return headers; }
+    const Headers& headersRef() const { return headers; }
+
+    // Ensures Date, Server, Content-Length, Connection defaults.
+    void ensureDefaultHeaders();
 };
 
-// Debug/trace helper (safe)
+// Debug/trace helper (does NOT print the actual body bytes)
 std::ostream& operator<<(std::ostream& out, const HttpResponse& r);
 
 #endif // HTTPRESPONSE_H
+
+
+
 
 

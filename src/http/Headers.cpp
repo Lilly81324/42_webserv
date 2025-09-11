@@ -7,9 +7,8 @@ Date: 11/08/2025
 
 #include "Headers.h"
 
-Headers::Headers()
+Headers::Headers() : map(), byteSize(0)
 {
-	this->byteSize = 0;
 }
 
 Headers::~Headers()
@@ -133,6 +132,7 @@ size_t Headers::getByteSize(void) const
 
 std::ostream &operator<<(std::ostream &out, const Headers &target)
 {
-	target.show(out);
+	// target.show(out);
+	 out << target.serialize();
 	return (out);
 }

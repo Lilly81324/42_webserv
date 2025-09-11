@@ -10,15 +10,17 @@ Date: 8/10/2025
 
 #include <string>
 
-
 class ServerConfig;
 class HttpRequest;
 class HttpResponse;
-class ServerPipeline {
-	public:
-		bool processRequest(const ServerConfig& cfg, int vs_indx, HttpRequest & req, HttpResponse& res);
+struct RouteDecision;
 
-	private:
+class ServerPipeline
+{
+public:
+	static bool processRequest(const ServerConfig &cfg, int vs_indx, HttpRequest &req, HttpResponse &res, RouteDecision &decision);
+
+private:
 };
 
 #endif // SERVERPIPELINE_H

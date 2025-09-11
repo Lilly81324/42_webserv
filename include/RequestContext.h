@@ -5,6 +5,9 @@
 #include "ServerConfig.h"
 #include "VirtualServer.h"
 #include "ClientConnection.h"
+#include "ServerConfig.h"
+#include "VirtualServer.h"
+#include "ClientConnection.h"
 
 struct RequestContext
 {
@@ -28,14 +31,12 @@ struct RequestContext
 	std::string rel_path;       // path relative to location prefix
 	std::string effective_root; // filesystem root to resolve files
 
-	// Optional connection info you may add later:
-	// std::string remote_ip;
-	// int remote_port;
-	// bool is_tls;
-	ClientConnection* connection; // add this
+
+
 	RequestContext()
 		: cfg(0), vs(0), loc(0), vs_index(-1), local_port(0), cgi_ext(),
-		upstream_name(), temp_file_used(false), temp_filename(), rel_path(), effective_root() {};
+		upstream_name(), temp_file_used(false), temp_filename(), rel_path(), effective_root()
+	 	 {};
 };
 
 #endif // REQUEST_CONTEXT_H

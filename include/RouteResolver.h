@@ -13,25 +13,25 @@ Date: 8/10/2025
 #include <string>
 #include <vector>
 
-	/**
-	 * RouteDecision
-	 *
-	 * Represents the routing decision produced by Router/RouteResolver.
-	 *
-	 * Fields:
-	 *  - kind: which handler kind the pipeline should use (STATIC/CGI/PROXY/PUTPATCH/RETURN/ERROR).
-	 *  - status: when kind==HK_ERROR or HK_RETURN, contains the HTTP status to emit.
-	 *  - vs, loc: pointers into the configuration describing the chosen virtual server
-	 *    and location (may be NULL for defaults).
-	 *  - cgi_ext, upstream_name, return_target: additional hints for handlers.
-	 *  - try_files, rate_limit, allow_list, deny_list: location-level policy copied
-	 *    into the decision so the pipeline can enforce them.
-	 *  - matched_prefix, rel_path, effective_root: helper routing fields computed by Router
-	 *    to simplify handler path resolution.
-	 *
-	 * Note: RouteDecision is an output structure only; callers should not modify the
-	 * configuration objects referenced by `vs`/`loc`.
-	 */
+/**
+ * RouteDecision
+ *
+ * Represents the routing decision produced by Router/RouteResolver.
+ *
+ * Fields:
+ *  - kind: which handler kind the pipeline should use (STATIC/CGI/PROXY/PUTPATCH/RETURN/ERROR).
+ *  - status: when kind==HK_ERROR or HK_RETURN, contains the HTTP status to emit.
+ *  - vs, loc: pointers into the configuration describing the chosen virtual server
+ *    and location (may be NULL for defaults).
+ *  - cgi_ext, upstream_name, return_target: additional hints for handlers.
+ *  - try_files, rate_limit, allow_list, deny_list: location-level policy copied
+ *    into the decision so the pipeline can enforce them.
+ *  - matched_prefix, rel_path, effective_root: helper routing fields computed by Router
+ *    to simplify handler path resolution.
+ *
+ * Note: RouteDecision is an output structure only; callers should not modify the
+ * configuration objects referenced by `vs`/`loc`.
+ */
 struct RouteDecision
 {
 	enum HandlerKind
@@ -56,7 +56,7 @@ struct RouteDecision
 	RateLimitConfig rate_limit;
 	std::vector<std::string> allow_list;
 	std::vector<std::string> deny_list;
-	 // for HK_RETURN: target (url or text)
+	// for HK_RETURN: target (url or text)
 	std::string return_target;
 	// Routing helpers
 	std::string matched_prefix;
@@ -64,6 +64,26 @@ struct RouteDecision
 	std::string effective_root;
 
 	RouteDecision() : kind(HK_ERROR), status(500), vs(0), loc(0), cgi_ext(), upstream_name(), try_files(), rate_limit(), allow_list(), deny_list(), return_target(), matched_prefix(), rel_path(), effective_root() {}
+	void reset()
+	{
+		kind = HK_ERROR;
+		status = 500;
+		vs = 0;
+		loc = 0;
+		cgi_ext.erase();
+		upstream_name.erase();
+		try_files.clear();
+		allow_list.clear();
+		deny_list.clear();
+		return_target.erase();
+		matched_prefix.erase();
+		rel_path.erase();
+		effective_root.erase();
+	}
+	~RouteDecision(){
+		vs =0;
+		loc = 0;
+	};
 };
 
 class RouteResolver

@@ -60,7 +60,6 @@ public:
 						  const std::string &uri,
 						  RouteDecision &out);
 
-
 private:
 	Router();
 	Router(const Router &);

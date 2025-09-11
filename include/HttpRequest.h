@@ -82,6 +82,14 @@ class HttpRequest
 		Headers headers;
 		CookieJar cookies;
 		vector<char> body;
+		/* If body is large we can offload it to a temp file. When true, the
+		   file at body_tmp_path contains the request body and `body` vector is
+		   kept empty. Use the API helpers below to manipulate the on-disk body.
+		*/
+		bool	body_on_disk;
+		std::string body_tmp_path;
+		// bytes written into the on-disk body file so far
+		size_t	body_on_disk_bytes;
 		string buffer;
 		size_t	totalBytesRead;
 		size_t	totalBytesHandled;
@@ -266,6 +274,15 @@ class HttpRequest
 		 * @returns Body of the response as vector
 		 */
 		vector<char> getBody(void) const;
+	
+		// On-disk body helpers
+		void	enableBodyOnDisk(const std::string &path);
+		bool	isBodyOnDisk(void) const;
+		std::string getBodyFilePath(void) const;
+		// Read whole body into a vector (will read from disk if enabled)
+		std::vector<char> readBodyToVector(void) const;
+		// Remove body file (if any) and reset state
+		void	cleanupBodyFile(void);
 
 		/**
 		 * @returns State of the Http Request
@@ -290,6 +307,8 @@ class HttpRequest
 		size_t getBytesHandledLast(void) const;
 
 		void setKeepAlive(bool state);
+
+		void reset();
 };
 
 /**

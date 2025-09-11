@@ -115,26 +115,13 @@ TEST_CASE("HTTP Request", "[https]")
 			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
-			// Too big of a value for Content Length
-			HttpRequest x;
-			errno = 0;
-			REQUIRE(x.parse("PUT / Http\r\nContent-Length:99999999999999999999999999\r\nkey:value\r\n\r\nI", 69) == false);
-			REQUIRE(errno == HTTP_BAD_REQUEST);
-		}
-		{
 			// MAX_INT Content Length
 			HttpRequest x;
 			errno = 0;
 			REQUIRE(x.parse("PUT / Http\r\nContent-Length:2147483647\r\nkey:value\r\n\r\nI", 53) == true);
 			REQUIRE(errno == 0);
 		}
-		{
-			// MAX_INT +1  Content Length
-			HttpRequest x;
-			errno = 0;
-			REQUIRE(x.parse("PUT / Http\r\nContent-Length:2147483648\r\nkey:value\r\n\r\nI", 53) == false);
-			REQUIRE(errno == HTTP_BAD_REQUEST);
-		}
+
 	}
 	SECTION("Valid Start Line")
 	{

@@ -17,32 +17,23 @@ static void on_sig(int)
 /** For now I get port from ARGV */
 int main(int argc, char** argv)
 {
-    const std::string path = (argc > 1) ? argv[1] : "config/extended.conf";
+	try
+	{
+		const std::string &path = (argc == 2) ? argv[1] : "config/extended.conf";
 
-    // Handle signals early
-    std::signal(SIGINT,  on_sig);
-    std::signal(SIGTERM, on_sig);
-#ifdef SIGPIPE
-    std::signal(SIGPIPE, SIG_IGN); // avoid crashes on client hangups
-#endif
-
-    try {
-        ServerConfig cfg;
-        cfg.parseFile(path);          // <-- now inside try
-
-        Server server(cfg);
-        g_srv = &server;
-
-        server.start();
-        server.run(50);               // poll timeout ms
-        return 0;
-    }
-    catch (const std::exception& e) {
-        std::cerr << "fatal: " << e.what() << "\n";
-        return 1;
-    }
-    catch (...) {
-        std::cerr << "fatal: unknown error\n";
-        return 1;
-    }
+		ServerConfig cfg;
+		cfg.parseFile(path);
+		Server server(cfg);
+		g_srv = &server;
+		std::signal(SIGINT, on_sig);
+		std::signal(SIGTERM, on_sig);
+		server.start();
+		server.run(50);
+	}
+	catch (const std::exception &e)
+	{
+		std::cerr << "fatal: " << e.what() << "\n";
+		return 1;
+	}
+	return 0;
 }

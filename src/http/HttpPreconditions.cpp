@@ -1,13 +1,4 @@
 #include "HttpPreconditions.h"
-#include "HttpRequest.h"
-#include "Headers.h"
-#include "HEADER_ENTRIES.h"
-
-#include <ctime>
-#include <string>
-#include <vector>
-
-// ---- tiny helpers ---------------------------------------------------
 
 /**
  * @brief Returns given string stripped at front and end of spaces and tabs
@@ -167,14 +158,14 @@ bool HttpPreconditions::checkIfMatch(const HttpRequest &req, const std::string &
 
 bool HttpPreconditions::getPreconditons(const HttpRequest &req, const std::string &etag, const std::time_t &mtime)
 {
-	// If ETag matches known one -> false, make 304
+	// If ETag matches known one -> false, 304 response
 	if (!HttpPreconditions::checkIfNoneMatch(req, etag))
 		return (false);
 
 	// If-None-Match Header should overwrite behaviour of If-Modified-Since
 	if (!req.getHeaders().keyExists(HDR_IF_NONE_MATCH))
 	{
-		// If file was not modified since check -> false, make 304
+		// If file was not modified since check -> false, 304 response
 		if (!HttpPreconditions::checkIsModifiedSince(req, mtime))
 			return (false);
 	}
@@ -183,8 +174,11 @@ bool HttpPreconditions::getPreconditons(const HttpRequest &req, const std::strin
 
 bool	HttpPreconditions::putpatchPreconditons(const HttpRequest &req, const std::string &etag)
 {
+	// If ETag doesnt match known one -> false, 304 response
 	if (!HttpPreconditions::checkIfMatch(req, etag))
 		return (false);
+	
+	// If ETag matches known one -> false, 304 response
 	if (!HttpPreconditions::checkIfNoneMatch(req, etag))
 		return (false);
 	return (true);

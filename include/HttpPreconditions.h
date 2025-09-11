@@ -2,28 +2,26 @@
 #define HTTP_PRECONDITIONS_H
 
 #include "ETagUtil.h"
+#include "HttpRequest.h"
+#include "Headers.h"
+#include "HEADER_ENTRIES.h"
 #include <string>
 #include <ctime>
+#include <vector>
 
 class HttpRequest;
 
 /**
  * Minimal HTTP preconditions helper (ETag + Last-Modified)
  *
- * isNotModified(req, etag, mtime) returns true when the client’s cached copy
- * is still valid so the server should send 304 Not Modified.
- *
  * Implements:
  *  - If-None-Match: exact match against a list of ETags (or "*")
  *  - If-Modified-Since: RFC1123 date; true if mtime <= IMS
  *  - If-Match: exact match against a list of ETags (or "*")
  *
- * Notes:
- *  - If-None-Match takes precedence over If-Modified-Since.
- *  - Weak ETags (W/...) are compared verbatim (no special handling).
- *
  * Interpretation:
  *  - A false return means that the Precondition has failed
+ * 	  A failed precondition usually indicates that the resouce has no changes, so -> 304
  *  - The program should run normally, if all Preconditions are true
  */
 namespace HttpPreconditions

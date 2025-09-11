@@ -11,9 +11,11 @@ Date: 8/10/2025
 
 #include <string>
 #include <sys/stat.h>
+#include <sstream>
 
 /**
  * Unique Identifiers for files
+ * Further info in the generate() function
  * Source: https://www.rfc-editor.org/rfc/rfc9110.html#section-8.8.3
  */
 class ETagUtil {

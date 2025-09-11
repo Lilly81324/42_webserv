@@ -7,9 +7,6 @@ date: 8/10/2025
 
 /* --- ETagUtil.cpp --- */
 #include "ETagUtil.h"
-#include <sstream>
-#include <iomanip>
-#include <iostream>
 
 std::string ETagUtil::generate(const char *filename)
 {

@@ -14,18 +14,21 @@ Date: 8/16/2025
 # include <iostream>
 # include <fstream>
 # include <vector>
+# include <sys/stat.h>
 # include "Handler.h"
 # include "HTTPCODES.h"
 # include "HEADER_ENTRIES.h"
+# include "HttpPreconditions.h"
 # include "Atoi.h"
+# include "ETagUtil.h"
 
 // Buffer size and how many bytes are read when we read from temp file containing body
 # define PUT_WRITE_BUFFER_SIZE 8192
 // Prefix for our custom patch methods (vnd.webserv.insert)
 # define CSTM_PATCH "vnd.webserv."
-// Mime Type for Patching in append mod
+// Mime Type for Patching in append mode
 # define MIME_PATCH_APPEND "application/vnd.webserv.append"
-// Mime Type for Patching in overwriting mod
+// Mime Type for Patching in overwriting mode
 # define MIME_PATCH_OVERWRITE "application/vnd.webserv.overwrite"
 // Counter how many Patch methods we have programmed
 # define MIME_PATCH_COUNTER 2
@@ -121,15 +124,16 @@ class PutPatchHandler : public Handler
 		/**
 		 * @brief Caller function for put and patch with the PutPatch Handler
 		 * 
-		 * Chooses the file of the path to operat on by using the contexts fields:
+		 * Chooses the file of the path to operate on by using the contexts fields:
 		 * ctx.effective_root + ctx.rel_path, in order to get the whole path of our target file
+		 * May run conditionally, if the "If-Match" Header is given in the Request
+		 * Will then only run, if the Request Headers Conditions (Preconditions) are all valid
+		 * Should any Precondition not be valid, the handler creates a 304 response
 		 * @param req Request that specifies the file to overwrite
 		 * @param res Response, which will get some Header Data set from this function
 		 * @param ctx Context, how the file should be created		 
-		 * @returns HTTP_FORBIDDEN (403) if target file cannot be opened, but exists
-		 * @returns HTTP_NOT_FOUND (404) if target file is not existant
-		 * @returns	HTTP_INV_MEDIA (415) if no valid Patch Method was specified in Header
-		 * @returns HTTP_INV_SERVER_ERR (500) if error while writing to file
+		 * @returns true if Qequest was correctly processed
+		 * @returns false if it enocuntered an error
 		 */
 		bool	handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx);
 };

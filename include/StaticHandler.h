@@ -14,6 +14,9 @@ class StaticHandler : public Handler
 	public:
 		StaticHandler();
 		~StaticHandler();
+		bool	handleGet(const std::string &canonPath, const std::string &rel, \
+				bool is_head, HttpRequest &req, HttpResponse &res, RequestContext &ctx);
+		bool handleDelete(const std::string &path, HttpRequest&req, HttpResponse res, RequestContext ctx);
 		bool handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx);
 
 	private:

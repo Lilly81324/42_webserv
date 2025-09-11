@@ -196,6 +196,16 @@ static std::string buildAutoindex(const std::string &urlBase, const std::string 
 //     return et.str();
 // }
 
+static bool make404response(HttpResponse &res)
+{
+	res.body.clear();
+	res.setStatus(404);
+	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+	res.headers.set(HDR_CONTENT_LENGTH, "0");
+	res.bodyLength = 0;
+	return (false);
+}
+
 // Try to serve a configured error page, e.g. error_page 404 /errors/404.html;
 // Falls back to /errors/404.html under the effective root if not configured.
 // NOTE: We do not change status-line (serializer sends 200). This only swaps the body.
@@ -241,33 +251,16 @@ static bool serveErrorPage_(int code,
     if (!realpathString(base, canonBase) ||
         !realpathString(fs, canonErr) ||
         !isSubPath(canonBase, canonErr))
-    {
-        // Fallback: empty body, plain text
-        res.body.clear();
-        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-        res.headers.set(HDR_CONTENT_LENGTH, "0");
-        res.bodyLength = 0;
-        return true;
-    }
+        return (make404response(res));
 
     // 4) Read and emit the error file
     struct stat st;
-    if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        res.body.clear();
-        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-        res.headers.set(HDR_CONTENT_LENGTH, "0");
-        res.bodyLength = 0;
-        return true;
-    }
+    if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        return (make404response(res));
 
     std::vector<char> file;
-    if (!readWholeFile(canonErr, file)) {
-        res.body.clear();
-        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-        res.headers.set(HDR_CONTENT_LENGTH, "0");
-        res.bodyLength = 0;
-        return true;
-    }
+    if (!readWholeFile(canonErr, file))
+        return (make404response(res));
 
     res.body.clear();
     if (!is_head)
@@ -283,73 +276,38 @@ static bool serveErrorPage_(int code,
     return true;
 }
 
-
-
 // ---------------- constructors (linker needed these) ----------------
 StaticHandler::StaticHandler() {}
 StaticHandler::~StaticHandler() {}
 
-// ---------------- main handler --------------------------------------
-bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
+bool StaticHandler::handleGet(const std::string &canonPath, const std::string &rel, \
+	bool is_head, HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
-    // Only GET/HEAD; soft-fail others with empty body (serializer always sends 200).
-    const std::string m = req.getMethod();
-    const bool is_head = (m == "HEAD");
-    if (m != "GET" && !is_head) {
-        res.body.clear();
-        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-        res.headers.set(HDR_CONTENT_LENGTH, "0");
-        res.bodyLength = 0;
-        return true;
-    }
-
-    // Prefer router/pipeline-computed paths
-    const std::string base = !ctx.effective_root.empty()
-        ? ctx.effective_root
-        : ((ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root);
-
-    std::string rel = !ctx.rel_path.empty() ? ctx.rel_path : req.getPath();
-    if (rel.empty() || rel[0] != '/') rel = "/" + rel;
-
-    std::string fsCandidate = base;
-    if (!fsCandidate.empty() && fsCandidate[fsCandidate.size() - 1] == '/')
-        fsCandidate.erase(fsCandidate.size() - 1);
-    fsCandidate += rel;
-
-#if defined(DEBUG) || defined(UNIT_TEST)
-    LOG_INFO("effective_root=" << base << " rel_path=" << rel << " fs=" << fsCandidate);
-#endif
-
-    // Canonicalize and block traversal
-    std::string canonRoot, canonPath;
-    if (!realpathString(base, canonRoot) ||
-        !realpathString(fsCandidate, canonPath) ||
-        !isSubPath(canonRoot, canonPath))
-    {
-        // Illegal traversal or bad root — show 404 page if available
-        return serveErrorPage_(404, ctx, res, is_head);
-    }
-
-    struct stat st;
+	struct stat st;
     if (::stat(canonPath.c_str(), &st) != 0) {
         // Not found -> try error page
         return serveErrorPage_(404, ctx, res, is_head);
     }
 
-    if (S_ISDIR(st.st_mode)) {
+	if (S_ISDIR(st.st_mode))
+	{
         // Try index files: location first, then server
         std::vector<std::string> idx;
-        if (ctx.loc) idx.insert(idx.end(), ctx.loc->index_files.begin(), ctx.loc->index_files.end());
-        if (idx.empty() && ctx.vs) idx = ctx.vs->index_files;
+        if (ctx.loc)
+			idx.insert(idx.end(), ctx.loc->index_files.begin(), ctx.loc->index_files.end());
+        if (idx.empty() && ctx.vs)
+			idx = ctx.vs->index_files;
 
-        for (size_t i = 0; i < idx.size(); ++i) {
+        for (size_t i = 0; i < idx.size(); ++i)
+		{
             std::string candidate = canonPath;
             if (candidate.empty() || candidate[candidate.size() - 1] != '/')
                 candidate += "/";
             candidate += idx[i];
 
             struct stat st2;
-            if (::stat(candidate.c_str(), &st2) == 0 && S_ISREG(st2.st_mode)) {
+            if (::stat(candidate.c_str(), &st2) == 0 && S_ISREG(st2.st_mode))
+			{
                 std::vector<char> file;
                 (void)readWholeFile(candidate, file);
 
@@ -368,7 +326,8 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
 
         // Autoindex if enabled
         const bool autoindex = (ctx.loc ? ctx.loc->autoindex : false);
-        if (autoindex) {
+        if (autoindex)
+		{
             std::string urlBase = rel;
             if (urlBase.empty() || urlBase[urlBase.size() - 1] != '/')
                 urlBase += "/";
@@ -388,44 +347,111 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         return serveErrorPage_(404, ctx, res, is_head);
     }
 
-    if (S_ISREG(st.st_mode)) {
-    // Build ETag and Last-Modified first (we’ll need them for 304)
-    const std::string et = ETagUtil::generate(canonPath.c_str());
-    const std::string lm = httpDate(st.st_mtime);
+    if (S_ISREG(st.st_mode))
+	{
+		// Build ETag and Last-Modified first (we’ll need them for 304)
+		const std::string et = ETagUtil::generate(canonPath.c_str());
+		const std::string lm = httpDate(st.st_mtime);
 
-    // Conditional GET handling
-    if (!HttpPreconditions::getPreconditons(req, et, st.st_mtime))
+		// Conditional GET handling
+		if (!HttpPreconditions::getPreconditons(req, et, st.st_mtime))
+		{
+			res.setStatus(304);
+			res.body.clear();
+			res.headers.set(HDR_ETAG, et);
+			if (!lm.empty()) res.headers.set(HDR_LAST_MODIFIED, lm);
+			res.headers.set(HDR_CONTENT_LENGTH, "0");
+			res.bodyLength = 0;
+			return true;
+		}
+
+		// Normal 200 body
+		std::vector<char> file;
+		if (!readWholeFile(canonPath, file))
+		{
+			// Failed to read: 404 page fallback (or empty)
+			return serveErrorPage_(404, ctx, res, is_head);
+		}
+
+		res.body.clear();
+		if (!is_head)
+			res.body.assign(file.begin(), file.end());
+		res.headers.set(HDR_CONTENT_TYPE, guessMime(canonPath, ctx.cfg));
+		res.headers.set(HDR_ETAG, et);
+		if (!lm.empty())
+			res.headers.set(HDR_LAST_MODIFIED, lm);
+		std::ostringstream cl; cl << (unsigned long)file.size();
+		res.headers.set(HDR_CONTENT_LENGTH, cl.str());
+		res.bodyLength = file.size();
+		return true;
+	}
+	// Not a dir or regular file -> 404 page if available
+    return serveErrorPage_(404, ctx, res, is_head);
+}
+
+/**
+ * Delete file
+ */
+bool StaticHandler::handleDelete(const std::string &path, HttpRequest&req, HttpResponse res, RequestContext ctx)
+{
+	// Check for existance
+	if (!access(path.c_str(), F_OK))
+		return (make404response(res));
+	if (!acces(path.))
+}
+
+// ---------------- main handler --------------------------------------
+bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
+{
+    // Only GET/HEAD; soft-fail others with empty body (serializer always sends 200).
+    const std::string m = req.getMethod();
+    const bool is_head = (m == "HEAD");
+    // if (m != "GET" && !is_head) {
+    //     res.body.clear();
+    //     res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+    //     res.headers.set(HDR_CONTENT_LENGTH, "0");
+    //     res.bodyLength = 0;
+    //     return true;
+    // }
+
+    // Prefer router/pipeline-computed paths
+    const std::string base = !ctx.effective_root.empty()
+        ? ctx.effective_root
+        : ((ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root);
+
+    std::string rel = !ctx.rel_path.empty() ? ctx.rel_path : req.getPath();
+    if (rel.empty() || rel[0] != '/') rel = "/" + rel;
+
+    std::string fsCandidate = base;
+    if (!fsCandidate.empty() && fsCandidate[fsCandidate.size() - 1] == '/')
+        fsCandidate.erase(fsCandidate.size() - 1);
+    fsCandidate += rel;
+
+	#if defined(DEBUG) || defined(UNIT_TEST)
+		LOG_INFO("effective_root=" << base << " rel_path=" << rel << " fs=" << fsCandidate);
+	#endif
+
+    // Canonicalize and block traversal
+    std::string canonRoot, canonPath;
+    if (!realpathString(base, canonRoot) ||
+        !realpathString(fsCandidate, canonPath) ||
+        !isSubPath(canonRoot, canonPath))
     {
-        res.setStatus(304);
-        res.body.clear();
-        res.headers.set(HDR_ETAG, et);
-        if (!lm.empty()) res.headers.set(HDR_LAST_MODIFIED, lm);
-        res.headers.set(HDR_CONTENT_LENGTH, "0");
-        res.bodyLength = 0;
-        return true;
-    }
-
-    // Normal 200 body
-    std::vector<char> file;
-    if (!readWholeFile(canonPath, file)) {
-        // Failed to read: 404 page fallback (or empty)
+        // Illegal traversal or bad root — show 404 page if available
         return serveErrorPage_(404, ctx, res, is_head);
     }
 
-    res.body.clear();
-    if (!is_head) res.body.assign(file.begin(), file.end());
-
-    res.headers.set(HDR_CONTENT_TYPE, guessMime(canonPath, ctx.cfg));
-    res.headers.set(HDR_ETAG, et);
-    if (!lm.empty()) res.headers.set(HDR_LAST_MODIFIED, lm);
-
-    std::ostringstream cl; cl << (unsigned long)file.size();
-    res.headers.set(HDR_CONTENT_LENGTH, cl.str());
-    res.bodyLength = file.size();
-    return true;
-}
-
-
-    // Not a dir or regular file -> 404 page if available
-    return serveErrorPage_(404, ctx, res, is_head);
+    if (m == "GET")
+		return (handleGet(canonRoot, rel, false, req, res, ctx));
+	else if (m == "HEAD")
+		return (handleGet(canonRoot, rel, true, req, res, ctx));
+	else if (m == "DELETE")
+		return (handleDelete(canonRoot, req, res, ctx));
+	res.setStatus(HTTP_BAD_REQUEST);
+	res.clearBody();
+	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+	res.headers.set(HDR_CONTENT_LENGTH, "0");
+	res.bodyLength = 0;
+	return (false);
+	
 }

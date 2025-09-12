@@ -271,6 +271,14 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 		return;
 	}
 
+	 // Uploads (multipart/form-data handled by UploadHandler)
+    if (method == "POST" && L && !L->upload_store.empty())
+    {
+        out.kind = RouteDecision::HK_UPLOAD;
+        out.status = HTTP_OK;
+        return;
+    }
+
 	// Proxy
 	if (isProxy(L))
 	{

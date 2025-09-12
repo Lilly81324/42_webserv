@@ -11,7 +11,7 @@ date: 8/10/2025
 #include <fstream>
 
 
-static unsigned long long BUFFERLIMIT = 128 * 1048 ;
+static unsigned long long BUFFERLIMIT = 128 * 1024 ;
 
 /**
  * Wether given Method is a valid one
@@ -273,9 +273,10 @@ int HttpRequest::handleInput(bool &activity)
 	}
 	else
 	{
-		activity = true;
-		line = this->buffer;
-		buffer.clear();
+		// We reached BODY: do NOT consume any more bytes here.
+    // Leave them in the buffer for the body reader stage.
+		activity = false;
+		return 0;
 	}
 	return (this->handleLine(line));
 }
@@ -350,6 +351,12 @@ size_t HttpRequest::getBodyLength(void) const
 	return (this->bodyLength);
 }
 
+void HttpRequest::appendBody(const char* data, size_t len)
+{
+    if (len) body.insert(body.end(), data, data + len);
+}
+
+
 string HttpRequest::getHttpVer(void) const
 {
 	return (this->http_version);
@@ -359,6 +366,16 @@ string HttpRequest::getBuffer(void) const
 {
 	return (this->buffer);
 }
+
+
+
+// in HttpRequest.cpp
+std::string HttpRequest::takeBuffer() {
+    std::string tmp;
+    tmp.swap(buffer);   // clears buffer and gives you the contents
+    return tmp;
+}
+
 
 const Headers &HttpRequest::getHeaders(void) const
 {
@@ -454,4 +471,27 @@ std::ostream &operator<<(std::ostream &out, const HttpRequest &target)
 void HttpRequest::setKeepAlive(bool state)
 {
 	this->conType = state;
+}
+
+void HttpRequest::reset()
+{
+	this->method.clear();
+	this->path.clear();
+	this->http_version.clear();
+	this->uri.clear();
+	this->query.clear();
+	this->session_id.clear();
+	this->bodyLength = 0;
+	this->buffer.clear();
+	this->state = START;
+	this->totalBytesRead = 0;
+	this->totalBytesHandled = 0;
+	this->bytesHandledLast = 0;
+	this->conType = true;
+	this->body_on_disk = false;
+	this->body_tmp_path.clear();
+	this->body_on_disk_bytes = 0;
+	this->body.clear();
+	this->headers.clear();
+	this->cookies.clear();
 }

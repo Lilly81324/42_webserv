@@ -70,6 +70,12 @@ struct Location {
     std::vector<std::string>        allow_list;     // CIDR or "all"
     std::vector<std::string>        deny_list;      // CIDR or "all"
     
+    // defaults: disabled, no overwrite, no per-part cap
+    std::string upload_store;          // e.g. "/var/www/uploads"
+    bool        upload_overwrite;      // default false
+    std::size_t upload_max_file_size;  // 0 = unlimited per part
+
+    
 
     Location();
 	~Location();

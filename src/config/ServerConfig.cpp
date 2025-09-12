@@ -806,6 +806,37 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
                             continue;
                         }
 
+                        if (lkw == "upload_store")
+                        {
+                            loc.upload_store = makeAbsolute(expectWord(i, tok));
+                            if (i < N && tok[i] == ";")
+                                ++i;
+                            continue;
+                        }
+
+                        if (lkw == "upload_overwrite")
+                        {
+                            const std::string v = expectWord(i, tok);
+                            if (v == "on")
+                                loc.upload_overwrite = true;
+                            else if (v == "off")
+                                loc.upload_overwrite = false;
+                            else
+                                throw std::runtime_error("upload_overwrite must be on|off");
+                            if (i < N && tok[i] == ";")
+                                ++i;
+                            continue;
+                        }
+
+                        if (lkw == "upload_max_file_size")
+                        {
+                            loc.upload_max_file_size = expectInt(i, tok, "upload_max_file_size");
+                            if (i < N && tok[i] == ";")
+                                ++i;
+                            continue;
+                        }
+
+
                         throw std::runtime_error(std::string("unknown directive in location: ") + lkw);
                     }
 

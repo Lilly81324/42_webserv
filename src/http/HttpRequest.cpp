@@ -11,7 +11,7 @@ date: 8/10/2025
 #include <fstream>
 
 
-static unsigned long long BUFFERLIMIT = 128 * 1048 ;
+static unsigned long long BUFFERLIMIT = 128 * 1024 ;
 
 /**
  * Wether given Method is a valid one
@@ -276,6 +276,15 @@ int HttpRequest::handleInput(bool &activity)
 		activity = true;
 		line = this->buffer;
 		buffer.clear();
+		/**
+		 * When we later want to have special body handling, this behaviour should be changed
+		 * to somethign like this:
+		 * activity = false;
+		 * return 0;
+		 * This will mean a normal ending for the parse() and keep the currently given
+		 * input in the Requests buffer
+		 * From there, we can use that buffer and whatever body we get later
+		 */
 	}
 	return (this->handleLine(line));
 }
@@ -350,6 +359,12 @@ size_t HttpRequest::getBodyLength(void) const
 	return (this->bodyLength);
 }
 
+void HttpRequest::appendBody(const char* data, size_t len)
+{
+    if (len) body.insert(body.end(), data, data + len);
+}
+
+
 string HttpRequest::getHttpVer(void) const
 {
 	return (this->http_version);
@@ -359,6 +374,16 @@ string HttpRequest::getBuffer(void) const
 {
 	return (this->buffer);
 }
+
+
+
+// in HttpRequest.cpp
+std::string HttpRequest::takeBuffer() {
+    std::string tmp;
+    tmp.swap(buffer);   // clears buffer and gives you the contents
+    return tmp;
+}
+
 
 const Headers &HttpRequest::getHeaders(void) const
 {

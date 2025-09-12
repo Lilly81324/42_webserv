@@ -3,37 +3,49 @@
 #include "RequestContext.h"
 #include "ResponseFactory.h"
 #include "ChunkedReader.h"
+#include "CGIStreamer.h"
 #include "FileBodyReader.h"
 #include "ContentLenghtReader.h"
 #include "ServerPipeline.h"
 #include "Server.h"
 #include <sstream>
 #include <netinet/in.h>
+#include <unistd.h>   // mkstemp, write
+#include <stdlib.h> 
+#include <limits>   // for std::numeric_limits
+#include <cstdio>
 
 static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
-ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
-	: state(PH_READ_HEADERS),
-	  server(s),
-	  io(fd, 64 * 1024),
-	  req(),
-	  res(),
-	  body(0),
-	  cgi(req, res),
-	  dl(),
-	  hdr_bytes(0),
-	  max_hdr_bytes(64 * 1024),
-	  max_body_bytes(0),
-	  should_close(false),
-	  route_selected(false),
-	  plan(),
-	  pr(),
-	  body_bytes_prev(0),
-	  body_no_progress_ticks(0),
-	  flush_no_progress_ticks(0),
-	  now_cached_ms(nowMs),
-	  ready_to_close(false)
+
+ClientConnection::ClientConnection(int fd, Server* s, unsigned long long nowMs)
+    : state(PH_READ_HEADERS),
+      server(s),
+      io(fd, 64 * 1024),
+      req(),
+      res(),
+      body(0),
+      cgi(req, res),
+      dl(),
+      hdr_bytes(0),
+      max_hdr_bytes(64 * 1024),
+      max_body_bytes(0),
+      should_close(false),
+      route_selected(false),
+      plan(),
+      pr(),
+      body_bytes_prev(0),
+      body_no_progress_ticks(0),
+      flush_no_progress_ticks(0),
+      now_cached_ms(nowMs),
+      ready_to_close(false),
+      fixed_body_target_((std::size_t)-1)   // <— add this
+
+
 {
+     // Wire the loop once
+    cgi.attachLoop(&server->getLoop()); 
+
 	ctx = new RouteDecision;
 	resetDeadline(HDR_TIMEOUT_MS);
 	struct sockaddr_storage ss;
@@ -52,9 +64,56 @@ ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	}
 }
 
+void ClientConnection::drainRingIntoBody()
+{
+    IoRing &ring = io.getInputRing();
+
+    while (true) {
+        std::size_t avail = ring.readAvail();
+        if (avail == 0) break;
+
+        const char *p = ring.readPtr();
+        if (!p) break;  // nothing contiguous to read right now
+
+        std::size_t take = avail;
+
+       
+        if (body_fd_ >= 0) {
+            std::size_t off = 0;
+            while (off < take) {
+                ssize_t w = ::write(body_fd_, p + off, take - off);
+                if (w > 0) {
+                    off += static_cast<std::size_t>(w);
+                } else if (w < 0 && errno == EINTR) {
+                    continue;
+                } else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    // Unlikely for regular files; stop this tick.
+                    break;
+                } else {
+                    // Hard error writing body to disk.
+                    fail(500, "Failed to buffer request body");
+                    return;
+                }
+            }
+            take = off; // actually consumed from ring
+        } else {
+            // RAM path (optional): e.g. body_vec_.insert(body_vec_.end(), p, p + take);
+        }
+
+        body_received_ += take;
+        ring.consumed(take);  // NOTE: 'consumed', not 'consume'
+
+        // If we know the expected length, stop when done
+        if (body_expected_ != static_cast<std::size_t>(-1) &&
+            body_received_ >= body_expected_) {
+            break;
+        }
+    }
+}
+
+
 ClientConnection::~ClientConnection()
 {
-
 	if (server)
 		server = 0;
 	if (ctx)
@@ -71,13 +130,63 @@ ClientConnection::~ClientConnection()
 }
 
 bool ClientConnection::isClosed() const { return state == PH_CLOSE; }
-bool ClientConnection::hasPendingWrite() { return io.getChainBuf().getByteSize() != 0; }
+
+bool ClientConnection::hasPendingWrite() const {
+    return io.getChainBuf().getByteSize() > 0 || cgi.hasOutBytes();
+}
+
 bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
 void ClientConnection::close()
-
 {
 	server->releaseConnection(this);
 }
+
+
+bool ClientConnection::pumpCgiToSocket(std::size_t max_bytes)
+{
+    bool progressed = false;
+
+    // 1) Pull from CGI → connection out buffer (chunked framing happens in CGIStreamer)
+    if (cgi.isActive()) {
+        const std::size_t pulled = cgi.takeOutBytes(io.getChainBuf(), max_bytes);
+        if (pulled > 0) progressed = true;
+    }
+
+    // 2) Try to write whatever we have to the client socket
+    if (io.getChainBuf().getByteSize() > 0) {
+        const ssize_t n = io.nb_write();  // non-blocking send
+        if (n > 0) progressed = true;
+        // Do NOT branch on errno here per project rules if n <= 0
+    }
+
+    // 3) If progress was made, refresh the write deadline (if you track one)
+    if (progressed) {
+        // keep the connection’s write phase alive
+        state = PH_WRITE;
+        // only call this if you have such a helper:
+        resetDeadline(WR_TIMEOUT_MS);
+    }
+
+    // 4) Finalize: only when CGI is done AND socket buffer is empty
+    if (!cgi.isActive() && io.getChainBuf().getByteSize() == 0) {
+        if (should_close) {
+            state = PH_CLOSE;
+        } else {
+            // Ready for the next request on this keep-alive connection
+            // Reinitialize request/response to defaults
+            req = HttpRequest();
+            res = HttpResponse();
+
+            state = PH_READ_HEADERS; // wait for the next request
+        }
+    }
+
+    return progressed || cgi.isActive() || (io.getChainBuf().getByteSize() > 0);
+}
+
+
+
+
 
 bool ClientConnection::wantsRead()
 {
@@ -87,108 +196,190 @@ bool ClientConnection::wantsRead()
 
 void ClientConnection::onTick(unsigned long long now_ms)
 {
-	const std::size_t outbytes = io.getChainBuf().getByteSize();
-	now_cached_ms = now_ms;
+    now_cached_ms = now_ms;
 
-	if (io.getFlow().shouldPauseRead(outbytes))
-		io.getFlow().setReadPaused(true);
-	if (io.getFlow().shouldResumeRead(outbytes))
-		io.getFlow().setReadPaused(false);
+    // Let CGI enforce its own deadlines (header + total runtime)
+    cgi.onTick(now_ms);
+    if (!cgi.isActive() && cgi.failed() && !cgi_error_latched) {
+        fail(504, "Gateway Timeout");
+        cgi_error_latched = true;
+        state = PH_WRITE;
+        (void)io.nb_write();
+        resetDeadline(WR_TIMEOUT_MS);
+        return;
+    }
 
-	(void)io.nb_write();
+    // 0) Pull any CGI bytes into the socket buffer BEFORE we attempt a write.
+    if (cgi.hasOutBytes())
+        (void)cgi.takeOutBytes(io.getChainBuf(), 128u * 1024u);
 
-	if (dl.expired(now_ms) && state != PH_CLOSE)
-	{
-		if (state == PH_READ_HEADERS || state == PH_READ_BODY || state == PH_PRECHECK || state == PH_ROUTE_SELECT)
-		{
-			fail(408, "Request Timeout");
+    // 1) Flow control based on queued output
+    const std::size_t outbytes = io.getChainBuf().getByteSize();
+    cgi.setClientWaterline(outbytes);
+
+    // and resume reading as soon as the socket drains enough.
+    const std::size_t HIGH_WATER = 192u * 1024u;  // pause when >= 192 KiB queued
+    const std::size_t LOW_WATER  = 64u  * 1024u;  // resume when <= 64 KiB queued
+
+	if (cgi.isActive()) {
+		if (outbytes >= HIGH_WATER) {
+			std::fprintf(stderr, "[CGI][BP] pause stdout (queued=%zu)\n", outbytes);
+			cgi.pauseStdoutReads();
+		} else if (outbytes <= LOW_WATER) {
+			std::fprintf(stderr, "[CGI][BP] resume stdout (queued=%zu)\n", outbytes);
+			cgi.resumeStdoutReads();
 		}
-		else
-		{
-			state = PH_CLOSE;
-		}
-		return;
 	}
 
-	if (!io.getFlow().isReadPaused() && (state == PH_READ_HEADERS || state == PH_READ_BODY))
-		if (io.nb_read(32 * 1024) == 0)
-		{
-			state = PH_CLOSE;
-			return;
-		}
+    // -------------------------------------------------------------------------
 
-	switch (state)
-	{
-	case PH_READ_HEADERS:
-		parseHeaders();
-		break;
-	case PH_ROUTE_SELECT:
-		selectRouteOnce();
-		break;
-	case PH_PRECHECK:
-		runPreflight();
-		break;
-	case PH_READ_BODY:
-		readBody();
-		break;
-	case PH_ROUTE:
-		routeAndBuild();
-		break;
-	case PH_WRITE:
-		finishWriteOrNext();
-		break;
+    if (io.getFlow().shouldPauseRead(outbytes))
+        io.getFlow().setReadPaused(true);
+    if (io.getFlow().shouldResumeRead(outbytes))
+        io.getFlow().setReadPaused(false);
 
-	case PH_CLOSE:
-		io.getFlow().setReadPaused(true);
+    // 2) Try to flush whatever is queued (static or CGI)
+    (void)io.nb_write();
 
-		(void)io.nb_write();
-		if (io.getChainBuf().getByteSize() != 0)
+    // After flushing, we may have dropped below LOW_WATER; re-check to resume quickly.
+    if (cgi.isActive()) {
+        const std::size_t out_after = io.getChainBuf().getByteSize();
+        if (out_after <= LOW_WATER) cgi.resumeStdoutReads();
+    }
 
-			if (body)
-			{
-				delete body;
-				body = 0;
-			}
-		req.cleanupBodyFile();
-		ready_to_close = true;
-		// server->releaseConnection(this);
-		return;
-	}
+    // 3) Deadline enforcement
+    if (dl.expired(now_ms) && state != PH_CLOSE) {
+        if (state == PH_READ_HEADERS || state == PH_READ_BODY ||
+            state == PH_PRECHECK     || state == PH_ROUTE_SELECT)
+        {
+            fail(408, "Request Timeout");
+        } else {
+            state = PH_CLOSE;
+        }
+        return;
+    }
+
+    // 4) Non-blocking read only in header/body phases and when not paused
+    if (!io.getFlow().isReadPaused() &&
+        (state == PH_READ_HEADERS || state == PH_READ_BODY))
+    {
+        const std::size_t kAllYouCanEat = std::numeric_limits<std::size_t>::max();
+        ssize_t r = io.nb_read(kAllYouCanEat);
+        if (r == 0) { state = PH_CLOSE; return; }
+        // r < 0 => EAGAIN/other; ignore here.
+    }
+
+    // 5) Drive the HTTP/CGI state machine
+    switch (state)
+    {
+    case PH_READ_HEADERS:  parseHeaders();   break;
+    case PH_ROUTE_SELECT:  selectRouteOnce();break;
+    case PH_PRECHECK:      runPreflight();   break;
+    case PH_READ_BODY:     readBody();       break;
+    case PH_ROUTE:         routeAndBuild();  break;
+    case PH_WRITE:         finishWriteOrNext(); break;
+    case PH_CLOSE:
+        io.getFlow().setReadPaused(true);
+        (void)io.nb_write();
+        if (io.getChainBuf().getByteSize() == 0) {
+            if (body) { delete body; body = 0; }
+            req.cleanupBodyFile();
+            ready_to_close = true;
+        }
+        return;
+    }
 }
 
+
+
+ bool pumpCgiToSocket(std::size_t max_bytes = 128u * 1024u);
+
+static const unsigned long long READ_TIMEOUT_MS = 15000;
+
+// (same helpers as before if you still need them)
+static inline bool ci_equal(const std::string &a, const std::string &b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        char ca = a[i], cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') ca = char(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = char(cb - 'A' + 'a');
+        if (ca != cb) return false;
+    }
+    return true;
+}
+static inline long long parse_content_length(const std::string &s) {
+    if (s.empty()) return -1;
+    long long v = 0;
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        if (c < '0' || c > '9') return -1;
+        v = v * 10 + (c - '0');
+        if (v < 0) return -1;
+    }
+    return v;
+}
+
+// Feed bytes from ring into your HttpRequest parser until it reports headers done
 void ClientConnection::parseHeaders()
 {
-	const char *buf = io.getInputRing().readPtr();
-	std::size_t avail = io.getInputRing().readAvail();
-	if (avail == 0)
-		return;
+    IoRing &ring = io.getInputRing();
 
-	if (!req.parse(buf, avail))
-	{
-		if (errno == HTTP_BAD_REQUEST || errno == HTTP_HEADER_TOO_BIG)
-			fail(errno, "");
-	}
+    for (;;) {
+        const char *p = ring.readPtr();
+        std::size_t n = ring.readAvail();
+        if (!p || n == 0) break;
 
-	std::size_t used = avail;
+        const char *end = 0;
 
-	if (used > 0)
-	{
-		io.getInputRing().consumed(used);
-		hdr_bytes += used;
-		if (hdr_bytes > max_hdr_bytes)
-		{
-			fail(431, "Request Header Fields to Larger");
-			return;
-		}
-		resetDeadline(HDR_TIMEOUT_MS);
-	}
+        // Look for "\r\n\r\n"
+        for (std::size_t i = 0; !end && i + 3 < n; ++i) {
+            if (p[i] == '\r' && p[i+1] == '\n' && p[i+2] == '\r' && p[i+3] == '\n')
+                end = p + i + 4;
+        }
+        // Or "\n\n"
+        if (!end) {
+            for (std::size_t i = 0; !end && i + 1 < n; ++i) {
+                if (p[i] == '\n' && p[i+1] == '\n')
+                    end = p + i + 2;
+            }
+        }
 
-	if (!req.headersDone())
-		return;
+        std::size_t to_feed;
+        if (end) {
+            // Found a complete header block
+            to_feed = static_cast<std::size_t>(end - p);
+        } else {
+            // Not yet complete → consume all but the last 3 bytes
+            to_feed = (n > 3) ? (n - 3) : 0;
+            if (to_feed == 0) break; // need more data
+        }
 
-	state = PH_ROUTE_SELECT;
-	resetDeadline(BODY_TIMEOUT_MS);
+        if (hdr_bytes + to_feed > max_hdr_bytes) {
+            fail(431, "Request Header Fields Too Large");
+            return;
+        }
+
+        if (!req.parse(p, to_feed)) {
+            fail(400, "Bad Request");
+            return;
+        }
+
+        ring.consumed(to_feed);
+        hdr_bytes += to_feed;
+        resetDeadline(HDR_TIMEOUT_MS);
+
+        if (end) {
+            route_selected = false;
+            state = PH_ROUTE_SELECT;
+            resetDeadline(BODY_TIMEOUT_MS);
+            return;
+        }
+        // else: continue the loop
+    }
+
+    resetDeadline(HDR_TIMEOUT_MS);
 }
+
 
 void ClientConnection::selectRouteOnce()
 {
@@ -209,7 +400,6 @@ void ClientConnection::selectRouteOnce()
 								  req.getPath(),
 								  req.getHeaders(),
 								  ctx);
-
 	route_selected = true;
 	state = PH_PRECHECK;
 	resetDeadline(BODY_TIMEOUT_MS);
@@ -217,269 +407,255 @@ void ClientConnection::selectRouteOnce()
 
 void ClientConnection::runPreflight()
 {
-	const Headers &H = req.getHeaders();
+    const Headers &H = req.getHeaders();
 
-	HeaderCheck hc = HeaderProcessor::analyze(req, H, max_body_bytes);
+    HeaderCheck hc = HeaderProcessor::analyze(req, H, max_body_bytes);
+    if (!hc.ok) { fail(hc.error_status, 0); return; }
 
-	if (!hc.ok)
-	{
-		fail(hc.error_status, 0);
-		return;
-	}
+    if (!pr.ok) { fail(pr.reject_status ? pr.reject_status : 400, pr.reject_reason.c_str()); return; }
 
-	if (!pr.ok)
-	{
-		fail(pr.reject_status ? pr.reject_status : 400, pr.reject_reason.c_str());
-		return;
-	}
+    max_body_bytes = pr.max_body_bytes;
 
-	max_body_bytes = pr.max_body_bytes;
+    if (hc.expect_continue && ExpectContinue::needed(req.getHeaders())) {
+        ExpectContinue::write100(io.getChainBuf());
+    }
 
-	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
-		ExpectContinue::write100(io.getChainBuf()); // queued; nb_write() will flush it
+    if (!pr.needs_body) {
+        state = PH_ROUTE;
+        return;
+    }
 
-	if (!pr.needs_body)
-	{
-		state = PH_ROUTE;
-		return;
-	}
+    if (hc.chunked) {
+        decideBodyReader(/* chunked */);
+    } else if (hc.content_length > 0) {
+        if (max_body_bytes && hc.content_length > max_body_bytes) {
+            fail(413, "Payload Too Large");
+            return;
+        }
+        decideBodyReader(hc.content_length);
+    } else {
+        fail(411, "Length Required");
+        return;
+    }
 
-	if (hc.chunked)
-	{
-		decideBodyReader(/*chunked*/);
-	}
-	else if (hc.content_length > 0)
-	{
+    // ---- INSERT THIS SAFETY NET *after* decideBodyReader(...) ----
+    if (body) {
+        std::string tail = req.takeBuffer();   // may contain body bytes that arrived with headers
+        if (!tail.empty())
+            (void)body->consume(tail.data(), tail.size());
+    }
+    // --------------------------------------------------------------
 
-		if (max_body_bytes && hc.content_length > max_body_bytes)
-		{
-			fail(413, "Payload Too Large");
-			return;
-		}
-		decideBodyReader(hc.content_length);
-	}
-	else
-	{
-		fail(411, "Length Required");
-		return;
-	}
+    body_bytes_prev         = 0;
+    body_no_progress_ticks  = 0;
+    flush_no_progress_ticks = 0;
 
-	body_bytes_prev = 0;
-	body_no_progress_ticks = 0;
-	flush_no_progress_ticks = 0;
-	state = PH_READ_BODY;
-	resetDeadline(BODY_TIMEOUT_MS);
+    state = PH_READ_BODY;
+    resetDeadline(BODY_TIMEOUT_MS);
 }
 
+
+
+// --- in ClientConnection.cpp ---
 void ClientConnection::readBody()
 {
-	const char *buf = io.getInputRing().readPtr();
-	const std::size_t avail = io.getInputRing().readAvail();
+    if (!body) { fail(400, "Bad Request"); return; }
 
-	if (!body)
-	{
-		fail(400, "Bad Request");
-		return;
-	}
+    IoRing &ring = io.getInputRing();
 
-	const std::size_t before = body->bytes_received();
+    // Progress baseline
+    const std::size_t before_bytes = body->bytes_received();
 
-	// 1) Try to consume whatever arrived this tick
-	if (avail != 0)
-	{
-		const std::size_t used = body->consume(buf, avail);
-		if (used > 0)
-		{
-			io.getInputRing().consumed(used);
-			resetDeadline(BODY_TIMEOUT_MS);
-		}
-	}
+    // 1) Drain as much as the reader will accept
+    for (;;) {
+        const char *buf   = ring.readPtr();
+        std::size_t avail = ring.readAvail();
+        if (!buf || avail == 0) break;
 
-	const std::size_t after = body->bytes_received();
+        const std::size_t used = body->consume(buf, avail);
+        if (used == 0) break;              // reader can’t take more right now
 
-	// 2) Enforce max-body guard (runtime, affects chunked too)
-	if (max_body_bytes && after > max_body_bytes)
-	{
-		fail(413, "Payload Too Large");
-		return; // do not attempt to flush
-	}
+        ring.consumed(used);
+        resetDeadline(BODY_TIMEOUT_MS);
+    }
 
-	// 3) Progress watchdog for reading (no advance across ticks)
-	if (after == before && avail == 0)
-	{
-		// nothing new consumed, and no new bytes visible in ring
-		++body_no_progress_ticks;
-	}
-	else
-	{
-		body_no_progress_ticks = 0;
-	}
-	body_bytes_prev = after;
+    const std::size_t after_bytes = body->bytes_received();
 
-	// 4) If we’re file-backed, attempt a bounded flush to disk each tick
-	//    and watch for persistent no-progress when there IS pending data.
-	std::size_t pending_before = 0;
-	std::size_t flushed = 0;
+    // 2) Enforce total body cap (post-read, on de-chunked length)
+    if (max_body_bytes && after_bytes > max_body_bytes) {
+        fail(413, "Payload Too Large");
+        return;
+    }
 
-	if (FileBodyReader *fr = dynamic_cast<FileBodyReader *>(body))
-	{
-		pending_before = fr->pending_size();
-		if (pending_before)
-			flushed = fr->flush_to_disk(64 * 1024);
-	}
-	else if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body))
-	{
-		pending_before = cr->pending_size();
-		if (pending_before)
-			flushed = cr->flush_to_disk(64 * 1024);
-	}
+    // 3) Watchdogs: read progress + staging flush progress
+    if (after_bytes == before_bytes && ring.readAvail() == 0)
+        ++body_no_progress_ticks;
+    else
+        body_no_progress_ticks = 0;
 
-	if (pending_before > 0 && flushed == 0)
-	{
-		++flush_no_progress_ticks;
-	}
-	else
-	{
-		flush_no_progress_ticks = 0;
-	}
+    std::size_t pending_before = 0, flushed = 0;
+    if (FileBodyReader *fr = dynamic_cast<FileBodyReader *>(body)) {
+        pending_before = fr->pending_size();
+        if (pending_before) flushed = fr->flush_to_disk(64 * 1024);
+    } else if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body)) {
+        pending_before = cr->pending_size();
+        if (pending_before) flushed = cr->flush_to_disk(64 * 1024);
+    }
 
-	// 5) Stall policies
-	if (body_no_progress_ticks >= BODY_STALL_TICK_LIMIT)
-	{
-		// We’ve been called many times with no read progress → timeout
-		fail(408, "Request Timeout");
-		return;
-	}
-	if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT)
-	{
-		// We had bytes staged for disk but couldn’t make any progress
-		// (don’t branch on errno; treat as storage/IO exhaustion class)
-		fail(507, "Insufficient Storage");
-		return;
-	}
+    if (pending_before > 0 && flushed == 0) ++flush_no_progress_ticks;
+    else                                    flush_no_progress_ticks = 0;
 
-	// 6) Completion check
-	if (!body->complete() && req.getState() != OVER)
-		return;
+    if (body_no_progress_ticks  >= BODY_STALL_TICK_LIMIT) { fail(408, "Request Timeout");      return; }
+    if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT){ fail(507, "Insufficient Storage"); return; }
 
-	// Body done → continue pipeline
-	state = PH_ROUTE;
-	resetDeadline(WR_TIMEOUT_MS);
+    // 4) Completion check
+    bool done = false;
+    if (fixed_body_target_ != (std::size_t)-1) {
+        if (body->bytes_received() >= fixed_body_target_) {
+            if (FileBodyReader *fr2 = dynamic_cast<FileBodyReader *>(body))
+                done = (fr2->pending_size() == 0);
+            else
+                done = true;
+        }
+    } else {
+        if (ChunkedReader *cr2 = dynamic_cast<ChunkedReader *>(body))
+            done = cr2->complete();
+    }
+
+    if (!done) return;
+
+    // 5) Body complete → advance pipeline
+    state = PH_ROUTE;                 // or PH_ROUTE_SELECT if that’s your next step
+    resetDeadline(WR_TIMEOUT_MS);
 }
 
 void ClientConnection::routeAndBuild()
 {
-	// Build the response for the current request
-	(void)ServerPipeline::processRequest(server->getConfig(), vs_idx, req, res, *ctx);
+    // Let the pipeline decide and (possibly) start CGI.
+    const bool done = ServerPipeline::processRequest(
+        server->getConfig(),
+        vs_idx,
+        req,
+        res,
+        *ctx,
+        &cgi
+    );
 
-	// Decide keep-alive vs close (HTTP/1.1 keeps alive by default unless client asks to close)
-	const std::string connHdr = req.getHeaders().get("Connection");
-	should_close = (req.getHttpVer() == "HTTP/1.0") ||
-				   (connHdr == "close" || connHdr == "Close");
+    // One keep-alive decision used by both paths
+    const std::string connHdr = req.getHeaders().get("Connection");
+    should_close =
+        (req.getHttpVer() == "HTTP/1.0") ||
+        (connHdr == "close" || connHdr == "Close");
 
-	// Advertise the chosen policy in the response
-	if (should_close)
-		res.headers.set("Connection", "close");
-	else
-		res.headers.set("Connection", "keep-alive");
+    if (!done) {
+      
+        state = PH_WRITE;
+        resetDeadline(WR_TIMEOUT_MS);
+        return;
+    }
 
-	// Fill in defaults (Date, Server, Content-Length if applicable, etc.)
-	res.ensureDefaultHeaders();
+    // -------- Synchronous response (static/proxy/put/patch) --------
+    // Reflect the keep-alive policy.
+    if (should_close)
+        res.headers.set("Connection", "close");
+    else
+        res.headers.set("Connection", "keep-alive");
 
-	// Serialize → output buffer
-	std::ostringstream os;
-	os << res;
-	const std::string s = os.str();
-	io.getChainBuf().push_copy(s.data(), s.size());
+    // Safe here: will add Content-Length/Date/Server if missing.
+    res.ensureDefaultHeaders();
 
+    // Serialize and queue.
+    std::ostringstream os;
+    os << res;
+    const std::string s = os.str();
+    io.getChainBuf().push_copy(s.data(), s.size());
+
+	state = PH_WRITE;
+	resetDeadline(WR_TIMEOUT_MS);
 	state = PH_WRITE;
 	resetDeadline(WR_TIMEOUT_MS);
 }
 
 void ClientConnection::finishWriteOrNext()
 {
-	if (io.getChainBuf().getByteSize() != 0)
-		return;
+    if (io.getChainBuf().getByteSize() != 0)
+        return;
 
-	if (should_close)
-	{
-		state = PH_CLOSE;
-		return;
-	}
+    if (cgi.isActive() || cgi.cgiStdoutFD() >= 0 || cgi.hasOutBytes())
+        return;
 
-	req.cleanupBodyFile();
-	req.reset();
-	// Reset req now
-	hdr_bytes = 0;
-	max_body_bytes = 0;
-	if (body)
-	{
-		delete body;
-		body = 0;
-	}
-	plan = RoutePlan();
-	ctx->reset();
-	req = HttpRequest();
-	res = HttpResponse();
-	route_selected = false;
+    if (should_close) { state = PH_CLOSE; return; }
 
-	state = PH_READ_HEADERS;
-	resetDeadline(IDLE_TIMEOUT_MS);
-	if (io.getInputRing().readAvail() > 0)
-	{
-		parseHeaders();
-	}
+    // reset for next request…
+    hdr_bytes = 0;
+    max_body_bytes = 0;
+    if (body) { delete body; body = 0; }
+    plan = RoutePlan();
+    ctx->reset();
+    req = HttpRequest();
+    res = HttpResponse();
+    route_selected = false;
+
+    fixed_body_target_ = (std::size_t)-1;   // <— reset here too
+    // in ClientConnection::finishWriteOrNext(), before switching back to PH_READ_HEADERS
+    cgi_error_latched = false;
+
+    state = PH_READ_HEADERS;
+    resetDeadline(IDLE_TIMEOUT_MS);
+    if (io.getInputRing().readAvail() > 0) parseHeaders();
 }
 
-void ClientConnection::fail(int code, const char *reason)
+
+void ClientConnection::fail(int code, const char* reason)
 {
+    res = ResponseFactory::makeText(code, "", reason ? reason : "", true);
 
-	res = ResponseFactory::makeText(code, "", reason ? reason : "", /*close*/ true);
+    std::ostringstream os;
+    os << res;
+    const std::string s = os.str();
+    io.getChainBuf().push_copy(s.data(), s.size());
 
-	std::ostringstream os;
-	os << res;
-	const std::string s = os.str();
-	io.getChainBuf().push_copy(s.data(), s.size()); // ChainBuf
+    should_close = true;
+    state = PH_WRITE;
+    resetDeadline(WR_TIMEOUT_MS);
 
-	should_close = true;
-	state = PH_WRITE;
-	resetDeadline(WR_TIMEOUT_MS);
-	finishWriteOrNext();
+    fixed_body_target_ = (std::size_t)-1;   // <— optional reset
+
+    finishWriteOrNext();
 }
 
-void ClientConnection::decideBodyReader()
+
+void ClientConnection::decideBodyReader()  // chunked
 {
-	if (body)
-	{
-		delete body;
-		body = 0;
-	}
-	body = new ChunkedReader(io.getTmp(), plan.max_body_bytes, server->getConfig().servers()[vs_idx].client_body_temp_path);
+    if (body) { delete body; body = 0; }
+    body = new ChunkedReader(io.getTmp(), plan.max_body_bytes,
+                             server->getConfig().servers()[vs_idx].client_body_temp_path);
+    fixed_body_target_ = (std::size_t)-1;   // unknown/chunked
 }
 
 void ClientConnection::decideBodyReader(std::size_t content_length)
 {
-	if (body)
-	{
-		delete body;
-		body = 0;
-	}
+    if (body) { delete body; body = 0; }
 
-	const std::size_t cap = (max_body_bytes != 0) ? max_body_bytes : (std::size_t)(~0);
+    const std::size_t cap = (max_body_bytes != 0) ? max_body_bytes : static_cast<std::size_t>(~0);
 
-	const bool use_inmem =
-		(content_length > 0) &&
-		(content_length <= INMEM_BODY_LIMIT) &&
-		(content_length <= cap);
+    fixed_body_target_ = content_length;    // <— set it right here
 
-	if (use_inmem)
-	{
-		body = new ContentLenghtReader(content_length, req);
-	}
-	else
-	{
-		FileBodyReader *fr = new FileBodyReader(
-			server->getConfig().servers()[vs_idx].client_body_temp_path);
-		body = fr;
-	}
+    if (content_length <= INMEM_BODY_LIMIT && content_length <= cap) {
+        body = new ContentLenghtReader(content_length, req);
+        return;
+    }
+
+    const std::string tmpdir = server->getConfig().servers()[vs_idx].client_body_temp_path;
+    FileBodyReader* fr = new FileBodyReader(tmpdir);
+    if (!fr->ensure_open()) {
+        delete fr;
+        fail(507, "Insufficient Storage");
+        return;
+    }
+    req.enableBodyOnDisk(fr->get_path());
+    body = fr;
 }
+
+
+

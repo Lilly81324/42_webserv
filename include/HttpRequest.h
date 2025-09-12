@@ -82,6 +82,8 @@ class HttpRequest
 		Headers headers;
 		CookieJar cookies;
 		vector<char> body;
+		
+
 		/* If body is large we can offload it to a temp file. When true, the
 		   file at body_tmp_path contains the request body and `body` vector is
 		   kept empty. Use the API helpers below to manipulate the on-disk body.
@@ -177,6 +179,9 @@ class HttpRequest
 		 */
 		bool	headerAsSize(string k, size_t &v) const;
 
+		void appendBody(const char* data, std::size_t len);
+    	// const std::vector<char>& getBody() const;   // you likely already have this
+
 		/**
 		 * For Later
 		 * PLACEHOLDER
@@ -260,6 +265,8 @@ class HttpRequest
 		 */
 		string getBuffer(void) const;
 
+		std::string takeBuffer();
+
 		/**
 		 * @returns Headers from this response
 		 */
@@ -273,6 +280,7 @@ class HttpRequest
 		/**
 		 * @returns Body of the response as vector
 		 */
+		// vector<char> getBody(void) const;
 		vector<char> getBody(void) const;
 	
 		// On-disk body helpers

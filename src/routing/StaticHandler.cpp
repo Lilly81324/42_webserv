@@ -196,10 +196,10 @@ static std::string buildAutoindex(const std::string &urlBase, const std::string 
 //     return et.str();
 // }
 
-static bool make404response(HttpResponse &res)
+static bool makeErrorResponse(HttpResponse &res, int status)
 {
 	res.body.clear();
-	res.setStatus(404);
+	res.setStatus(status);
 	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
 	res.headers.set(HDR_CONTENT_LENGTH, "0");
 	res.bodyLength = 0;
@@ -251,16 +251,16 @@ static bool serveErrorPage_(int code,
     if (!realpathString(base, canonBase) ||
         !realpathString(fs, canonErr) ||
         !isSubPath(canonBase, canonErr))
-        return (make404response(res));
+        return (makeErrorResponse(res, 404));
 
     // 4) Read and emit the error file
     struct stat st;
     if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
-        return (make404response(res));
+        return (makeErrorResponse(res, 404));
 
     std::vector<char> file;
     if (!readWholeFile(canonErr, file))
-        return (make404response(res));
+        return (makeErrorResponse(res, 404));
 
     res.body.clear();
     if (!is_head)
@@ -396,8 +396,11 @@ bool StaticHandler::handleDelete(const std::string &path, HttpRequest&req, HttpR
 {
 	// Check for existance
 	if (!access(path.c_str(), F_OK))
-		return (make404response(res));
-	if (!acces(path.))
+		return (makeErrorResponse(res, 404));
+    std::cout << "File exists" << std::endl;
+	if (!access(path.c_str(), W_OK))
+        return (makeErrorResponse(res, 404));
+    std::cout << "Has access to write to file" << std::endl;
 }
 
 // ---------------- main handler --------------------------------------

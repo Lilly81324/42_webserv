@@ -8,6 +8,8 @@ Date: 8/10/2025
 #ifndef STATICHANDLER_H
 #define STATICHANDLER_H
 
+#include <iostream>
+
 #include "Handler.h"
 class StaticHandler : public Handler
 {

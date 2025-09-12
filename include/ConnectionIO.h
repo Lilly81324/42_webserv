@@ -21,50 +21,50 @@ Date: 9/1/2025
 class ConnectionIO
 {
 private:
-    ConnectionIO(const ConnectionIO &);
-    ConnectionIO &operator=(const ConnectionIO &);
+	ConnectionIO(const ConnectionIO &);
+	ConnectionIO &operator=(const ConnectionIO &);
 
 public:
-    // explicit ConnectionIO(int fd = -1, std::size_t inCap = 64 * 1024)
+	// explicit ConnectionIO(int fd = -1, std::size_t inCap = 64 * 1024)
 	explicit ConnectionIO(int fd = -1, std::size_t inCap = 256 * 1024)
-        : socket(fd), in(inCap), out(), flow(), tx_scratch(), tmp()
-    {
-        tx_scratch.reserve(128 * 1024); // one-time reserve
-    }
+		: socket(fd), in(inCap), out(), flow(), tx_scratch(), tmp()
+	{
+		tx_scratch.reserve(128 * 1024); // one-time reserve
+	}
 
-    ~ConnectionIO() {}
+	~ConnectionIO() {}
 
-    void close() { socket.reset(); }
+	void close() { socket.reset(); }
 
-    int getFD() const { return socket.get(); }
+	int getFD() const { return socket.get(); }
 
-    IoRing &getInputRing() { return in; }
-    const IoRing &getInputRing() const { return in; }
+	IoRing &getInputRing() { return in; }
+	const IoRing &getInputRing() const { return in; }
 
-    // Non-const accessor for writers (push_copy, dropFront, etc.)
-    ChainBuf &getChainBuf() { return out; }
+	// Non-const accessor for writers (push_copy, dropFront, etc.)
+	ChainBuf &getChainBuf() { return out; }
 
-    // Const accessor for queries (e.g., getByteSize()) in const contexts
-    const ChainBuf &getChainBuf() const { return out; }
+	// Const accessor for queries (e.g., getByteSize()) in const contexts
+	const ChainBuf &getChainBuf() const { return out; }
 
-    FlowControl &getFlow() { return flow; }
-    const FlowControl &getFlow() const { return flow; }
+	FlowControl &getFlow() { return flow; }
+	const FlowControl &getFlow() const { return flow; }
 
-    // Non-blocking read/write to socket
-    ssize_t nb_read(std::size_t max_bytes);
-    ssize_t nb_write();
+	// Non-blocking read/write to socket
+	ssize_t nb_read(std::size_t max_bytes);
+	ssize_t nb_write();
 
-    // Scratch buffer (e.g., for assembling a write from ChainBuf)
-    std::vector<char> &getTmp() { return tmp; }
-    const std::vector<char> &getTmp() const { return tmp; }
+	// Scratch buffer (e.g., for assembling a write from ChainBuf)
+	std::vector<char> &getTmp() { return tmp; }
+	const std::vector<char> &getTmp() const { return tmp; }
 
 private:
-    UniqueFD          socket;
-    IoRing            in;         // inbound ring buffer
-    ChainBuf          out;        // outbound chain buffer (to socket)
-    FlowControl       flow;       // read flow-control (pause/resume)
-    std::vector<char> tx_scratch; // internal staging for writes
-    std::vector<char> tmp;        // general-purpose scratch
+	UniqueFD socket;
+	IoRing in;					  // inbound ring buffer
+	ChainBuf out;				  // outbound chain buffer (to socket)
+	FlowControl flow;			  // read flow-control (pause/resume)
+	std::vector<char> tx_scratch; // internal staging for writes
+	std::vector<char> tmp;		  // general-purpose scratch
 };
 
 #endif // CONNECTIONIO_H

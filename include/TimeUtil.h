@@ -8,13 +8,13 @@ Date: 8/10/2025
 #ifndef TIMEUTIL_H
 #define TIMEUTIL_H
 
-class TimeUtil {
+class TimeUtil
+{
 public:
-    TimeUtil();
-    ~TimeUtil();
+	TimeUtil();
+	~TimeUtil();
 
 private:
-
 };
 
 #endif // TIMEUTIL_H

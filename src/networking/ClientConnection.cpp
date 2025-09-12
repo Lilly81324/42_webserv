@@ -532,7 +532,7 @@ void ClientConnection::readBody()
 void ClientConnection::routeAndBuild()
 {
     // Let the pipeline decide and (possibly) start CGI.
-    const bool done = ServerPipeline::processRequest(
+    (void)ServerPipeline::processRequest(
         server->getConfig(),
         vs_idx,
         req,
@@ -546,13 +546,6 @@ void ClientConnection::routeAndBuild()
     should_close =
         (req.getHttpVer() == "HTTP/1.0") ||
         (connHdr == "close" || connHdr == "Close");
-
-    if (!done) {
-      
-        state = PH_WRITE;
-        resetDeadline(WR_TIMEOUT_MS);
-        return;
-    }
 
     // -------- Synchronous response (static/proxy/put/patch) --------
     // Reflect the keep-alive policy.
@@ -570,8 +563,6 @@ void ClientConnection::routeAndBuild()
     const std::string s = os.str();
     io.getChainBuf().push_copy(s.data(), s.size());
 
-	state = PH_WRITE;
-	resetDeadline(WR_TIMEOUT_MS);
 	state = PH_WRITE;
 	resetDeadline(WR_TIMEOUT_MS);
 }

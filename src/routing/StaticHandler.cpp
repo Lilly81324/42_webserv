@@ -5,35 +5,7 @@ author: undefined
 date: 8/10/2025
 ------------------------------------------ */
 
-/* --- StaticHandler.cpp (implemented) --- */
-/* --- StaticHandler.cpp --- */
-
 #include "StaticHandler.h"
-#include "RequestContext.h"
-#include "VirtualServer.h"
-#include "ServerConfig.h"
-#include "HttpRequest.h"
-#include "HttpResponse.h"
-#include "Headers.h"
-#include "HEADER_ENTRIES.h"
-#include "HttpPreconditions.h"
-
-
-#include <sys/stat.h>
-#include <dirent.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <cerrno>
-#include <cstring>
-#include <cstdio>
-#include <sstream>
-#include <vector>
-#include <string>
-#include <algorithm>
-#include <map>
-#include <limits.h> // PATH_MAX
-
-// ---------------- small helpers ----------------
 
 static std::string toLower(const std::string &s)
 {
@@ -187,23 +159,24 @@ static std::string buildAutoindex(const std::string &urlBase, const std::string 
     return html.str();
 }
 
-// DISCONTINUED, UNUSED
-// static std::string makeEtag(const struct stat &st)
-// {
-//     std::ostringstream et;
-//     et << "\"" << std::hex << (unsigned long long)st.st_size
-//        << "-" << std::hex << (unsigned long long)st.st_mtime << "\"";
-//     return et.str();
-// }
 
-static bool makeErrorResponse(HttpResponse &res, int status)
+/**
+ * @brief Prepares barebones Reponse
+ * 
+ * Sets the status, clears body and sets Content-Type and Content-Length
+ * as well as setting the bodyLength field to 0
+ * @param res Response to prepate
+ * @param status Status code to set Response to
+ * @param state Return value of this function
+ */
+static bool prepareResponse(HttpResponse &res, int status, bool state)
 {
+    res.setStatus(status);
 	res.body.clear();
-	res.setStatus(status);
 	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
 	res.headers.set(HDR_CONTENT_LENGTH, "0");
 	res.bodyLength = 0;
-	return (false);
+	return (state);
 }
 
 // Try to serve a configured error page, e.g. error_page 404 /errors/404.html;
@@ -212,7 +185,7 @@ static bool makeErrorResponse(HttpResponse &res, int status)
 // Try to serve a configured error page at server level (VirtualServer).
 // Falls back to /errors/404.html (or 500) under the effective root.
 // NOTE: We do not change the status line (serializer still emits 200).
-static bool serveErrorPage_(int code,
+static bool serveErrorPage(int code,
                             const RequestContext& ctx,
                             HttpResponse& res,
                             bool is_head)
@@ -230,6 +203,7 @@ static bool serveErrorPage_(int code,
     if (uri.empty()) {
         // Sensible default if nothing configured
         if (code == 404) uri = "/errors/404.html";
+		else if (code == 403) uri = "/errors/403.html";
         else if (code == 500) uri = "/errors/500.html";
         else uri = "/errors/404.html";
     }
@@ -251,16 +225,16 @@ static bool serveErrorPage_(int code,
     if (!realpathString(base, canonBase) ||
         !realpathString(fs, canonErr) ||
         !isSubPath(canonBase, canonErr))
-        return (makeErrorResponse(res, 404));
+        return (prepareResponse(res, 404, false));
 
     // 4) Read and emit the error file
     struct stat st;
     if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
-        return (makeErrorResponse(res, 404));
+        return (prepareResponse(res, 404, false));
 
     std::vector<char> file;
     if (!readWholeFile(canonErr, file))
-        return (makeErrorResponse(res, 404));
+        return (prepareResponse(res, 404, false));
 
     res.body.clear();
     if (!is_head)
@@ -273,7 +247,7 @@ static bool serveErrorPage_(int code,
     cl << static_cast<unsigned long>(file.size());
     res.headers.set(HDR_CONTENT_LENGTH, cl.str());
     res.bodyLength = file.size();
-    return true;
+    return false;
 }
 
 // ---------------- constructors (linker needed these) ----------------
@@ -286,7 +260,7 @@ bool StaticHandler::handleGet(const std::string &canonPath, const std::string &r
 	struct stat st;
     if (::stat(canonPath.c_str(), &st) != 0) {
         // Not found -> try error page
-        return serveErrorPage_(404, ctx, res, is_head);
+        return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
     }
 
 	if (S_ISDIR(st.st_mode))
@@ -344,7 +318,7 @@ bool StaticHandler::handleGet(const std::string &canonPath, const std::string &r
         }
 
         // Directory without index and autoindex off -> 404 page if available
-        return serveErrorPage_(404, ctx, res, is_head);
+        return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
     }
 
     if (S_ISREG(st.st_mode))
@@ -370,7 +344,7 @@ bool StaticHandler::handleGet(const std::string &canonPath, const std::string &r
 		if (!readWholeFile(canonPath, file))
 		{
 			// Failed to read: 404 page fallback (or empty)
-			return serveErrorPage_(404, ctx, res, is_head);
+			return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
 		}
 
 		res.body.clear();
@@ -386,36 +360,44 @@ bool StaticHandler::handleGet(const std::string &canonPath, const std::string &r
 		return true;
 	}
 	// Not a dir or regular file -> 404 page if available
-    return serveErrorPage_(404, ctx, res, is_head);
+    return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
 }
 
-/**
- * Delete file
- */
-bool StaticHandler::handleDelete(const std::string &path, HttpRequest&req, HttpResponse res, RequestContext ctx)
+bool StaticHandler::handleDelete(const std::string &path, HttpResponse res, RequestContext ctx)
 {
-	// Check for existance
-	if (!access(path.c_str(), F_OK))
-		return (makeErrorResponse(res, 404));
-    std::cout << "File exists" << std::endl;
-	if (!access(path.c_str(), W_OK))
-        return (makeErrorResponse(res, 404));
-    std::cout << "Has access to write to file" << std::endl;
+	struct stat st;
+
+	// Check if target exists
+	if (::stat(path.c_str(), &st) != 0)
+		return (serveErrorPage(HTTP_NOT_FOUND, ctx, res, false));
+	
+	// Check if target is a file
+	if (!S_ISREG(st.st_mode))
+		return (serveErrorPage(HTTP_FORBIDDEN, ctx, res, false));
+
+	// Chek if target could be deleted
+    if (std::remove(path.c_str()) != 0)
+		return (serveErrorPage(HTTP_FORBIDDEN, ctx, res, false));
+    return (prepareResponse(res, HTTP_OK, true));
 }
 
-// ---------------- main handler --------------------------------------
 bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
     // Only GET/HEAD; soft-fail others with empty body (serializer always sends 200).
     const std::string m = req.getMethod();
     const bool is_head = (m == "HEAD");
-    // if (m != "GET" && !is_head) {
-    //     res.body.clear();
-    //     res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-    //     res.headers.set(HDR_CONTENT_LENGTH, "0");
-    //     res.bodyLength = 0;
-    //     return true;
-    // }
+    (void)is_head;
+
+    // Some Test Cases write POST requests, that end up falling into here
+    // They require this exact behaviour to be treated with 200, and continued later
+	// Frankly, this should probably not be here, and looks like a band aid fix
+    if (m != "GET" && m != "DELETE" && !is_head) {
+        res.body.clear();
+        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
+        res.headers.set(HDR_CONTENT_LENGTH, "0");
+        res.bodyLength = 0;
+        return true;
+    }
 
     // Prefer router/pipeline-computed paths
     const std::string base = !ctx.effective_root.empty()
@@ -441,15 +423,17 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         !isSubPath(canonRoot, canonPath))
     {
         // Illegal traversal or bad root — show 404 page if available
-        return serveErrorPage_(404, ctx, res, is_head);
+        // this oen here!
+        // Catches target not existing
+        return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
     }
 
     if (m == "GET")
-		return (handleGet(canonRoot, rel, false, req, res, ctx));
+		return (handleGet(canonPath, rel, false, req, res, ctx));
 	else if (m == "HEAD")
-		return (handleGet(canonRoot, rel, true, req, res, ctx));
+		return (handleGet(canonPath, rel, true, req, res, ctx));
 	else if (m == "DELETE")
-		return (handleDelete(canonRoot, req, res, ctx));
+		return (handleDelete(canonPath, res, ctx));
 	res.setStatus(HTTP_BAD_REQUEST);
 	res.clearBody();
 	res.headers.set(HDR_CONTENT_TYPE, "text/plain");

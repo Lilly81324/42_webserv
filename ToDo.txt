@@ -1,2 +1,0 @@
-DELETE
-has no defined boy -> make it empty body

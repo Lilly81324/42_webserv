@@ -159,7 +159,6 @@ static std::string buildAutoindex(const std::string &urlBase, const std::string 
     return html.str();
 }
 
-
 /**
  * @brief Prepares barebones Reponse
  * 
@@ -169,14 +168,22 @@ static std::string buildAutoindex(const std::string &urlBase, const std::string 
  * @param status Status code to set Response to
  * @param state Return value of this function
  */
-static bool prepareResponse(HttpResponse &res, int status, bool state)
+static bool prepareResponse(HttpResponse &res, bool state)
 {
-    res.setStatus(status);
 	res.body.clear();
 	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
 	res.headers.set(HDR_CONTENT_LENGTH, "0");
 	res.bodyLength = 0;
 	return (state);
+}
+
+/**
+ * @brief Overload of function to set Response status
+ */
+static bool prepareResponse(HttpResponse &res, bool state, int status)
+{
+    res.setStatus(status);
+	return (prepareResponse(res, state));
 }
 
 // Try to serve a configured error page, e.g. error_page 404 /errors/404.html;
@@ -225,16 +232,16 @@ static bool serveErrorPage(int code,
     if (!realpathString(base, canonBase) ||
         !realpathString(fs, canonErr) ||
         !isSubPath(canonBase, canonErr))
-        return (prepareResponse(res, 404, false));
+        return (prepareResponse(res, true));
 
     // 4) Read and emit the error file
     struct stat st;
     if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
-        return (prepareResponse(res, 404, false));
+        return (prepareResponse(res, true));
 
     std::vector<char> file;
     if (!readWholeFile(canonErr, file))
-        return (prepareResponse(res, 404, false));
+        return (prepareResponse(res, true));
 
     res.body.clear();
     if (!is_head)
@@ -247,7 +254,7 @@ static bool serveErrorPage(int code,
     cl << static_cast<unsigned long>(file.size());
     res.headers.set(HDR_CONTENT_LENGTH, cl.str());
     res.bodyLength = file.size();
-    return false;
+    return true;
 }
 
 // ---------------- constructors (linker needed these) ----------------

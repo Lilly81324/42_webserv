@@ -38,8 +38,6 @@ TEST_CASE("Etag tests", "[etag][lel]")
 		usleep(100000);
 		writeToFile(file, "blib blob");
 		newEtag = ETagUtil::generate(file);
-		std::cout << (oldEtag == newEtag) << std::endl;
-		std::cout << (ETagUtil::weakComp(oldEtag, newEtag)) << std::endl;
 		REQUIRE(!ETagUtil::weakComp(oldEtag, newEtag));
 		REQUIRE(!ETagUtil::strongComp(oldEtag, newEtag));
 	}

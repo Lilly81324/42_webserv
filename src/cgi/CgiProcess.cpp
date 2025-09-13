@@ -9,12 +9,12 @@ date: 8/10/2025
 #include "VirtualServer.h" // full definition of CgiSpec for the 3-arg overload
 
 #include <unistd.h> // pipe, fork, dup2, execve, close
-#include <fcntl.h>	// fcntl
-#include <cstring>	// strerror
+#include <fcntl.h>  // fcntl
+#include <cstring>  // strerror
 #include <cerrno>
 #include <stdexcept>
 #include <sys/wait.h> // waitpid
-#include <signal.h>	  // kill
+#include <signal.h>   // kill
 #include <sys/time.h> // gettimeofday
 #include <vector>
 
@@ -65,60 +65,48 @@ CgiProcess::~CgiProcess()
 
 // High-level convenience overload: build argv/envp and delegate
 bool CgiProcess::spawn(const CgiSpec &spec,
-					   const std::string &script_path,
-					   const std::vector<std::string> &envv)
+					const std::string &script_path,
+					const std::vector<std::string> &envv)
 {
 	closeBoth(); // if previously used
 	_pid = -1;
-	_in = -1;  // parent will WRITE to child's stdin
-	_out = -1; // parent will READ  from child's stdout
+	_in  = -1;   // parent will WRITE to child's stdin
+	_out = -1;   // parent will READ  from child's stdout
 
-	int pin[2] = {-1, -1};	// pipe for child's stdin  (parent writes -> child reads)
-	int pout[2] = {-1, -1}; // pipe for child's stdout (child writes -> parent reads)
+	int pin[2]  = { -1, -1 }; // pipe for child's stdin  (parent writes -> child reads)
+	int pout[2] = { -1, -1 }; // pipe for child's stdout (child writes -> parent reads)
 
-	if (::pipe(pin) < 0)
-		return false;
-	if (::pipe(pout) < 0)
-	{
-		::close(pin[0]);
-		::close(pin[1]);
-		return false;
-	}
+	if (::pipe(pin)  < 0) return false;
+	if (::pipe(pout) < 0) { ::close(pin[0]); ::close(pin[1]); return false; }
 
 	pid_t pid = ::fork();
-	if (pid < 0)
-	{
-		::close(pin[0]);
-		::close(pin[1]);
-		::close(pout[0]);
-		::close(pout[1]);
+	if (pid < 0) {
+		::close(pin[0]);  ::close(pin[1]);
+		::close(pout[0]); ::close(pout[1]);
 		return false;
 	}
 
-	if (pid == 0)
-	{
+	if (pid == 0) {
 		// ---- Child ----
 		// stdin: read end of pin
-		::dup2(pin[0], STDIN_FILENO);
+		::dup2(pin[0],  STDIN_FILENO);
 		// stdout: write end of pout
 		::dup2(pout[1], STDOUT_FILENO);
 
 		// close all pipe fds in child
-		::close(pin[0]);
-		::close(pin[1]);
-		::close(pout[0]);
-		::close(pout[1]);
+		::close(pin[0]);  ::close(pin[1]);
+		::close(pout[0]); ::close(pout[1]);
 
 		// Build argv and envp (you already have helpers; keep minimal here)
-		std::vector<char *> argv;
-		argv.push_back(const_cast<char *>(spec.bin.c_str()));	 // /usr/bin/python3
-		argv.push_back(const_cast<char *>(script_path.c_str())); // /path/to/script.py
+		std::vector<char*> argv;
+		argv.push_back(const_cast<char*>(spec.bin.c_str())); // /usr/bin/python3
+		argv.push_back(const_cast<char*>(script_path.c_str()));      // /path/to/script.py
 		argv.push_back(0);
 
-		std::vector<char *> envp;
+		std::vector<char*> envp;
 		envp.reserve(envv.size() + 1);
 		for (size_t i = 0; i < envv.size(); ++i)
-			envp.push_back(const_cast<char *>(envv[i].c_str()));
+			envp.push_back(const_cast<char*>(envv[i].c_str()));
 		envp.push_back(0);
 
 		::execve(spec.bin.c_str(), &argv[0], &envp[0]);
@@ -138,28 +126,21 @@ bool CgiProcess::spawn(const CgiSpec &spec,
 
 	// Set parent ends to NONBLOCK + CLOEXEC
 	int fl;
-	fl = ::fcntl(_in, F_GETFL, 0);
-	if (fl >= 0)
-		::fcntl(_in, F_SETFL, fl | O_NONBLOCK);
-	fl = ::fcntl(_out, F_GETFL, 0);
-	if (fl >= 0)
-		::fcntl(_out, F_SETFL, fl | O_NONBLOCK);
-	fl = ::fcntl(_in, F_GETFD, 0);
-	if (fl >= 0)
-		::fcntl(_in, F_SETFD, fl | FD_CLOEXEC);
-	fl = ::fcntl(_out, F_GETFD, 0);
-	if (fl >= 0)
-		::fcntl(_out, F_SETFD, fl | FD_CLOEXEC);
+	fl = ::fcntl(_in,  F_GETFL, 0); if (fl >= 0) ::fcntl(_in,  F_SETFL,  fl | O_NONBLOCK);
+	fl = ::fcntl(_out, F_GETFL, 0); if (fl >= 0) ::fcntl(_out, F_SETFL, fl | O_NONBLOCK);
+	fl = ::fcntl(_in,  F_GETFD, 0); if (fl >= 0) ::fcntl(_in,  F_SETFD, fl | FD_CLOEXEC);
+	fl = ::fcntl(_out, F_GETFD, 0); if (fl >= 0) ::fcntl(_out, F_SETFD, fl | FD_CLOEXEC);
 
 	return true;
 }
 
+
 // Low-level spawn: do the actual fork/exec (stub for now; returns false)
 bool CgiProcess::spawn(const std::string &bin,
-					   const std::string &script,
-					   char *const *argv,
-					   char *const *envp,
-					   int timeout_ms)
+					const std::string &script,
+					char *const *argv,
+					char *const *envp,
+					int timeout_ms)
 {
 	// Clean up any previous child
 	terminate();
@@ -218,8 +199,8 @@ bool CgiProcess::spawn(const std::string &bin,
 		// argv should look like: [bin, script, NULL]
 		(void)script; // only to silence unused warning; script is already in argv
 		::execve(bin.c_str(),
-				 const_cast<char *const *>(argv),
-				 const_cast<char *const *>(envp));
+				const_cast<char *const *>(argv),
+				const_cast<char *const *>(envp));
 		_exit(127); // exec failed
 	}
 
@@ -242,13 +223,11 @@ bool CgiProcess::spawn(const std::string &bin,
 	return true;
 }
 
-void CgiProcess::closeIn()
-{
+void CgiProcess::closeIn() { 
 	(void)xclose(_in);
 }
-void CgiProcess::closeOut()
-{
-	(void)xclose(_out);
+void CgiProcess::closeOut() { 
+	(void)xclose(_out); 
 }
 void CgiProcess::closeBoth()
 {

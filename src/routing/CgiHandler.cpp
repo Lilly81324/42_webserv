@@ -4,7 +4,7 @@
 author: undefined
 date: 8/10/2025
 ------------------------------------------ */
-#include <stdio.h> // for fprintf, stderr
+#include <stdio.h>   // for fprintf, stderr
 
 #include "CgiHandler.h"
 #include "CgiRegistry.h"
@@ -27,7 +27,7 @@ date: 8/10/2025
 #include <cstring>
 
 #include <cerrno>
-#include <cstdio> // for fprintf, stderr
+#include <cstdio>   // for fprintf, stderr
 
 // small helpers (already in your TU; keep one copy)
 #ifdef KEEP_HOST_HELPER
@@ -46,8 +46,8 @@ static std::string hostWithoutPort(const std::string &hostHdr)
 #endif
 
 int CgiHandler::buildEnv(const HttpRequest &req,
-						 const VirtualServer &vs,
-						 std::vector<std::string> &envv) const
+						const VirtualServer &vs,
+						std::vector<std::string> &envv) const
 {
 	envv.clear();
 
@@ -192,6 +192,7 @@ int CgiHandler::buildEnv(const HttpRequest &req,
 	return static_cast<int>(envv.size()); // tests expect >0
 }
 
+
 CgiHandler::CgiHandler() : Handler() {}
 CgiHandler::~CgiHandler() {}
 
@@ -201,48 +202,43 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 {
 
 	std::fprintf(stderr, "[CGI] handle enter method=%s path=%s body_len=%zu temp=%d\n",
-				 req.getMethod().c_str(), req.getPath().c_str(),
-				 (size_t)req.getBodyLength(), (int)ctx.temp_file_used);
+			req.getMethod().c_str(), req.getPath().c_str(),
+			(size_t)req.getBodyLength(), (int)ctx.temp_file_used);
 
 	// 0) Resolve CGI spec (per-location overrides global)
 	CgiRegistry reg;
-	const std::map<std::string, CgiSpec> *locMap = ctx.loc ? &ctx.loc->cgi_by_ext : 0;
-	const std::map<std::string, CgiSpec> *defMap = ctx.cfg ? &ctx.cfg->cgi_defaults : 0;
+	const std::map<std::string, CgiSpec>* locMap = ctx.loc ? &ctx.loc->cgi_by_ext : 0;
+	const std::map<std::string, CgiSpec>* defMap = ctx.cfg ? &ctx.cfg->cgi_defaults : 0;
 	reg.setSources(locMap, defMap);
 
-	const CgiSpec *spec = reg.findByExtension(ctx.cgi_ext);
-	if (!spec)
-		return false; // not a CGI target; let other handlers try
+	const CgiSpec* spec = reg.findByExtension(ctx.cgi_ext);
+	if (!spec) return false; // not a CGI target; let other handlers try
 
-	if (!ctx.cgi_streamer)
-	{
+	if (!ctx.cgi_streamer) {
 		res = ResponseFactory::makeText(500, "CGI unavailable\n", "Internal Server Error", true);
 		return true;
 	}
 
 	// 1) Build the CGI environment
 	std::vector<std::string> envv;
-	if (buildEnv(req, *ctx.vs, envv) <= 0)
-	{
+	if (buildEnv(req, *ctx.vs, envv) <= 0) {
 		res = ResponseFactory::makeText(500, "CGI env build failed\n", "Internal Server Error", true);
 		return true;
 	}
 
 	// 2) Compute script filename (prefer effective_root, else loc/server root)
-	const std::string &baseRoot =
+	const std::string& baseRoot =
 		!ctx.effective_root.empty() ? ctx.effective_root
-									: (ctx.loc && !ctx.loc->root.empty() ? ctx.loc->root : ctx.vs->root);
+		: (ctx.loc && !ctx.loc->root.empty() ? ctx.loc->root : ctx.vs->root);
 
 	std::string root = baseRoot;
-	if (!root.empty() && root[root.size() - 1] == '/')
-		root.erase(root.size() - 1);
+	if (!root.empty() && root[root.size() - 1] == '/') root.erase(root.size() - 1);
 
 	// IMPORTANT: use the FULL request path so "/cgi/..." is preserved
-	std::string urlPath = req.getPath(); // e.g. "/cgi/hello.py"
-	if (urlPath.empty() || urlPath[0] != '/')
-		urlPath = "/" + urlPath;
+	std::string urlPath = req.getPath();                 // e.g. "/cgi/hello.py"
+	if (urlPath.empty() || urlPath[0] != '/') urlPath = "/" + urlPath;
 
-	const std::string scriptPath = root + urlPath; // "./www" + "/cgi/hello.py"
+	const std::string scriptPath = root + urlPath;       // "./www" + "/cgi/hello.py"
 
 	// ---- DEBUG + EARLY GUARD ----
 	{
@@ -254,8 +250,7 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 		::write(2, line.c_str(), line.size());
 		::write(2, "\n", 1);
 
-		if (::access(scriptPath.c_str(), R_OK) != 0)
-		{
+		if (::access(scriptPath.c_str(), R_OK) != 0) {
 			int se = errno;
 			std::ostringstream msg;
 			msg << "CGI script not found at: " << scriptPath
@@ -267,15 +262,14 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 	// ------------------------------
 
 	// 3) Start CGI asynchronously
-	if (!ctx.cgi_streamer->beginCgi(*spec, scriptPath, envv))
-	{
+	if (!ctx.cgi_streamer->beginCgi(*spec, scriptPath, envv)) {
 		res = ResponseFactory::makeText(500, "CGI spawn failed\n", "Internal Server Error", true);
 		return true;
 	}
 
 	// >>> ADD THIS RIGHT HERE: print the pipe FDs we will poll <<<
 	{
-		int in = ctx.cgi_streamer->cgiStdinFD();
+		int in  = ctx.cgi_streamer->cgiStdinFD();
 		int out = ctx.cgi_streamer->cgiStdoutFD();
 		std::fprintf(stderr, "[CGI] begin ok inFD=%d outFD=%d\n", in, out);
 	}
@@ -285,18 +279,15 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 	//    doesn't block waiting for EOF (typical for GET/HEAD).
 	const bool has_body = (req.getBodyLength() > 0) || ctx.temp_file_used;
 
-	if (has_body)
-	{
-		int inFD = ctx.cgi_streamer->cgiStdinFD();
-		int outFD = ctx.cgi_streamer->cgiStdoutFD();
-		std::fprintf(stderr, "[CGI] register POLLOUT for inFD=%d; POLLIN for outFD=%d\n", inFD, outFD);
+	if (has_body) {
+	int inFD  = ctx.cgi_streamer->cgiStdinFD();
+	int outFD = ctx.cgi_streamer->cgiStdoutFD();
+	std::fprintf(stderr, "[CGI] register POLLOUT for inFD=%d; POLLIN for outFD=%d\n", inFD, outFD);
 
 		// Whatever your event-loop API is, ensure both registrations happen:
 		// loop.modifyFD(inFD,  POLLOUT | /* keep existing flags if you track them */);
 		// loop.modifyFD(outFD, POLLIN  | /* … */);
-	}
-	else if (req.getMethod() != "POST")
-	{
+	} else if (req.getMethod() != "POST") {
 		// For GET/HEAD with no body, close stdin so the CGI won’t hang waiting for EOF.
 		ctx.cgi_streamer->closeStdin();
 	}
@@ -307,3 +298,7 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 	// Async: EventLoop/ClientHandler will pump CGI pipes and stream output.
 	return false;
 }
+
+
+
+

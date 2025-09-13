@@ -20,14 +20,15 @@ Date: 8/10/2025
 class CGIStreamer;
 
 class ServerPipeline
-{
-public:
-	static bool processRequest(const ServerConfig &cfg,
-							   int vs_indx,
-							   HttpRequest &req,
-							   HttpResponse &res,
-							   RouteDecision &decision,
-							   CGIStreamer *cgi_streamer); // <-- 6th param
+	{
+	public:
+		static bool processRequest(const ServerConfig &cfg,
+								int vs_indx,
+								HttpRequest &req,
+								HttpResponse &res,
+								RouteDecision &decision,
+								CGIStreamer* cgi_streamer); // <-- 6th param
 };
 
 #endif // SERVER_PIPELINE_H
+

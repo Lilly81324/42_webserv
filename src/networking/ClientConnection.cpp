@@ -427,7 +427,8 @@ void ClientConnection::parseHeaders()
 
 		if (!req.parse(p, to_feed))
 		{
-			fail(400, "Bad Request");
+			int code = errno ? errno : 400;    // parse() sets errno to the HTTP status
+			fail(code, 0);
 			return;
 		}
 

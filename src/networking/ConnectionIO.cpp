@@ -1,9 +1,9 @@
 #include "ConnectionIO.h"
 
 #include <errno.h>
-#include <string.h>		// std::memmove (used by IoRing::compactIfNeeded)
+#include <string.h>     // std::memmove (used by IoRing::compactIfNeeded)
 #include <sys/socket.h> // recv, send
-#include <unistd.h>		// close
+#include <unistd.h>     // close
 
 ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 {
@@ -21,8 +21,7 @@ ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 	char *dst = in.writePtr();
 	ssize_t n = ::recv(socket.get(), dst, (int)space, MSG_DONTWAIT);
 
-	if (n > 0)
-	{
+	if (n > 0) {
 		in.wrote((std::size_t)n);
 		return n;
 	}
@@ -45,8 +44,7 @@ ssize_t ConnectionIO::nb_write()
 
 	ssize_t n = ::send(socket.get(), &tx_scratch[0], (int)n_to_send, MSG_DONTWAIT);
 
-	if (n > 0)
-	{
+	if (n > 0) {
 		out.dropFront((std::size_t)n);
 		return n;
 	}

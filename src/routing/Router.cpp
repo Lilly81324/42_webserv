@@ -253,7 +253,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	if (!isMethodAllowed(L, method))
 	{
 		out.kind = RouteDecision::HK_ERROR;
-		out.status = HTTP_METHOD_FORBIDDEN;
+		out.status = 405;
 		return;
 	}
 
@@ -261,7 +261,7 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 	if ((method == "PUT" || method == "PATCH") && !isPutPatchAllowed(L, method))
 	{
 		out.kind = RouteDecision::HK_ERROR;
-		out.status = HTTP_METHOD_FORBIDDEN;
+		out.status = 405;
 		return;
 	}
 	if ((method == "PUT" || method == "PATCH") && isPutPatchAllowed(L, method))

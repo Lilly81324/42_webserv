@@ -8,18 +8,17 @@ Date: 8/10/2025
 #ifndef CILESS_H
 #define CILESS_H
 
-#include <string>
-#include <ctype.h>
+# include <string>
+# include <ctype.h>
 
 using namespace std;
 
 /**
  * Class for overwriting map containers Compare Function,
- * in order to make comparing case insensitive,
+ * in order to make comparing case insensitive, 
  * while storing the result as case sensitive
  */
-class CiLess
-{
+class CiLess {
 public:
 	/**
 	 * Constructor

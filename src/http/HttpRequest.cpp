@@ -17,13 +17,10 @@ static unsigned long long BUFFERLIMIT = 128 * 1024 ;
  * Wether given Method is a valid one
  * @returns true if it is
  */
-bool isMethodValid(const std::string &in)
-{
-    if (in == "GET" || in == "HEAD" || in == "PUT" || in == "PATCH" ||
-        in == "DELETE" || in == "POST")
-        return (true);
-    return (false);
+bool isMethodValid(const std::string &m) {
+    return (m=="GET" || m=="HEAD" || m=="POST" || m=="PUT" || m=="PATCH" || m=="DELETE");
 }
+
 
 
 /**
@@ -53,10 +50,9 @@ bool isQueryValid(const std::string &in)
  */
 bool isHttpVerValid(const std::string &in)
 {
-	if (in.size() < 1)
-		return (false);
-	return (true);
+    return (in == "HTTP/1.0" || in == "HTTP/1.1");
 }
+
 
 /**
  * Wether given Header Key is valid
@@ -122,55 +118,57 @@ string HttpRequest::extension(void) const
 
 int HttpRequest::handleLineStart(const std::string &in)
 {
-	size_t i = 0;
-	size_t pos = 0;
+    size_t i = 0;
+    size_t pos = 0;
 
-	pos = in.find(' ', i);
-	if (pos == (size_t)-1)
-		return (HTTP_BAD_REQUEST);
-	this->method = in.substr(i, pos);
-	if (!isMethodValid(this->method))
-		return (HTTP_BAD_REQUEST);
+    pos = in.find(' ', i);
+    if (pos == (size_t)-1)
+        return (HTTP_BAD_REQUEST);
+    this->method = in.substr(i, pos);
+    if (!isMethodValid(this->method))
+        return HTTP_NOT_IMPLEMENTED; // 501
 
-	i = ++pos;
-	pos = in.find('?', i);
-	if (pos != (size_t)-1)
-	{
-		this->path = in.substr(i, pos - i);
-		if (!isPathValid(this->path))
-			return (HTTP_BAD_REQUEST);
-		i = ++pos;
-		pos = in.find(' ', i);
-		if (pos == (size_t)-1)
-			return (HTTP_BAD_REQUEST);
-		this->query = in.substr(i, pos - i);
-		if (!isQueryValid(this->query))
-			return (HTTP_BAD_REQUEST);
-	}
-	else
-	{
-		pos = in.find(' ', i);
-		if (pos == (size_t)-1)
-			return (HTTP_BAD_REQUEST);
-		this->path = in.substr(i, pos - i);
-		if (!isPathValid(this->path))
-			return (HTTP_BAD_REQUEST);
-	}
+    i = ++pos;
+    pos = in.find('?', i);
+    if (pos != (size_t)-1)
+    {
+        this->path = in.substr(i, pos - i);
+        if (!isPathValid(this->path))
+            return (HTTP_BAD_REQUEST); // FIX: was HTTP_VERSION_NOT_SUPP
+        i = ++pos;
+        pos = in.find(' ', i);
+        if (pos == (size_t)-1)
+            return (HTTP_BAD_REQUEST);
+        this->query = in.substr(i, pos - i);
+        if (!isQueryValid(this->query))
+            return (HTTP_BAD_REQUEST);
+    }
+    else
+    {
+        pos = in.find(' ', i);
+        if (pos == (size_t)-1)
+            return (HTTP_BAD_REQUEST);
+        this->path = in.substr(i, pos - i);
+        if (!isPathValid(this->path))
+            return (HTTP_BAD_REQUEST);
+    }
 
-	i = ++pos;
-	pos = in.find("\r\n", i);
-	if (pos == (size_t)-1)
-		return (HTTP_BAD_REQUEST);
-	this->http_version = in.substr(i, pos - i);
-	if (!isHttpVerValid(this->http_version))
-		return (HTTP_BAD_REQUEST);
+    i = ++pos;
+    pos = in.find("\r\n", i);
+    if (pos == (size_t)-1)
+        return (HTTP_BAD_REQUEST);
+    this->http_version = in.substr(i, pos - i);
+    if (!isHttpVerValid(this->http_version))
+        return (HTTP_VERSION_NOT_SUPP); // FIX: 505
 
-	i = pos + 2;
-	if (in[i])
-		return (HTTP_BAD_REQUEST);
-	this->state = HEADER;
-	return (0);
+    i = pos + 2;
+    if (i < in.size() && in[i])
+        return (HTTP_BAD_REQUEST); // avoid out-of-bounds & reject trailing junk
+
+    this->state = HEADER;
+    return (0);
 }
+
 
 int HttpRequest::handleLineHeader(const std::string &in)
 {
@@ -224,7 +222,7 @@ int HttpRequest::handleLineBody(const std::string &in)
 	if (this->method != "POST" && this->method != "PUT" && this->method != "PATCH")
 		return (HTTP_BAD_REQUEST);
 	if (!this->headers.keyExists("Content-Length"))
-		return (HTTP_BAD_REQUEST);
+		return HTTP_LENGTH_REQUIRED;
 	if (in.size() + this->body.size() > this->bodyLength)
 		return (HTTP_BAD_REQUEST);
 	for (int i = 0; in[i]; i++)

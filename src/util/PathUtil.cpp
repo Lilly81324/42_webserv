@@ -12,7 +12,7 @@ date: 8/10/2025
 #include <limits.h>
 #include <string.h>
 #include <vector>
-#include <stdlib.h>
+#include <stdlib.h>  
 
 static std::string normalize_slashes(const std::string &s)
 {
@@ -120,11 +120,9 @@ static bool stat_type(const std::string &path, mode_t mask)
 		return false;
 	return (st.st_mode & S_IFMT) == mask;
 }
-bool PathUtil::isDir(const std::string &path)
-{
-	return stat_type(path, S_IFDIR);
+bool PathUtil::isDir(const std::string &path) {
+	return stat_type(path, S_IFDIR); 
 }
-bool PathUtil::isFile(const std::string &path)
-{
+bool PathUtil::isFile(const std::string &path) { 
 	return stat_type(path, S_IFREG);
 }

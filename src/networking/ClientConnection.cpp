@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <limits> // for std::numeric_limits
 #include <cstdio>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <netinet/tcp.h>
+#include <fcntl.h>
+#include <errno.h>
 
 static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
@@ -138,6 +144,228 @@ ClientConnection::~ClientConnection()
 		body = 0;
 	}
 	req.cleanupBodyFile();
+}
+
+// small helper
+static int get_so_error(int fd) {
+    int err = 0; socklen_t len = sizeof(err);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) return errno;
+    return err;
+}
+
+bool ClientConnection::beginProxyTunnel(int upstream_fd,
+                                        const std::string& host,
+                                        const std::string& port,
+                                        int connect_timeout_ms,
+                                        int io_idle_timeout_ms,
+                                        const HttpRequest& req)
+{
+    // Delegate to the overload that accepts a target path; empty means derive from req.
+    return beginProxyTunnel(upstream_fd, host, port,
+                            connect_timeout_ms, io_idle_timeout_ms,
+                            req, std::string());
+}
+
+bool ClientConnection::beginProxyTunnel(int upstream_fd,
+                                        const std::string& host,
+                                        const std::string& port,
+                                        int connect_timeout_ms,
+                                        int io_idle_timeout_ms,
+                                        const HttpRequest& req,
+                                        const std::string& target_path)
+{
+    if (proxy_.active) return false; // already proxying this connection
+
+    proxy_.active        = true;
+    proxy_.connect_done  = false;
+    proxy_.ufd           = upstream_fd;
+    proxy_.uh            = host;
+    proxy_.up            = port;
+
+    proxy_.connect_deadline_ms = now_cached_ms + (unsigned long long)connect_timeout_ms;
+    proxy_.io_idle_deadline_ms = now_cached_ms + (unsigned long long)io_idle_timeout_ms;
+
+    // ---- Build upstream request head -------------------------------------------------
+    std::string head;
+    head.reserve(1024);
+
+    // Request line: METHOD SP target SP HTTP/1.1 CRLF
+    head += req.getMethod();
+    head += " ";
+
+    // Target path: use override if provided, else derive from req (path[?query])
+    std::string target;
+    if (!target_path.empty()) {
+        target = target_path;
+    } else {
+        target = req.getPath();
+        const std::string q = req.getQuery();
+        if (!q.empty()) { target += "?"; target += q; }
+    }
+    head += target;
+
+    head += " ";
+    head += req.getHttpVer();   // e.g., "HTTP/1.1"
+    head += "\r\n";
+
+    // Headers: use your public Headers API; no iteration support, so copy a small allowlist
+    const Headers& H = req.getHeaders();
+
+    // Host
+    if (!H.keyExists("Host")) {
+        head += "Host: ";
+        head += proxy_.uh;
+        if (!proxy_.up.empty() && proxy_.up != "80") { head += ":"; head += proxy_.up; }
+        head += "\r\n";
+    } else {
+        const std::string hv = H.get("Host");
+        if (!hv.empty()) {
+            head += "Host: ";
+            head += hv;
+            head += "\r\n";
+        }
+    }
+
+    // Pass-through a few safe headers if present (no hop-by-hop here)
+    const char* pass_list[] = {
+        "Content-Type",
+        "Content-Length",
+        "User-Agent",
+        "Accept",
+        "Accept-Encoding",
+        "Accept-Language",
+        "Cookie"
+    };
+    for (size_t i = 0; i < sizeof(pass_list)/sizeof(pass_list[0]); ++i) {
+        const std::string v = H.get(pass_list[i]);
+        if (!v.empty()) {
+            head += pass_list[i];
+            head += ": ";
+            head += v;
+            head += "\r\n";
+        }
+    }
+
+    // Simplify lifecycle upstream (no keep-alive upstream for first cut)
+    head += "Connection: close\r\n";
+    head += "\r\n";
+
+    // Save head into upstream-send buffer
+    proxy_.to_upstream = head;
+    proxy_.to_up_off   = 0;
+
+    // Optional: include already-buffered body (if any) — small bodies only
+    std::vector<char> mem = req.readBodyToVector();
+    if (!mem.empty()) {
+        proxy_.body_mem.swap(mem);
+        proxy_.body_off = 0;
+    } else {
+        proxy_.body_off = 0;
+    }
+
+    // serviceProxyTunnel() will be called from onTick() to drive connect/IO
+    return true;
+}
+
+
+// Call from your per-connection tick (where you already pump IO)
+void ClientConnection::serviceProxyTunnel()
+{
+    if (!proxy_.active) return;
+
+    bool progressed = false;
+
+    // 1) finish non-blocking connect
+    if (!proxy_.connect_done) {
+        int err = get_so_error(proxy_.ufd);
+        if (err == 0) {
+            proxy_.connect_done = true;
+        } else if (now_cached_ms >= proxy_.connect_deadline_ms) {
+            fail(504, "Gateway Timeout");
+            ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
+            return;
+        } // else: still connecting
+    }
+
+    // 2) write pending request head/body to upstream
+    if (proxy_.connect_done && proxy_.ufd >= 0) {
+        // write head
+        while (proxy_.to_up_off < proxy_.to_upstream.size()) {
+            const char* p = proxy_.to_upstream.data() + proxy_.to_up_off;
+            size_t nleft = proxy_.to_upstream.size() - proxy_.to_up_off;
+            ssize_t n = ::write(proxy_.ufd, p, (int)nleft);
+            if (n > 0) {
+                proxy_.to_up_off += (size_t)n;
+                progressed = true;
+            } else {
+                if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) break;
+                if (n < 0 && errno == EINTR) continue;
+                fail(502, "Bad Gateway");
+                ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
+                return;
+            }
+        }
+        // write body (if any)
+        while (proxy_.to_up_off >= proxy_.to_upstream.size() &&
+               proxy_.body_off < proxy_.body_mem.size()) {
+            const char* p = &proxy_.body_mem[0] + proxy_.body_off;
+            size_t nleft = proxy_.body_mem.size() - proxy_.body_off;
+            ssize_t n = ::write(proxy_.ufd, p, (int)nleft);
+            if (n > 0) {
+                proxy_.body_off += (size_t)n;
+                progressed = true;
+            } else {
+                if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) break;
+                if (n < 0 && errno == EINTR) continue;
+                fail(502, "Bad Gateway");
+                ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
+                return;
+            }
+        }
+    }
+
+    // 3) read from upstream → queue to client outbound buffer
+    if (proxy_.ufd >= 0) {
+        std::vector<char>& tmp = io.getTmp();
+        if (tmp.size() < 64*1024) tmp.resize(64*1024);
+
+        for (;;) {
+            ssize_t r = ::read(proxy_.ufd, &tmp[0], (int)tmp.size());
+            if (r > 0) {
+                io.getChainBuf().push_copy(&tmp[0], (size_t)r);
+                progressed = true;
+            } else if (r == 0) {
+                ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
+                should_close = true; // simplest: close after upstream closes
+                break;
+            } else {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) break;
+                if (errno == EINTR) continue;
+                fail(502, "Bad Gateway");
+                ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
+                return;
+            }
+        }
+    }
+
+    // 4) back-pressure on client reads based on queued outbound size
+    const size_t HI = 512*1024, LO = 128*1024;
+    const size_t out_sz = io.getChainBuf().getByteSize();
+    if (out_sz > HI) {
+        io.getFlow().setReadPaused(true);
+    } else if (out_sz < LO) {
+        io.getFlow().setReadPaused(false);
+    }
+
+    // 5) idle timeout
+    if (progressed) {
+        proxy_.io_idle_deadline_ms = now_cached_ms + 15000; // or your configured value
+    } else if (now_cached_ms >= proxy_.io_idle_deadline_ms) {
+        fail(504, "Gateway Timeout");
+        if (proxy_.ufd >= 0) { ::close(proxy_.ufd); proxy_.ufd = -1; }
+        proxy_.active = false;
+        return;
+    }
 }
 
 bool ClientConnection::isClosed() const { return state == PH_CLOSE; }
@@ -269,6 +497,11 @@ void ClientConnection::onTick(unsigned long long now_ms)
 		if (out_after <= LOW_WATER)
 			cgi.resumeStdoutReads();
 	}
+
+	// 2.5) Drive reverse-proxy tunnel (non-blocking upstream I/O)
+	// Minimal insertion: run the proxy pump each tick so connect/IO progresses.
+	if (proxy_.active)
+		serviceProxyTunnel();
 
 	// 3) Deadline enforcement
 	if (dl.expired(now_ms) && state != PH_CLOSE)
@@ -649,7 +882,8 @@ void ClientConnection::routeAndBuild()
 		req,
 		res,
 		*ctx,
-		&cgi);
+		&cgi,
+		this);
 
 	// One keep-alive decision used by both paths
 	const std::string connHdr = req.getHeaders().get("Connection");

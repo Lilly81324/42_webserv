@@ -57,10 +57,13 @@ bool ServerPipeline::processRequest(const ServerConfig &cfg,
                                     HttpRequest &req,
                                     HttpResponse &res,
                                     RouteDecision &decision,
-                                    CGIStreamer* cgi_streamer)
+                                    CGIStreamer* cgi_streamer,
+                                    ClientConnection* self)
 {
+
     // ---- Build RequestContext from inputs ----
     RequestContext ctx;
+    ctx.client = self;
     ctx.cfg        = &cfg;
     ctx.vs_index   = vs_indx;
     ctx.vs         = 0;
@@ -112,7 +115,7 @@ bool ServerPipeline::processRequest(const ServerConfig &cfg,
 
             // 405 requires an Allow header
             if (code == 405) {
-                res = ResponseFactory::makeErrorOrPage(ctx, 405, "Method Not Allowed", true /* close */);
+                res = ResponseFactory::makeErrorOrPage(ctx, 405, "Method Not Allowed", true);
                 const std::string allowLine = build_allow_header(ctx.loc);
                 if (!allowLine.empty())
                     res.headers.set("Allow", allowLine);

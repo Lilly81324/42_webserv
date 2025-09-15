@@ -12,28 +12,45 @@ date: 8/27/2025
 #include "HEADER_ENTRIES.h"
 #include "VirtualServer.h"
 #include "ServerConfig.h"
-
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <vector>
-
 #include <ctime>
 #include <sstream>
 #include <map>
 
 // --- tiny helpers ---
 
-static const std::string& reasonFor(int code) {
-    struct StatusPair { int code; const char* reason; };
+static const std::string& reasonFor(int code) 
+{
+    struct StatusPair { 
+        int code;
+        const char* reason; 
+    };
     static const StatusPair status_array[] = {
-        {200,"OK"}, {204,"No Content"},
-        {301,"Moved Permanently"}, {302,"Found"}, {303,"See Other"}, {307,"Temporary Redirect"}, {308,"Permanent Redirect"},
-        {400,"Bad Request"}, {401,"Unauthorized"}, {403,"Forbidden"}, {404,"Not Found"},
-        {405,"Method Not Allowed"}, {411,"Length Required"}, {413,"Payload Too Large"},
-        {417,"Expectation Failed"}, {421,"Misdirected Request"}, {431,"Request Header Fields Too Large"},
-        {500,"Internal Server Error"}, {501,"Not Implemented"}, {502,"Bad Gateway"},
-        {503,"Service Unavailable"}, {505,"HTTP Version Not Supported"}
+        { 200,"OK" }, 
+        { 204,"No Content" },
+        { 301,"Moved Permanently" },
+        { 302,"Found" }, 
+        { 303,"See Other" },
+        { 307,"Temporary Redirect" }, 
+        { 308,"Permanent Redirect" },
+        { 400,"Bad Request" },
+        { 401,"Unauthorized" },
+        { 403,"Forbidden" },
+        { 404,"Not Found" },
+        { 405,"Method Not Allowed" },
+        { 411,"Length Required" },
+        { 413,"Payload Too Large" },
+        { 417,"Expectation Failed" },
+        { 421,"Misdirected Request" },
+        { 431,"Request Header Fields Too Large" },
+        { 500,"Internal Server Error" },
+        { 501,"Not Implemented" },
+        { 502,"Bad Gateway" },
+        { 503,"Service Unavailable" },
+        { 505,"HTTP Version Not Supported" }
     };
     static std::map<int, std::string> k;
     if (k.empty()) {
@@ -69,47 +86,42 @@ static void addCommonHeaders(HttpResponse &r, bool close)
 
 // --- builders ---
 
-HttpResponse ResponseFactory::makeError(int code,const std::string & reasons,bool close, const std::string& bodyText)
+
+HttpResponse ResponseFactory::makeError(int code,const std::string & reasons, bool close, const std::string& bodyText)
 {
     HttpResponse r;
     r.status = code;
     r.reason = reasons.empty() ? reasonFor(code) : reasons;
-
     std::string text = bodyText.empty()
         ? (static_cast<std::ostringstream&>(std::ostringstream() << code << " " << r.reason << "\n")).str()
         : bodyText;
-
     r.body.assign(text.begin(), text.end());
     r.headers.set("Content-Type", "text/plain; charset=utf-8");
-
     std::ostringstream cl; cl << (unsigned long)r.body.size();
     r.headers.set("Content-Length", cl.str());
     r.bodyLength = r.body.size();
-
     addCommonHeaders(r, close);
     return r;
 }
+
+
+// makeText function is plain text fallback used in a few internal error sites.
 
 HttpResponse ResponseFactory::makeText(int code,const std::string& text,const std::string & reasons,bool close)
 {
     HttpResponse r;
     r.status = code;
     r.reason = reasons.empty() ? reasonFor(code) : reasons;
-
     r.body.assign(text.begin(), text.end());
     r.headers.set("Content-Type", "text/plain; charset=utf-8");
-
     std::ostringstream cl; cl << (unsigned long)r.body.size();
     r.headers.set("Content-Length", cl.str());
     r.bodyLength = r.body.size();
-
     addCommonHeaders(r, close);
     return r;
 }
 
 /* ---------- NEW: unified error page mapper (safe) ---------- */
-
-
 
 static std::string httpDate(time_t t) {
     char buf[64];
@@ -120,7 +132,8 @@ static std::string httpDate(time_t t) {
 
 static std::string extLower(const std::string &p) {
     std::string::size_type dot = p.rfind('.');
-    if (dot == std::string::npos) return "";
+    if (dot == std::string::npos)
+        return "";
     std::string e = p.substr(dot + 1);
     for (size_t i=0; i<e.size(); ++i)
         if (e[i] >= 'A' && e[i] <= 'Z') e[i] = char(e[i] - 'A' + 'a');
@@ -135,17 +148,32 @@ static std::string guessMime(const std::string &path,
         if (it != cfg->mime_mapping.end())
             return it->second;
     }
-    if (ext=="html"||ext=="htm") return "text/html";
-    if (ext=="css") return "text/css";
-    if (ext=="js") return "application/javascript";
-    if (ext=="json") return "application/json";
-    if (ext=="png") return "image/png";
-    if (ext=="jpg"||ext=="jpeg") return "image/jpeg";
-    if (ext=="gif") return "image/gif";
-    if (ext=="svg") return "image/svg+xml";
-    if (ext=="txt") return "text/plain";
+    if (ext=="html"||ext=="htm")
+        return "text/html";
+    if (ext=="css")
+        return "text/css";
+    if (ext=="js")
+        return "application/javascript";
+    if (ext=="json")
+        return "application/json";
+    if (ext=="png")
+        return "image/png";
+    if (ext=="jpg"||ext=="jpeg")
+        return "image/jpeg";
+    if (ext=="gif")
+        return "image/gif";
+    if (ext=="svg")
+        return "image/svg+xml";
+    if (ext=="txt")
+        return "text/plain";
     return "application/octet-stream";
 }
+
+
+
+/* makeErrorOrPage(ctx, code, reason, close, extra) – 
+picks a configured error page if present, otherwise falls back to a minimal text response. 
+Sets Connection: close when you ask it to. */
 
 HttpResponse ResponseFactory::makeErrorOrPage(const RequestContext &ctx,
                                               int code,
@@ -167,8 +195,10 @@ HttpResponse ResponseFactory::makeErrorOrPage(const RequestContext &ctx,
     }
     // Sensible defaults if nothing configured
     if (uri.empty()) {
-        if (code == 404) uri = "/404.html";
-        else if (code == 500) uri = "/500.html";
+        if (code == 404)
+            uri = "/404.html";
+        else if (code == 500)
+            uri = "/500.html";
     }
 
     // 2) If no mapping or no server, fallback to plain text body
@@ -233,10 +263,11 @@ HttpResponse ResponseFactory::makeErrorOrPage(const RequestContext &ctx,
     r.body.assign(buf.begin(), buf.end());
     r.headers.set(HDR_CONTENT_TYPE, guessMime(canonErr, ctx.cfg));
     const std::string et = ETagUtil::generate(canonErr.c_str());
-    if (!et.empty()) r.headers.set(HDR_ETAG, et);
+    if (!et.empty())
+        r.headers.set(HDR_ETAG, et);
     const std::string lm = httpDate(st.st_mtime);
-    if (!lm.empty()) r.headers.set(HDR_LAST_MODIFIED, lm);
-
+    if (!lm.empty())
+        r.headers.set(HDR_LAST_MODIFIED, lm);
     std::ostringstream cl; cl << (unsigned long)r.body.size();
     r.headers.set("Content-Length", cl.str());
     r.bodyLength = r.body.size();

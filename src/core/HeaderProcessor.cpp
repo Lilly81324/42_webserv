@@ -101,15 +101,6 @@ HeaderCheck HeaderProcessor::analyze(const HttpRequest &req,
 		return hc;
 	}
 
-	// -------- Global body cap--------
-	// if (max_body_bytes_global && hc.content_length > 0 &&
-	// 	hc.content_length > max_body_bytes_global)
-	// {
-	// 	hc.ok = false;
-	// 	hc.error_status = "413 Payload Too Large";
-	// 	return hc;
-	// }
-
 	// -------- Expect: 100-continue --------
 	const std::string &ex = hdrs.get("Expect");
 	if (!ex.empty())

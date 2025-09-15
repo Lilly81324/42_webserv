@@ -17,19 +17,32 @@ date: 8/10/2025
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
 #include "ClientHandler.h"
-
 #include <sys/time.h>
 #include <poll.h>
-
 #include <sstream>
 #include <vector>
 #include <string>
 #include <cstring>
-
 #include <cerrno>
 #include <cstdio>   // for fprintf, stderr
 
 // small helpers (already in your TU; keep one copy)
+
+
+/* 
+
+#ifdef KEEP_HOST_HELPER static std::string hostWithoutPort(const std::string &hostHdr)
+This helper normalizes the Host header into a canonical server name by removing any 
+explicit port suffix while correctly supporting IPv6 bracket notation. 
+For IPv6, it keeps the [addr] portion and discards a following :port; for IPv4/hostnames, 
+it splits on the last colon. Normalization matters because CGI variables such as 
+SERVER_NAME and SERVER_PORT are derived from Host, 
+and inconsistent parsing produces incorrect environment values. By centralizing that logic, 
+we avoid duplicating tricky edge-case handling across the codebase and ensure consistent 
+behavior across platforms and requests.
+
+ */
+
 #ifdef KEEP_HOST_HELPER
 static std::string hostWithoutPort(const std::string &hostHdr)
 {
@@ -45,6 +58,20 @@ static std::string hostWithoutPort(const std::string &hostHdr)
 }
 #endif
 
+
+/* 
+
+int CgiHandler::buildEnv(const HttpRequest&, const VirtualServer&, std::vectorstd::string
+&) const Builds a complete CGI environment array (envp) from HTTP request and server context.
+It derives SERVER_NAME and SERVER_PORT from Host when provided (handling IPv6 brackets and explicit ports),
+falls back to server names or listen host, and sets core variables like
+GATEWAY_INTERFACE, REQUEST_METHOD, QUERY_STRING, SERVER_PROTOCOL, CONTENT_TYPE, and CONTENT_LENGTH
+(including buffered body length if header missing). It computes DOCUMENT_ROOT and SCRIPT_FILENAME by
+joining effective roots with the requested path, and exposes REMOTE_ADDR using X-Forwarded-For’s first token when present.
+Finally, it appends REDIRECT_STATUS=200 for php-cgi compatibility. Returns the count.  
+
+*/
+
 int CgiHandler::buildEnv(const HttpRequest &req,
 						const VirtualServer &vs,
 						std::vector<std::string> &envv) const
@@ -56,7 +83,6 @@ int CgiHandler::buildEnv(const HttpRequest &req,
 	// --- SERVER_NAME / SERVER_PORT (prefer Host header if present) ---
 	std::string host = H.get(HDR_HOST);
 	int server_port = vs.listen_port;
-
 	if (!host.empty())
 	{
 		// strip optional port from Host
@@ -182,7 +208,6 @@ int CgiHandler::buildEnv(const HttpRequest &req,
 	if (!clen.empty())
 		envv.push_back(std::string("CONTENT_LENGTH=") + clen);
 	envv.push_back(std::string("REMOTE_ADDR=") + remote);
-
 	envv.push_back(std::string("DOCUMENT_ROOT=") + docroot);
 	envv.push_back(std::string("SCRIPT_FILENAME=") + script_filename);
 
@@ -193,10 +218,54 @@ int CgiHandler::buildEnv(const HttpRequest &req,
 }
 
 
-CgiHandler::CgiHandler() : Handler() {}
-CgiHandler::~CgiHandler() {}
+/* 
 
+CgiHandler::CgiHandler()
+A lightweight constructor that keeps the handler effectively stateless and cheap to instantiate.
+CgiHandler instances serve as plug-in components the pipeline can invoke after routing decides a request targets a CGI endpoint
+(based on extension and location policy). Because the heavy lifting (mapping the extension, building the environment,
+spawning the process, streaming I/O, enforcing deadlines) is delegated to CgiRegistry, CgiProcess, and CGIStreamer,
+the constructor performs no allocations or side effects. This design keeps object lifetimes simple,
+supports reuse across connections, and avoids per-request overhead, fitting cleanly into the non-blocking, single-poll event-driven architecture.
+
+
+*/
+
+CgiHandler::CgiHandler() : Handler() {}
+
+/* 
+
+CgiHandler::~CgiHandler()
+The destructor is intentionally trivial because CgiHandler holds no owning resources; process management,
+pipes, and buffers are owned by CGIStreamer/CgiProcess or managed by the pipeline/loop.
+Keeping destruction cheap matters in a server that frequently constructs handlers or stores them behind
+base pointers; it ensures polymorphic deletion through Handler* remains safe and doesn’t introduce hidden
+synchronization, syscalls, or buffering flushes. In short, the destructor’s “do nothing” contract confirms
+RAII responsibilities stay with the components that actually allocate operating-system resources, reducing
+complexity and preventing accidental double-closes or lifetime confusion during shutdown paths.
+
+*/
+
+CgiHandler::~CgiHandler() {}
 // keep your buildEnv implementation as-is (the tests exercise it)
+
+
+
+
+
+/* 
+
+
+bool CgiHandler::handle(HttpRequest&, HttpResponse&, RequestContext&)
+Orchestrates a CGI request. It resolves the applicable CgiSpec by merging per-location overrides
+with server defaults; if none matches the extension, it returns false so other handlers can try.
+Next, it builds the environment, determines the absolute filesystem script path from the effective root
+plus full URL path (not stripping /cgi/...), and verifies readability. It then asks ctx.cgi_streamer to beginCgi,
+logging pipe FDs. If the request has no body, it proactively closes CGI stdin to unblock the script.
+It returns false to indicate asynchronous processing; the EventLoop and ClientHandler continue streaming output.
+
+
+*/
 
 bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx)
 {
@@ -212,13 +281,12 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 	reg.setSources(locMap, defMap);
 
 	const CgiSpec* spec = reg.findByExtension(ctx.cgi_ext);
-	if (!spec) return false; // not a CGI target; let other handlers try
-
+	if (!spec)
+		return false; // not a CGI target; let other handlers try
 	if (!ctx.cgi_streamer) {
 		res = ResponseFactory::makeText(500, "CGI unavailable\n", "Internal Server Error", true);
 		return true;
 	}
-
 	// 1) Build the CGI environment
 	std::vector<std::string> envv;
 	if (buildEnv(req, *ctx.vs, envv) <= 0) {
@@ -232,11 +300,13 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 		: (ctx.loc && !ctx.loc->root.empty() ? ctx.loc->root : ctx.vs->root);
 
 	std::string root = baseRoot;
-	if (!root.empty() && root[root.size() - 1] == '/') root.erase(root.size() - 1);
+	if (!root.empty() && root[root.size() - 1] == '/') 
+		root.erase(root.size() - 1);
 
 	// IMPORTANT: use the FULL request path so "/cgi/..." is preserved
 	std::string urlPath = req.getPath();                 // e.g. "/cgi/hello.py"
-	if (urlPath.empty() || urlPath[0] != '/') urlPath = "/" + urlPath;
+	if (urlPath.empty() || urlPath[0] != '/') 
+		urlPath = "/" + urlPath;
 
 	const std::string scriptPath = root + urlPath;       // "./www" + "/cgi/hello.py"
 
@@ -280,21 +350,13 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 	const bool has_body = (req.getBodyLength() > 0) || ctx.temp_file_used;
 
 	if (has_body) {
-	int inFD  = ctx.cgi_streamer->cgiStdinFD();
-	int outFD = ctx.cgi_streamer->cgiStdoutFD();
-	std::fprintf(stderr, "[CGI] register POLLOUT for inFD=%d; POLLIN for outFD=%d\n", inFD, outFD);
-
-		// Whatever your event-loop API is, ensure both registrations happen:
-		// loop.modifyFD(inFD,  POLLOUT | /* keep existing flags if you track them */);
-		// loop.modifyFD(outFD, POLLIN  | /* … */);
+		int inFD  = ctx.cgi_streamer->cgiStdinFD();
+		int outFD = ctx.cgi_streamer->cgiStdoutFD();
+		std::fprintf(stderr, "[CGI] register POLLOUT for inFD=%d; POLLIN for outFD=%d\n", inFD, outFD);
 	} else if (req.getMethod() != "POST") {
 		// For GET/HEAD with no body, close stdin so the CGI won’t hang waiting for EOF.
 		ctx.cgi_streamer->closeStdin();
 	}
-	/* if (!has_body && req.getMethod() != "POST") {
-		ctx.cgi_streamer->closeStdin();  // must set its fd to -1 internally
-	} */
-
 	// Async: EventLoop/ClientHandler will pump CGI pipes and stream output.
 	return false;
 }

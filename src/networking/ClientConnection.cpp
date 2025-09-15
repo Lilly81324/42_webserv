@@ -23,6 +23,22 @@
 
 static const std::size_t INMEM_BODY_LIMIT = 256 * 1024;
 
+
+/* 
+
+ClientConnection::ClientConnection(int fd, Server s, unsigned long long nowMs)*
+
+Initializes a per-client state machine: records server pointer, wraps socket in ConnectionIO, 
+constructs request/response objects, wires a CGIStreamer to the server’s EventLoop, 
+allocates a RouteDecision, and sets initial deadlines for header parsing. 
+It also discovers the local port via getsockname for virtual-server selection. 
+Default caps (header/body), keep-alive flags, progress counters, and a special 
+fixed_body_target_ sentinel are initialized. This constructor ensures the connection 
+starts in PH_READ_HEADERS, fully ready for the non-blocking pipeline, with all 
+invariants defined so later phases can safely assume consistent, initialized state.
+
+*/
+
 ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	: state(PH_READ_HEADERS),
 	  server(s),
@@ -67,6 +83,22 @@ ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 		}
 	}
 }
+
+
+/* 
+
+void ClientConnection::drainRingIntoBody()
+
+Moves bytes already read into the input ring into the request body sink 
+(RAM or temp-file). If a temp file is active, it writes in a loop handling 
+EINTR and unlikely regular-file EAGAIN; on hard error, it fails the request. 
+Updates body_received_, advances the ring with consumed, and stops when the known length is satisfied. 
+This helper is useful when body bytes arrived together with headers or when scheduling prefers staged draining. 
+Keeping this logic separate avoids mixing ring manipulation with parser code and ensures the server 
+honors Content-Length precisely without blocking.
+
+
+*/
 
 void ClientConnection::drainRingIntoBody()
 {
@@ -129,6 +161,22 @@ void ClientConnection::drainRingIntoBody()
 	}
 }
 
+/* 
+
+ClientConnection::~ClientConnection()
+
+Cleans up per-connection resources: deletes the routing context and body reader if allocated, 
+resets server pointer, and asks the HttpRequest to remove any temporary body file. 
+Destruction is designed to be safe from any state, including error or partially handled requests, 
+guaranteeing file descriptors and temporary files are not leaked. 
+Because connections may terminate from many paths (timeouts, client closes, errors), 
+consolidating cleanup here enforces RAII discipline and keeps the event-driven loop robust under stress, 
+preventing gradual resource loss across many concurrent clients.
+
+
+*/
+
+
 ClientConnection::~ClientConnection()
 {
 	if (server)
@@ -146,12 +194,45 @@ ClientConnection::~ClientConnection()
 	req.cleanupBodyFile();
 }
 
+
+
 // small helper
+
+/* 
+
+
+static int get_so_error(int fd)
+
+Queries SO_ERROR with getsockopt, returning the pending error (or errno if getsockopt fails). 
+Used to complete a non-blocking connect() during reverse-proxy setup. Rather than branching on connect’s immediate result, 
+the code defers connection success/failure checks to this helper—aligned with poll-driven architectures. 
+It’s crucial for correctness because non-blocking connects typically yield EINPROGRESS; the socket becomes writable later, 
+and SO_ERROR indicates final outcome. Centralizing this avoids duplicated boilerplate and 
+keeps connection completion logic straightforward inside the proxy tunneling pump.
+
+*/
+
+
 static int get_so_error(int fd) {
     int err = 0; socklen_t len = sizeof(err);
     if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) return errno;
     return err;
 }
+
+
+
+/* 
+
+bool ClientConnection::beginProxyTunnel(…, const HttpRequest& req) (no target path)
+
+Convenience overload that delegates to the full version, passing an empty target path so the 
+function derives it from the request (path plus optional query). This keeps handler code simple 
+when the upstream target equals the client’s path. Introducing a small wrapper avoids duplicating derivation logic, 
+ensures consistent header construction for upstream requests, and preserves a single place for timeout and buffer initialization. 
+It returns true to indicate the tunnel has been staged and will be driven asynchronously by the per-tick pump (serviceProxyTunnel).
+
+
+*/
 
 bool ClientConnection::beginProxyTunnel(int upstream_fd,
                                         const std::string& host,
@@ -165,6 +246,20 @@ bool ClientConnection::beginProxyTunnel(int upstream_fd,
                             connect_timeout_ms, io_idle_timeout_ms,
                             req, std::string());
 }
+
+
+/* 
+
+bool ClientConnection::beginProxyTunnel(…, const HttpRequest& req, const std::string& target_path)
+
+Initializes reverse-proxy state: marks proxy active, sets connect and idle deadlines, stores upstream fd/host/port, 
+and builds the upstream HTTP/1.1 request head (request line, Host, and a pass-through allowlist of safe headers). 
+Copies any already-buffered client body into a memory buffer for forwarding. It deliberately requests Connection: 
+close upstream for simplicity. No blocking occurs here; writing/reading is deferred to the main tick. 
+Returning true means the tunnel will progress via serviceProxyTunnel, which handles connect completion, 
+body forwarding, response streaming, backpressure, and timeouts.
+
+*/
 
 bool ClientConnection::beginProxyTunnel(int upstream_fd,
                                         const std::string& host,
@@ -215,7 +310,9 @@ bool ClientConnection::beginProxyTunnel(int upstream_fd,
     if (!H.keyExists("Host")) {
         head += "Host: ";
         head += proxy_.uh;
-        if (!proxy_.up.empty() && proxy_.up != "80") { head += ":"; head += proxy_.up; }
+        if (!proxy_.up.empty() && proxy_.up != "80") { 
+			head += ":"; head += proxy_.up; 
+		}
         head += "\r\n";
     } else {
         const std::string hv = H.get("Host");
@@ -267,11 +364,26 @@ bool ClientConnection::beginProxyTunnel(int upstream_fd,
     return true;
 }
 
+/* 
+
+void ClientConnection::serviceProxyTunnel()
+
+Drives the upstream tunnel each tick. 
+First completes the non-blocking connect by checking SO_ERROR and enforcing a connect 
+deadline. Then writes the staged upstream request head and any memory-buffered body in bounded 
+loops handling EAGAIN/EINTR. Next, it reads upstream response bytes into the client’s outbound ChainBuf, 
+closing and marking should_close when upstream closes. 
+Implements output-based backpressure (pause/resume reads) and an IO idle timeout: if no progress by deadline, 
+fails with 504. Importantly, this path must be integrated under the single poll loop to satisfy the project’s 
+“one poll for all I/O” rule.
+
+*/
 
 // Call from your per-connection tick (where you already pump IO)
 void ClientConnection::serviceProxyTunnel()
 {
-    if (!proxy_.active) return;
+    if (!proxy_.active)
+		return;
 
     bool progressed = false;
 
@@ -298,8 +410,10 @@ void ClientConnection::serviceProxyTunnel()
                 proxy_.to_up_off += (size_t)n;
                 progressed = true;
             } else {
-                if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) break;
-                if (n < 0 && errno == EINTR) continue;
+                if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
+					break;
+                if (n < 0 && errno == EINTR)
+					continue;
                 fail(502, "Bad Gateway");
                 ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
                 return;
@@ -315,8 +429,10 @@ void ClientConnection::serviceProxyTunnel()
                 proxy_.body_off += (size_t)n;
                 progressed = true;
             } else {
-                if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) break;
-                if (n < 0 && errno == EINTR) continue;
+                if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
+					break;
+                if (n < 0 && errno == EINTR)
+					continue;
                 fail(502, "Bad Gateway");
                 ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
                 return;
@@ -327,7 +443,8 @@ void ClientConnection::serviceProxyTunnel()
     // 3) read from upstream → queue to client outbound buffer
     if (proxy_.ufd >= 0) {
         std::vector<char>& tmp = io.getTmp();
-        if (tmp.size() < 64*1024) tmp.resize(64*1024);
+        if (tmp.size() < 64*1024)
+			tmp.resize(64*1024);
 
         for (;;) {
             ssize_t r = ::read(proxy_.ufd, &tmp[0], (int)tmp.size());
@@ -339,8 +456,10 @@ void ClientConnection::serviceProxyTunnel()
                 should_close = true; // simplest: close after upstream closes
                 break;
             } else {
-                if (errno == EWOULDBLOCK || errno == EAGAIN) break;
-                if (errno == EINTR) continue;
+                if (errno == EWOULDBLOCK || errno == EAGAIN)
+					break;
+                if (errno == EINTR)
+					continue;
                 fail(502, "Bad Gateway");
                 ::close(proxy_.ufd); proxy_.ufd = -1; proxy_.active = false;
                 return;
@@ -362,24 +481,98 @@ void ClientConnection::serviceProxyTunnel()
         proxy_.io_idle_deadline_ms = now_cached_ms + 15000; // or your configured value
     } else if (now_cached_ms >= proxy_.io_idle_deadline_ms) {
         fail(504, "Gateway Timeout");
-        if (proxy_.ufd >= 0) { ::close(proxy_.ufd); proxy_.ufd = -1; }
+        if (proxy_.ufd >= 0) { 
+			::close(proxy_.ufd); proxy_.ufd = -1; 
+		}
         proxy_.active = false;
         return;
     }
 }
 
-bool ClientConnection::isClosed() const { return state == PH_CLOSE; }
+/* 
+
+bool ClientConnection::isClosed() const
+
+Returns whether the connection’s state machine is in PH_CLOSE. 
+This is a simple predicate used by server lifecycle code to decide whether to release the connection object, 
+stop scheduling reads, or finalize teardown. Keeping a named query improves readability 
+where decisions depend on the terminal state versus intermediary write-drain states.
+
+*/
+
+
+bool ClientConnection::isClosed() const { 
+	return state == PH_CLOSE; 
+}
+
+
+
+/* 
+
+bool ClientConnection::hasPendingWrite() const
+
+Indicates if there are bytes queued to send to the client: either in the connection’s 
+ChainBuf or still pending from the CGI streamer. The event loop uses this to decide whether 
+to monitor POLLOUT for the client socket, preventing unnecessary wakeups and maintaining fairness across many connections. 
+It’s a cheap check that feeds into readiness updates.
+
+*/
+
 
 bool ClientConnection::hasPendingWrite() const
 {
 	return io.getChainBuf().getByteSize() > 0 || cgi.hasOutBytes();
 }
 
-bool ClientConnection::isReadPaused() { return io.getFlow().isReadPaused(); }
+
+/* 
+
+bool ClientConnection::isReadPaused()
+
+Returns the current input-flow pause flag from FlowControl. 
+Useful for higher layers (e.g., handlers) to adjust behavior under backpressure and for unit tests verifying waterline logic. 
+Keeping the accessor here avoids exposing internal flow-control structures directly
+
+
+*/
+
+bool ClientConnection::isReadPaused() { 
+	return io.getFlow().isReadPaused(); 
+}
+
+
+/* 
+
+void ClientConnection::close()
+
+Asks the server to release this connection (server->releaseConnection(this)), 
+centralizing ownership transfer and actual socket close. This indirection keeps ClientConnection focused on protocol and state, 
+while Server owns object pooling or deletion policies. It maintains architectural separation, 
+important for graceful shutdowns and reuse strategies.
+
+*/
+
+
 void ClientConnection::close()
 {
 	server->releaseConnection(this);
 }
+
+
+/* 
+
+bool ClientConnection::pumpCgiToSocket(std::size_t max_bytes)
+
+Moves up to max_bytes already-framed CGI bytes into the outbound buffer,
+then attempts a non-blocking write to the client. If progress occurs, it refreshes the write 
+deadline and keeps state in PH_WRITE. When the CGI is finished and the socket buffer empties, 
+it either closes (if should_close) or resets request/response for keep-alive. 
+This pump isolates “CGI → socket” concerns, decoupling them from the rest of the tick logic. 
+It ensures chunked framing correctness (handled inside CGIStreamer) 
+while preserving fairness and responsiveness.
+
+*/
+
 
 bool ClientConnection::pumpCgiToSocket(std::size_t max_bytes)
 {
@@ -432,11 +625,43 @@ bool ClientConnection::pumpCgiToSocket(std::size_t max_bytes)
 	return progressed || cgi.isActive() || (io.getChainBuf().getByteSize() > 0);
 }
 
+
+
+/* 
+
+bool ClientConnection::wantsRead()
+
+Returns whether the state machine currently desires socket reads: header, 
+route-select, precheck, or body phases. Helps the event dispatcher decide POLLIN interest without examining 
+internal state details elsewhere. 
+This improves clarity and avoids accidental reads during write-drain or close phases.
+
+
+*/
+
 bool ClientConnection::wantsRead()
 {
 	// We want read in header/body phases; can also allow lingering read in PH_CLOSE if you implement it
 	return state == PH_READ_HEADERS || state == PH_ROUTE_SELECT || state == PH_PRECHECK || state == PH_READ_BODY;
 }
+
+
+/* 
+
+void ClientConnection::onTick(unsigned long long now_ms)
+
+Heart of the per-connection scheduler. Updates cached time, 
+lets the CGI streamer enforce its deadlines, pulls CGI bytes into the outbound buffer, 
+applies backpressure hints to CGI stdout, services the reverse-proxy pump, 
+enforces connection-level deadlines (header/body/write/idle), performs non-blocking reads in eligible phases, 
+and advances the state machine (parse headers, route selection, prechecks, body read, route/build, write/next, close). 
+It also ensures fairness by bounding work, avoiding any errno-based branching after nb_read/nb_write, 
+honoring pause/resume policies, and quick-returning on terminal states. 
+This function ensures progress and responsiveness across thousands of concurrent connections.
+
+
+*/
+
 
 void ClientConnection::onTick(unsigned long long now_ms)
 {
@@ -570,9 +795,56 @@ void ClientConnection::onTick(unsigned long long now_ms)
 	}
 }
 
+/* 
+
+Moves already-framed CGI bytes (from CGIStreamer) into the connection’s outbound buffer and performs a bounded 
+non-blocking write to the client socket. It returns whether progress was made and advances timeouts. 
+The max_bytes cap enforces fairness so one response can’t monopolize the loop.
+
+Do we call it again?
+Yes—repeatedly, every tick while:
+
+CGIStreamer still has bytes, and/or
+
+the client socket is writable, and
+
+the connection is in a write/streaming phase.
+
+It’s not recursive; it’s driven by the event loop (on onTick() and/or client POLLOUT). 
+You keep calling it until either the outbound buffer drains, CGI ends, or backpressure says stop.
+
+Typical flow each tick:
+
+Pull new CGI bytes (CGIStreamer::takeOutBytes)
+
+If outbound not empty and socket writable → call pumpCgiToSocket()
+
+If drained and CGI finished → close or prepare next request (keep-alive)
+
+static const unsigned long long READ_TIMEOUT_MS = 15000;
+
+A read-progress deadline (15s). It’s compared against “last read progress” timestamps in 
+onTick() to fail stalled phases (header read, body read, or idle reads). 
+This guarantees no request can hang the connection, satisfying the project’s 
+“never hang indefinitely” rule. When exceeded, the connection typically fail()s with 408/504 
+(depending on context), flushes the error, then closes.
+
+ */
+
+
 bool pumpCgiToSocket(std::size_t max_bytes = 128u * 1024u);
 
 static const unsigned long long READ_TIMEOUT_MS = 15000;
+
+
+/* 
+
+ASCII case-insensitive equality. Used for comparing header names/values where HTTP is case-insensitive 
+(e.g., "Connection", "Transfer-Encoding", "chunked", "close"). 
+Keeping it ASCII avoids locale surprises and keeps the hot path tiny and predictable. 
+You’ll see it in places deciding keep-alive, TE: chunked, or other policy toggles.
+
+*/
 
 // (same helpers as before if you still need them)
 static inline bool ci_equal(const std::string &a, const std::string &b)
@@ -591,6 +863,20 @@ static inline bool ci_equal(const std::string &a, const std::string &b)
 	}
 	return true;
 }
+
+
+/* 
+
+Strict decimal parser for Content-Length. Returns -1 if empty, 
+contains non-digits, or overflows a signed 64-bit accumulator. 
+Using this tiny parser (instead of strtoll with permissive rules) 
+gives deterministic behavior and easy input validation. 
+Callers gate body readers: if it returns a non-negative value, 
+they select the fixed-length path; otherwise they reject (411/400) 
+or fall back to other body strategies as policy allows.
+
+*/
+
 static inline long long parse_content_length(const std::string &s)
 {
 	if (s.empty())
@@ -607,6 +893,20 @@ static inline long long parse_content_length(const std::string &s)
 	}
 	return v;
 }
+
+
+/* 
+
+void ClientConnection::parseHeaders()
+
+Feeds bytes from the input ring to the HTTP parser until a full header block is found (\r\n\r\n or \n\n). 
+Enforces a maximum header size to prevent abuse. On parse failure, calls fail with the parser-provided status. 
+When headers complete, transitions to PH_ROUTE_SELECT and arms the body timeout. 
+This code purposely avoids blocking: it only consumes available bytes, leaves the remainder for future ticks, 
+and resets deadlines as progress occurs. Careful ring management (consumed vs. contiguous pointer) 
+avoids copying and preserves performance under heavy load.
+
+*/
 
 // Feed bytes from ring into your HttpRequest parser until it reports headers done
 void ClientConnection::parseHeaders()
@@ -682,6 +982,21 @@ void ClientConnection::parseHeaders()
 	resetDeadline(HDR_TIMEOUT_MS);
 }
 
+
+
+/* 
+
+void ClientConnection::selectRouteOnce()
+
+Resolves the virtual server (by local port; placeholder “localhost” host), 
+runs preflight rules (RequestGuards::preflight), and records a RoutePlan skeleton. 
+It performs this exactly once per request and then moves to PH_PRECHECK. 
+Separating this step keeps routing concerns distinct from header parsing and body handling, 
+and ensures configuration (allowed methods, limits, return directives) are evaluated before heavy work. 
+It also caches the chosen virtual-server index for subsequent decisions, including temp-file directory or root resolution.
+
+*/
+
 void ClientConnection::selectRouteOnce()
 {
 	if (route_selected)
@@ -705,6 +1020,20 @@ void ClientConnection::selectRouteOnce()
 	state = PH_PRECHECK;
 	resetDeadline(BODY_TIMEOUT_MS);
 }
+
+
+/* 
+
+void ClientConnection::runPreflight()
+
+Analyzes headers via HeaderProcessor to decide body strategy (chunked vs. fixed length) and validate limits/semantics 
+(Expect: 100-continue, connection policy). Applies RequestGuards results, possibly failing early with accurate status 
+(413, 411, etc.). If a body is required, calls decideBodyReader (chunked or sized); then consumes any tail bytes that arrived with headers. 
+Initializes stall watchdog counters, transitions to PH_READ_BODY, and resets the body deadline. 
+This step centralizes correctness checks and ensures that the actual body phase never starts with inconsistent state or exceeded limits.
+
+
+*/
 
 void ClientConnection::runPreflight()
 {
@@ -771,6 +1100,22 @@ void ClientConnection::runPreflight()
 	state = PH_READ_BODY;
 	resetDeadline(BODY_TIMEOUT_MS);
 }
+
+
+
+/* 
+
+void ClientConnection::readBody()
+
+Streams request body from the ring into the selected reader (chunked decoder, in-RAM fixed, or temp-file writer). 
+Enforces total post-decode cap, runs two watchdogs (body progress and flush progress), and errors on stalls (408) 
+or insufficient storage (507). When complete—either reaching the fixed length and flushing pending, 
+or chunked reader reporting done—it advances to PH_ROUTE and arms write deadlines. 
+By handling backpressure and disk flushing incrementally, it allows arbitrarily large uploads without blocking, 
+honoring server limits configured per location or server block.
+
+
+*/
 
 // --- in ClientConnection.cpp ---
 void ClientConnection::readBody()
@@ -873,6 +1218,23 @@ void ClientConnection::readBody()
 	resetDeadline(WR_TIMEOUT_MS);
 }
 
+
+
+/* 
+
+
+void ClientConnection::routeAndBuild()
+
+Delegates to ServerPipeline::processRequest to choose and run a handler
+(static, upload, CGI, proxy, put/patch, return). 
+Sets keep-alive policy from request version and Connection header, ensures default response headers, 
+serializes the response into the outbound buffer, and transitions to PH_WRITE. If the handler is asynchronous (e.g., CGI/proxy), 
+it still moves to write phase where streaming progress occurs while the loop continues pumping. 
+Centralizing serialization avoids duplication and guarantees 
+Date/Server/Connection and Content-Length are correct or synthesized as needed.
+
+*/
+
 void ClientConnection::routeAndBuild()
 {
 	// Let the pipeline decide and (possibly) start CGI.
@@ -921,6 +1283,21 @@ void ClientConnection::routeAndBuild()
 	resetDeadline(WR_TIMEOUT_MS);
 }
 
+
+/* 
+
+void ClientConnection::finishWriteOrNext()
+
+If outbound bytes remain, keep writing later. 
+When CGI isn’t active and no bytes remain, either close (for non-keep-alive) or reset all per-request state 
+(headers/body counters, plan, context, request/response objects, CGI error latch, and fixed_body_target_) 
+and transition back to PH_READ_HEADERS. If unread bytes are already in the ring, 
+immediately call parseHeaders to pipeline the next request on the same connection. 
+This function implements HTTP/1.1 keep-alive efficiently while ensuring clean state between requests.
+
+
+*/
+
 void ClientConnection::finishWriteOrNext()
 {
 	if (io.getChainBuf().getByteSize() != 0)
@@ -959,6 +1336,20 @@ void ClientConnection::finishWriteOrNext()
 		parseHeaders();
 }
 
+/* 
+
+void ClientConnection::fail(int code, const char reason)*
+
+Builds a plain-text error response via ResponseFactory::makeText, 
+queues it, marks should_close, switches to PH_WRITE, resets write deadlines, 
+and then calls finishWriteOrNext to progress teardown. Centralizing failure handling ensures consistent headers, 
+connection policy, and serialization across all error sites (parsing, 
+timeouts, storage errors, proxy/CGI failures). It also resets body-length bookkeeping to avoid inconsistent post-error state. 
+This uniform path keeps the server’s behavior predictable for clients and simplifies reasoning about termination semantics.
+
+*/
+
+
 void ClientConnection::fail(int code, const char *reason)
 {
 	res = ResponseFactory::makeText(code, "", reason ? reason : "", true);
@@ -977,6 +1368,22 @@ void ClientConnection::fail(int code, const char *reason)
 	finishWriteOrNext();
 }
 
+
+/* 
+
+void ClientConnection::decideBodyReader() (chunked)
+
+Chooses ChunkedReader for Transfer-Encoding: chunked, passing temp-buffer and a 
+configured temp directory. Marks fixed_body_target_ unknown. 
+The chunked reader supports disk spilling to avoid memory blowup and exposes completion and 
+pending-flush checks used by watchdog logic. This selection ensures the 
+server properly de-chunks before handing data to handlers (e.g., CGI or upload), 
+satisfying the specification that CGIs expect EOF-terminated bodies, not raw chunked framing.
+
+
+
+*/
+
 void ClientConnection::decideBodyReader() // chunked
 {
 	if (body)
@@ -988,6 +1395,21 @@ void ClientConnection::decideBodyReader() // chunked
 							 server->getConfig().servers()[vs_idx].client_body_temp_path);
 	fixed_body_target_ = (std::size_t)-1; // unknown/chunked
 }
+
+
+
+/* 
+
+void ClientConnection::decideBodyReader(std::size_t content_length)
+
+For fixed-length bodies, sets fixed_body_target_, 
+then selects in-memory accumulation if length is small (INMEM_BODY_LIMIT) and within configured cap, 
+else opens a FileBodyReader under the configured temp directory. If file open fails, replies 507. 
+This decision balances memory efficiency with performance: small bodies stay fast in RAM; 
+large ones spill to disk safely. It integrates tightly with later stall/flush watchdogs and the final completion checks before routing.
+
+
+*/
 
 void ClientConnection::decideBodyReader(std::size_t content_length)
 {

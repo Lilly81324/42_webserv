@@ -8,7 +8,9 @@ ContentLenghtReader::ContentLenghtReader(std::size_t total_len, HttpRequest &req
 
 std::size_t ContentLenghtReader::consume(const char *data, std::size_t len)
 {
-	if (done_ || got_ >= need_) { done_ = true; return 0; }
+	if (done_ || got_ >= need_) { 
+		done_ = true; 
+		return 0; }
 
 	const std::size_t remaining = need_ - got_;
 	const std::size_t take = (len < remaining) ? len : remaining;
@@ -17,6 +19,7 @@ std::size_t ContentLenghtReader::consume(const char *data, std::size_t len)
 		req_.appendBody(data, take);  // write straight into HttpRequest::body
 		got_ += take;
 	}
-	if (got_ >= need_) done_ = true;
+	if (got_ >= need_)
+		done_ = true;
 	return take;
 }

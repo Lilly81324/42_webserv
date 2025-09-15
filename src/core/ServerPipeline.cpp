@@ -18,7 +18,6 @@ date: 8/10/2025
 #include "RequestContext.h"
 #include "ResponseFactory.h"
 #include "UploadHandler.h"
-
 #include <sys/stat.h>
 #include <sstream>
 #include <cstdio>
@@ -28,18 +27,38 @@ date: 8/10/2025
 
 // Build an RFC-compliant Allow header from a location's allowed_methods,
 // making sure HEAD is present if GET is allowed.
+
+/* 
+
+    static std::string build_allow_header(const Location* loc)
+
+Builds a correct Allow header from a location’s configured allowed_methods. 
+It first copies the list, then ensures HEAD is included whenever GET is allowed (RFC practice). 
+Next it sorts and deduplicates the methods, 
+and finally joins them with commas into a single header value (e.g., "GET, HEAD, POST"). 
+Centralizing this logic avoids subtle bugs where different handlers might emit inconsistent 
+Allow sets, and guarantees 405 responses always advertise exactly which methods are permitted on that route. 
+The result is used when routing yields a HK_ERROR with status 405 Method Not Allowed.
+
+*/
+
+
 static std::string build_allow_header(const Location* loc)
 {
-    if (!loc) return std::string();
+    if (!loc)
+        return std::string();
 
     std::vector<std::string> allow = loc->allowed_methods;
     bool hasGet = false, hasHead = false;
 
     for (size_t i = 0; i < allow.size(); ++i) {
-        if (allow[i] == "GET")  hasGet  = true;
-        if (allow[i] == "HEAD") hasHead = true;
+        if (allow[i] == "GET") 
+            hasGet  = true;
+        if (allow[i] == "HEAD")
+            hasHead = true;
     }
-    if (hasGet && !hasHead) allow.push_back("HEAD");
+    if (hasGet && !hasHead)
+        allow.push_back("HEAD");
 
     std::sort(allow.begin(), allow.end());
     allow.erase(std::unique(allow.begin(), allow.end()), allow.end());
@@ -51,6 +70,20 @@ static std::string build_allow_header(const Location* loc)
     }
     return line;
 }
+
+
+/* 
+
+bool ServerPipeline::processRequest(const ServerConfig& cfg, int vs_indx, HttpRequest& req, HttpResponse& res, RouteDecision& decision, CGIStreamer* cgi_streamer, ClientConnection* self)
+
+Core orchestrator for one request. It assembles a RequestContext from the resolved virtual server, decision (effective root, relative path, 
+matched prefix, CGI extension, upstream target), and runtime objects (client connection, CGI streamer). If no VS exists, it returns a 500 text response. 
+Otherwise, it selects exactly one handler from the decision kind: Static, CGI, Proxy, Put/Patch, or Upload. 
+For HK_ERROR, it either builds a 405 (including Allow from build_allow_header) or uses ResponseFactory::makeErrorOrPage for configured error pages/fallback text. 
+It then invokes handle() once, deletes the handler, and returns whether the response is complete (synchronous) or will continue streaming asynchronously.
+
+
+*/
 
 bool ServerPipeline::processRequest(const ServerConfig &cfg,
                                     int vs_indx,

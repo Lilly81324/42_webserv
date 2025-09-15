@@ -21,12 +21,11 @@ bool isMethodValid(const std::string &m) {
     return (m=="GET" || m=="HEAD" || m=="POST" || m=="PUT" || m=="PATCH" || m=="DELETE");
 }
 
-
-
 /**
  * Wether given Path is a valid one
  * @returns true if it is
  */
+
 bool isPathValid(const std::string &in)
 {
 	if (in[0] != '/')
@@ -52,7 +51,6 @@ bool isHttpVerValid(const std::string &in)
 {
     return (in == "HTTP/1.0" || in == "HTTP/1.1");
 }
-
 
 /**
  * Wether given Header Key is valid
@@ -351,7 +349,8 @@ size_t HttpRequest::getBodyLength(void) const
 
 void HttpRequest::appendBody(const char* data, size_t len)
 {
-    if (len) body.insert(body.end(), data, data + len);
+    if (len)
+		body.insert(body.end(), data, data + len);
 }
 
 

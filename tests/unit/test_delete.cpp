@@ -29,6 +29,41 @@ static void makeFile(const char *file, const std::string &content)
 	}
 }
 
+static bool readWholeFile(const std::string &path, std::vector<char> &out)
+{
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0)
+        return false;
+    char buf[8192];
+    ssize_t n;
+    while ((n = ::read(fd, buf, sizeof(buf))) > 0)
+        out.insert(out.end(), buf, buf + n);
+    int saved = errno;
+    ::close(fd);
+    return (n >= 0) || (saved == 0);
+}
+
+bool	compareBody(std::vector<char> &target, const std::string &fileName)
+{
+	unsigned int pos = 0;
+	std::vector<char> goal;
+
+	if (!readWholeFile(fileName.c_str(), goal))
+		return (false);
+	if (target.size() != goal.size())
+		return (false);
+	for (std::vector<char>::const_iterator it = target.begin();
+		it != target.end(); it++)
+	{
+		std::cout << "Comparing " << *it << " and " << goal[pos] << std::endl;
+		if (*it != goal[pos])
+			return (false);
+		pos++;
+	}
+	return (true);
+}
+
+
 /**
  * @brief Checks if a file has specified contents
  * @param length Amount of bytes the Content will be
@@ -102,6 +137,8 @@ TEST_CASE("Delete Static Handler", "[handler][static][delete]")
 	SECTION("Invalid File Deletion")
 	{
 		{	// Deleting non existant
+			// Currenty gets stopped by file check before it can be checked wether its folder or not
+			// So it should normally return 403, but currently returns 404
 			HttpRequest req;
 			HttpResponse res;
 
@@ -109,8 +146,9 @@ TEST_CASE("Delete Static Handler", "[handler][static][delete]")
 			std::string parse;
 			parse = "DELETE / HttpVersion/1.1\r\nContent-Length: 1\r\n\r\nX";
 			req.parse(parse.c_str(), parse.length());
-			REQUIRE(handle.handle(req, res, ctx) == true);
+			REQUIRE(handle.handle(req, res, ctx) == false);
 			REQUIRE(res.getStatusCode() == HTTP_NOT_FOUND);
+			REQUIRE(compareBody(res.body, std::string(cwd) + std::string("/www/errors/404.html")));
 		}
 		{	// Deleting in bad folder
 			// TODO: Add way of testing for DELETEing files in directories that dont allow it

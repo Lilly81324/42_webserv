@@ -32,6 +32,10 @@ Date: 8/10/2025
 #include <map>
 #include <limits.h> // PATH_MAX
 
+// In Case the StaticHandler wants to give back an Error Page, 
+// but cant find the specified Error Page File, it returns this as Response
+#define FALLBACK_404 "<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head>\n<body><h1>Fallback 404: Not Found</h1><p>The requested resource was not found.</p></body></html>"
+
 class StaticHandler : public Handler
 {
 	public:

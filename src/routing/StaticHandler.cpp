@@ -186,12 +186,35 @@ static bool prepareResponse(HttpResponse &res, bool state, int status)
 	return (prepareResponse(res, state));
 }
 
-// Try to serve a configured error page, e.g. error_page 404 /errors/404.html;
-// Falls back to /errors/404.html under the effective root if not configured.
-// NOTE: We do not change status-line (serializer sends 200). This only swaps the body.
-// Try to serve a configured error page at server level (VirtualServer).
-// Falls back to /errors/404.html (or 500) under the effective root.
-// NOTE: We do not change the status line (serializer still emits 200).
+/**
+ * @brief Prepares a fallback Response
+ * @param res Response to set
+ * 
+ * In the case, that the Handler wants to give back an Error Page, 
+ * but the file for that page is missing, this should be called
+ */
+static bool fallback404(HttpResponse &res)
+{
+	res.clearBody();
+	res.setBody(FALLBACK_404);
+	return (false);
+}
+
+/**
+ * @brief Prepare Response to be based off of an Error file
+ * @param code Http Code that specifies the Error file to look for (404 -> /errors/404.html)
+ * @param ctx Context, for finding the Error files
+ * @param res Response to be set
+ * @param is_head Set by the HEAD method (Legacy)
+ * 
+ * Sets the given code as Response code
+ * Then searches if it can find the Error Page in the Virtual Servers Pages
+ * If not, then it uses some fallback file names
+ * Then builds the filePath for that Error File
+ * If the Error File cannot be accessed or read, uses a fallback response (404)
+ * If the file could be found, use it as Response body
+ * Then prepare rest of Response
+ */
 static bool serveErrorPage(int code,
                             const RequestContext& ctx,
                             HttpResponse& res,
@@ -208,7 +231,7 @@ static bool serveErrorPage(int code,
             uri = it->second;
     }
     if (uri.empty()) {
-        // Sensible default if nothing configured
+        // If no specific error page found for the given error code, use theese fallbacks
         if (code == 404) uri = "/errors/404.html";
 		else if (code == 403) uri = "/errors/403.html";
         else if (code == 500) uri = "/errors/500.html";
@@ -216,32 +239,38 @@ static bool serveErrorPage(int code,
     }
 
     // 2) Build filesystem path: effective_root (or loc root, else vs root) + uri
-    const std::string base = !ctx.effective_root.empty()
-        ? ctx.effective_root
-        : ((ctx.loc && !ctx.loc->root.empty()) ? ctx.loc->root : ctx.vs->root);
-
-    std::string rel = uri;
-    if (rel.empty() || rel[0] != '/') rel = "/" + rel;
-
-    std::string fs = base;
-    if (!fs.empty() && fs[fs.size()-1] == '/') fs.erase(fs.size()-1);
-    fs += rel;
+	std::string base;
+	// Try to use Virtual Servers root as root for errors
+	if (ctx.vs && !ctx.vs->root.empty())
+		base = ctx.vs->root;
+	else
+	{
+    	// Fallback, make current path as root (/home/whatever/www)
+		char *c_path = getcwd(NULL, 0);
+		base = "/";
+		if (c_path)
+		{
+			base = std::string(c_path) + std::string("/www");
+			free(c_path);
+		}
+	}
 
     // 3) Canonicalize and safety check
+    std::string path = base + uri;
     std::string canonBase, canonErr;
     if (!realpathString(base, canonBase) ||
-        !realpathString(fs, canonErr) ||
+        !realpathString(path, canonErr) ||
         !isSubPath(canonBase, canonErr))
-        return (prepareResponse(res, true));
+		return (fallback404(res));
 
     // 4) Read and emit the error file
     struct stat st;
     if (::stat(canonErr.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
-        return (prepareResponse(res, true));
-
+		return (fallback404(res));
+	
     std::vector<char> file;
     if (!readWholeFile(canonErr, file))
-        return (prepareResponse(res, true));
+		return (fallback404(res));
 
     res.body.clear();
     if (!is_head)
@@ -254,7 +283,7 @@ static bool serveErrorPage(int code,
     cl << static_cast<unsigned long>(file.size());
     res.headers.set(HDR_CONTENT_LENGTH, cl.str());
     res.bodyLength = file.size();
-    return true;
+    return false;
 }
 
 // ---------------- constructors (linker needed these) ----------------
@@ -393,17 +422,12 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
     // Only GET/HEAD; soft-fail others with empty body (serializer always sends 200).
     const std::string m = req.getMethod();
     const bool is_head = (m == "HEAD");
-    (void)is_head;
 
     // Some Test Cases write POST requests, that end up falling into here
     // They require this exact behaviour to be treated with 200, and continued later
 	// Frankly, this should probably not be here, and looks like a band aid fix
-    if (m != "GET" && m != "DELETE" && !is_head) {
-        res.body.clear();
-        res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-        res.headers.set(HDR_CONTENT_LENGTH, "0");
-        res.bodyLength = 0;
-        return true;
+    if (m != "GET" && m != "DELETE" && m != "HEAD") {
+        return (prepareResponse(res, true));
     }
 
     // Prefer router/pipeline-computed paths
@@ -430,8 +454,6 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         !isSubPath(canonRoot, canonPath))
     {
         // Illegal traversal or bad root — show 404 page if available
-        // this oen here!
-        // Catches target not existing
         return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
     }
 
@@ -444,8 +466,6 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
 	res.setStatus(HTTP_BAD_REQUEST);
 	res.clearBody();
 	res.headers.set(HDR_CONTENT_TYPE, "text/plain");
-	res.headers.set(HDR_CONTENT_LENGTH, "0");
-	res.bodyLength = 0;
 	return (false);
 	
 }

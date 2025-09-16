@@ -61,7 +61,7 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 			
 			std::remove(file);
 			std::string parse;
-			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_FILE_CREATED);
@@ -74,7 +74,7 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 
 			std::remove(file);
 			std::string parse;
-			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 1\r\n\r\nX";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 1\r\n\r\nX";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode()  == HTTP_FILE_CREATED);
@@ -93,7 +93,7 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 				stream.close();
 			}
 			std::string parse;
-			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 1\r\n\r\nX";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 1\r\n\r\nX";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -118,7 +118,7 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 				stream.close();
 			}
 			std::string parse;
-			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\n\r\n";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\n";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_FILE_CREATED);
@@ -143,7 +143,7 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 			}
 			chmod(file, S_IRUSR | S_IRGRP | S_IROTH);
 			std::string parse;
-			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == false);
 			REQUIRE(res.getStatusCode() == HTTP_FORBIDDEN);
@@ -168,7 +168,7 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 			}
 			chmod(bodyFile, 0);
 			std::string parse;
-			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\n\r\n";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\n";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == false);
 			REQUIRE(res.getStatusCode() == HTTP_FORBIDDEN);
@@ -208,7 +208,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = "PATCH / HttpVersion/1.1\r\nContent-Length: 7\r\nContent-Type: application/vnd.webserv.append\r\n\r\nxXNEWXx";
+			parse = "PATCH / HTTP/1.1\r\nContent-Length: 7\r\nContent-Type: application/vnd.webserv.append\r\n\r\nxXNEWXx";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -231,7 +231,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = "PATCH / HttpVersion/1.1\r\nContent-Length: 7\r\n" + std::string(HDR_PATCH_OFFSET) + ": 2\r\nContent-Type: application/vnd.webserv.overwrite\r\n\r\nxXNEWXx";
+			parse = "PATCH / HTTP/1.1\r\nContent-Length: 7\r\n" + std::string(HDR_PATCH_OFFSET) + ": 2\r\nContent-Type: application/vnd.webserv.overwrite\r\n\r\nxXNEWXx";
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -254,7 +254,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = "PATCH / HttpVersion/1.1\r\n" \
+			parse = "PATCH / HTTP/1.1\r\n" \
 			"Content-Length: 7\r\n" + \
 			std::string(HDR_PATCH_OFFSET) + ": 999999999\r\n" +\
 			"Content-Type: application/vnd.webserv.overwrite\r\n" + \
@@ -282,7 +282,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = std::string("PATCH / HttpVersion/1.1\r\n") + \
+			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
 			"Content-Type: application/vnd.webserv.overwrite\r\n" + \
 			"\r\n" + \
@@ -318,7 +318,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = std::string("PATCH / HttpVersion/1.1\r\n") + \
+			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
 			"Content-Type: application/vnd.webserv.append\r\n" + \
 			"\r\n";
@@ -346,7 +346,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = std::string("PATCH / HttpVersion/1.1\r\n") + \
+			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
 			"\r\n" + \
 			"xXNEWXx";
@@ -374,7 +374,7 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = std::string("PATCH / HttpVersion/1.1\r\n") + \
+			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
 			"Content-Type: application/vnd.webserv.bogus\r\n" + \
 			"\r\n" + \

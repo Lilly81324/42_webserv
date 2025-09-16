@@ -1,7 +1,6 @@
 // src/networking/FileBodyReader.cpp  (std98)
 
 #include "FileBodyReader.h"
-
 #include <cerrno>
 #include <cstring>
 #include <vector>
@@ -14,16 +13,16 @@
 // ---- tiny helpers (std98) ----
 std::string FileBodyReader::join_path(const std::string &a, const std::string &b)
 {
-	if (a.empty()) return b;
-	if (a[a.size() - 1] == '/') return a + b;
+	if (a.empty())
+		return b;
+	if (a[a.size() - 1] == '/')
+		return a + b;
 	return a + "/" + b;
 }
 
 const std::string& FileBodyReader::get_path() const {
     return path;
 }
-
-
 
 // Build a mkstemp template like "<dir>/<prefix>.XXXXXX"
 std::string FileBodyReader::make_template(const std::string &dir, const std::string &prefix)
@@ -59,7 +58,8 @@ bool FileBodyReader::ensure_open()
     // try configured dir first
     std::string tmpl = make_template(dir, prefix);
     std::vector<char> cbuf; cbuf.reserve(tmpl.size() + 1);
-    for (std::size_t i = 0; i < tmpl.size(); ++i) cbuf.push_back(tmpl[i]);
+    for (std::size_t i = 0; i < tmpl.size(); ++i)
+		cbuf.push_back(tmpl[i]);
     cbuf.push_back('\0');
 
     int raw = ::mkstemp(&cbuf[0]); // 0600
@@ -73,7 +73,8 @@ bool FileBodyReader::ensure_open()
     std::string fallbackDir = "/tmp";
     tmpl = make_template(fallbackDir, prefix);
     cbuf.clear();
-    for (std::size_t i = 0; i < tmpl.size(); ++i) cbuf.push_back(tmpl[i]);
+    for (std::size_t i = 0; i < tmpl.size(); ++i)
+		cbuf.push_back(tmpl[i]);
     cbuf.push_back('\0');
 
     raw = ::mkstemp(&cbuf[0]);
@@ -82,7 +83,7 @@ bool FileBodyReader::ensure_open()
 
     path.assign(&cbuf[0]);
     fd.reset(raw);
-    dir = fallbackDir; // remember where we actually created it
+    dir = fallbackDir;
     return true;
 }
 
@@ -140,7 +141,8 @@ std::size_t FileBodyReader::flush_to_disk(std::size_t max_bytes)
 
 	const char *p = &pending[0] + pending_off;
 	std::size_t n = pending.size() - pending_off;
-	if (n > max_bytes) n = max_bytes;
+	if (n > max_bytes)
+		n = max_bytes;
 
 	ssize_t w = ::write(fd.get(), p, n);
 	if (w > 0)

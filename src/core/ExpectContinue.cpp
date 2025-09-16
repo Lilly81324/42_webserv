@@ -21,7 +21,9 @@ static std::string rtrim(const std::string &s)
 		--i;
 	return s.substr(0, i);
 }
-static std::string trim(const std::string &s) { return rtrim(ltrim(s)); }
+static std::string trim(const std::string &s) { 
+	return rtrim(ltrim(s)); 
+}
 
 static std::string to_lower(const std::string &s)
 {

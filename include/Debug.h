@@ -1,5 +1,5 @@
 #ifndef DEBUG_CGI
-#define DEBUG_CGI 0
+#define DEBUG_CGI 1
 #endif
 
 #pragma once

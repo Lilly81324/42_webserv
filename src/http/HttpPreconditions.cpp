@@ -56,6 +56,26 @@ static std::string trim_ws(const std::string& s)
 
 
 
+/**
+ * Splits string into substrings, based on commas
+ * Removes spaces and tabs before and after commas
+ */
+
+
+ /*  
+ 
+	static void split_commas(const std::string& s, std::vector<std::string>& out)
+
+	Splits a comma-separated header value into individual tokens and trims each token with trim_ws. 
+	Used for headers like If-None-Match and If-Match, which allow lists of validators (e.g., "etag1", W/"etag2"). 
+	Producing a clean vector simplifies subsequent iteration and comparison without repeatedly scanning the original string. 
+	This function deliberately avoids regex and complex parsing for performance and portability. 
+	Having a single, well-defined splitter keeps behavior consistent across different precondition checks, 
+	preventing subtle bugs where one path treats whitespace or empty items differently from another. 
+	It’s the foundation for reliable multi-ETag evaluation.
+ 
+ */
+
 static void split_commas(const std::string& s, std::vector<std::string>& out) {
     out.clear();
     std::string cur;

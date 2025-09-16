@@ -1,5 +1,6 @@
 #include "ServerConfig.h"
 #include "HTTPCODES.h"
+
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -12,23 +13,6 @@
 
 
 
-/* 
-
-static std::string makeAbsolute(const std::string& path)
-
-Canonicalizes configuration paths using realpath, 
-returning an absolute, symlink-resolved filesystem path when possible, 
-else the original on failure. Using absolute paths makes later joins, 
-safety checks, and error reporting deterministic across working directories. 
-It prevents surprises where relative root, upload_store, or client_body_temp_path might refer 
-to different places depending on how the daemon is launched. Centralizing path resolution 
-here keeps parsing code clean and avoids scattering realpath calls throughout modules. Even when resolution 
-fails (nonexistent files at parse time), returning the input allows delayed existence 
-checks elsewhere without throwing, supporting flexible workflows.
-
-
-*/
-
 static std::string makeAbsolute(const std::string &path) {
 	char buf[PATH_MAX];
 	if (::realpath(path.c_str(), buf))
@@ -37,23 +21,6 @@ static std::string makeAbsolute(const std::string &path) {
 }
 
 // ---------- tiny helpers (only those we use) ----------
-
-
-/* 
-
-static bool parseUnsigned(const std::string& s, int& out)
-
-Strict decimal parser for small non-negative integers used for ports, weights, 
-timeouts, and simple numeric directives. Rejects empty strings and non-digits, 
-accumulates in a long, and applies a conservative guard to avoid pathological 
-growth before casting to int. Returning false instead of throwing lets higher-level 
-code decide error wording and context. This tiny helper keeps token processing lightweight, 
-independent of locale, and deterministic—important for parsing configuration reliably in constrained environments. 
-Its simplicity also improves testability and avoids tricky edge cases introduced by permissive C library conversions.
-
-*/
-
-
 static bool parseUnsigned(const std::string &s, int &out)
 {
 	if (s.empty())
@@ -71,20 +38,6 @@ static bool parseUnsigned(const std::string &s, int &out)
 	return true;
 }
 
-
-/* 
-
-static void validateErrorStatusOrThrow(const std::string& raw)
-
-Validates that an error_page directive’s status code token is a legal HTTP error status (between 400 and 599). 
-It uses parseUnsigned and the project’s HTTP constants, throwing std::runtime_error with a precise message 
-when the value is missing, malformed, or outside range. 
-Doing strict validation early prevents nonsensical mappings (e.g., mapping 200 or negative numbers to error pages), 
-which would later confuse response selection and testing. 
-Centralizing this validation keeps the error_page parsing clear and consistent with other status-code checks in the server.
-
-*/
-
 static void validateErrorStatusOrThrow(const std::string &raw)
 {
 	int code = -1;
@@ -97,20 +50,6 @@ static void validateErrorStatusOrThrow(const std::string &raw)
 
 // ---------- ServerConfig impl ----------
 
-/* 
-
-ServerConfig::ServerConfig()
-
-Constructs a fresh configuration with empty server list and sensible global defaults: 
-sessions disabled, cookie attributes blank, MIME map and CGI defaults empty. 
-This provides a neutral baseline before parsing any text, ensuring every field has a defined value. 
-The design avoids unnecessary dynamic allocation and leaves ownership to normal STL containers, 
-simplifying teardown and reloads. Having a clean base state makes partial parsing safe, 
-because later functions can reset or append without risking stale data from previous loads.
-
-
-*/
-
 ServerConfig::ServerConfig()
 	: _servers(), session_enabled(false), session_cookie_name(), session_max_age(0), session_secure(false), session_http_only(false), session_same_site(), mime_mapping(), cgi_defaults()
 {
@@ -118,57 +57,16 @@ ServerConfig::ServerConfig()
 
 ServerConfig::~ServerConfig() {}
 
-
-/* 
-
-void ServerConfig::push_back(const VirtualServer& vs)
-
-Appends an already-constructed VirtualServer to the internal list. 
-This is used by the parser once a server { ... } block completes successfully. 
-Keeping a thin method rather than exposing the vector directly makes intent clear and offers a single place to add future invariants 
-(e.g., index or cross-validation) if desired. 
-It maintains symmetry with other helper methods and preserves encapsulation of the server list.
-
-
-*/
-
 void ServerConfig::push_back(const VirtualServer &vs)
 {
 	_servers.push_back(vs);
 }
-
-/* 
-
-bool ServerConfig::canOpen(const char* path) const
-
-Quick existence/readability probe for configuration files using std::ifstream. 
-Returns true if the file stream opens successfully, without reading contents. 
-Useful for early checks and better error messages before invoking the full parser. 
-By not throwing, it supports CLI behavior like “file not found” without a stack trace, 
-keeping UX friendly. It’s intentionally conservative—subsequent parsing still handles I/O errors robustly.
-
-
-*/
 
 bool ServerConfig::canOpen(const char *path) const
 {
 	std::ifstream f(path);
 	return f.good();
 }
-
-
-/* 
-
-std::string ServerConfig::readWholeFile(const std::string& path)
-
-Reads an entire configuration file into a string buffer (std::ostringstream << rdbuf()), 
-throwing with context if the file can’t be opened. Isolating file I/O here keeps parseFile small and testable, 
-and allows parseString to be exercised independently with in-memory text. Using binary mode avoids platform-specific 
-newline transformations so tokenization sees raw characters. Centralizing the “read all” 
-behavior also simplifies future enhancements like size caps or informative diagnostics.
-
-
-*/
 
 std::string ServerConfig::readWholeFile(const std::string &path)
 {
@@ -181,21 +79,6 @@ std::string ServerConfig::readWholeFile(const std::string &path)
 	oss << f.rdbuf();
 	return oss.str();
 }
-
-/* 
-
-std::vector<std::string> ServerConfig::tokenize(const std::string& data)
-
-A minimal tokenizer for nginx-style config:
-Skips # comments to end of line.
-Splits on whitespace.
-Emits {, }, ; as standalone tokens.
-Accumulates other characters into words.
-There’s no string-literal or escape processing—intentionally simple and predictable for this project’s grammar. 
-Producing a flat token stream decouples lexing from parsing, making errors easier to report with token indices. 
-The approach minimizes dependencies, allocations, and complexity while supporting the directives used.
-
-*/
 
 std::vector<std::string> ServerConfig::tokenize(const std::string &data)
 {
@@ -248,18 +131,6 @@ std::vector<std::string> ServerConfig::tokenize(const std::string &data)
 		out.push_back(cur);
 	return out;
 }
-
-
-/* 
-
-static std::string expectWord(std::size_t& i, const std::vector<std::string>& t) (anonymous namespace)
-
-Fetches the next token as a “word,” advancing the index or throwing “unexpected end” if no token remains. 
-Centralizing this guard avoids repetitive bounds checks scattered through parsing logic and yields clearer error messages. 
-It’s used for directives expecting an immediate parameter, like root, server_name entries, or health_path. 
-The helper’s simplicity contributes to robust, readable parser code.
-
-*/
 
 namespace
 {
@@ -321,20 +192,6 @@ namespace
 	}
 
 } // anonymous namespace
-
-
-/* 
-
-void ServerConfig::parseTokens(const std::vector<std::string>& tok)
-
-The main recursive-descent style parser over a flat token vector. Supports:
-Global blocks: types { ext mime; }, global cgi .ext [bin] timeout;, session settings, global upstream NAME { ... }.
-Server blocks: server { listen ...; server_name ...; root ...; index ...; error_page ...; client_body_temp_path ...; client_max_body_size ...; upstream ...; location ... }.
-Location blocks: root, index, autoindex on|off, methods (GET/POST/DELETE), upload_dir, cgi, proxy_pass POOL, rate-limit, allow_put/allow_patch/generate_etag/client_max_body_size, try_files, return CODE [target], allow/deny, upload_store, upload_overwrite, upload_max_file_size.
-It throws clear exceptions on syntax/semantic errors, accumulates VirtualServers, and defers uniqueness checks.
-
-
-*/
 
 void ServerConfig::parseTokens(const std::vector<std::string> &tok)
 {
@@ -770,6 +627,7 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
 						// tolerate stray semicolons inside location block
 						if (lkw == ";")
 							continue;
+
 						if (lkw == "root")
 						{
 						loc.root = makeAbsolute(expectWord(i, tok));
@@ -1012,22 +870,6 @@ void ServerConfig::parseTokens(const std::vector<std::string> &tok)
 	}
 }
 
-
-/* 
-
-void ServerConfig::checkDuplicateListen_() const
-
-Validates there are no duplicate listen host:port pairs across servers. 
-It normalizes empty hosts to 0.0.0.0, inserts pairs into a std::set, 
-and throws with a detailed message on duplicates. 
-Catching this at parse time prevents undefined binding behavior or surprising server selection at runtime. 
-Ensuring unique listeners also simplifies the server’s 
-acceptor planning and avoids accidental overshadowing of 
-configuration blocks that would otherwise contend for the same socket
-
-
-*/
-
 void ServerConfig::checkDuplicateListen_() const
 {
 	std::set<std::pair<std::string, int> > seen;
@@ -1048,39 +890,11 @@ void ServerConfig::checkDuplicateListen_() const
 	}
 }
 
-
-/* 
-
-void ServerConfig::parseFile(const std::string& path)
-
-Convenience wrapper: reads the file via readWholeFile then calls parseString. 
-Keeping file I/O separate from parsing allows test suites to feed text directly without filesystem dependencies. 
-It also keeps error reporting cleaner, with I/O errors surfaced before tokenization. 
-After parsing, duplicate listeners are checked by parseString.
-
-
-*/
-
 void ServerConfig::parseFile(const std::string &path)
 {
 	const std::string data = readWholeFile(path);
 	parseString(data);
 }
-
-/* 
-
-void ServerConfig::parseString(const std::string& text)
-
-Top-level entry to parse configuration text already in memory. 
-It tokenizes, early-returns with an empty server list if no tokens, 
-then calls parseTokens and finally checkDuplicateListen_. 
-Splitting responsibilities this way improves unit test coverage and reusability 
-(e.g., embedding default configs). It ensures that even dynamically 
-generated configuration strings receive the same rigorous syntax and semantic checks as files.
-
-
-*/
-
 
 void ServerConfig::parseString(const std::string &text)
 {

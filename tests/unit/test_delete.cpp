@@ -55,7 +55,6 @@ bool	compareBody(std::vector<char> &target, const std::string &fileName)
 	for (std::vector<char>::const_iterator it = target.begin();
 		it != target.end(); it++)
 	{
-		std::cout << "Comparing " << *it << " and " << goal[pos] << std::endl;
 		if (*it != goal[pos])
 			return (false);
 		pos++;

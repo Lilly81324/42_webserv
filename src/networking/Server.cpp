@@ -8,7 +8,6 @@ date: 8/10/2025
 
 /* --- src/networking/Server.cpp --- */
 #include "Server.h"
-
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -27,12 +26,12 @@ static void throwErr(const char *what)
 }
 
 EventLoop& Server::getLoop() {
-    return loop;
+    return loop_;
 }
 
 Server::Server(ServerConfig &srvConfig) : srvConfig(srvConfig)
 {
-	this->loop = EventLoop();
+	this->loop_ = EventLoop();
 	serverpipeline = new ServerPipeline();
 }
 
@@ -49,7 +48,7 @@ void Server::registerListeners()
 	{
 		if (*it && (*it)->getFD() >= 0)
 		{
-			loop.addFD((*it)->getFD(), POLLIN, new AcceptorHandler(loop, *this, *it));
+			loop_.addFD((*it)->getFD(), POLLIN, new AcceptorHandler(loop_, *this, *it));
 		}
 	}
 }
@@ -62,13 +61,14 @@ void Server::unregisterListeners()
 		it != listeners.end(); ++it)
 	{
 		Listener *lst = *it;
-		if (!lst) continue;
-
+		if (!lst)
+			continue;
         const int fd = lst->getFD();
         if (fd >= 0) {
             // Also deletes the per-fd handler inside EventLoop, if any.
-            loop.removeFD(fd);
+            loop_.removeFD(fd);
         }
+		listeners.clear();
 		delete lst;  // Listener dtor should close its fd (RAII)
 		*it = 0;
 	}
@@ -108,7 +108,7 @@ void Server::stop()
 {
 	unregisterListeners();
 	closeAll();
-	loop.stop();
+	loop_.stop();
 	shutdownAllHandlers();
 }
 
@@ -125,7 +125,8 @@ void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique
 	{
 		const int idx = int(it - servers.begin());
 		const int port = it->listen_port;
-		if(port <= 0 || port > 65535) continue;
+		if(port <= 0 || port > 65535)
+			continue;
 		const std::string host = it->listen_host.empty() ? std::string("0.0.0.0") : it->listen_host;
 		const std::pair<std::string, int> key(host, port);
 		if (uniq.insert(key).second)
@@ -245,12 +246,12 @@ void Server::buildHostMaps()
 	for (std::vector<Listener*>::const_iterator it = listeners.begin();
 			it != listeners.end(); ++it)
 	{
-		if (!*it) continue;
-
+		if (!*it)
+			continue;
 		const int port = (*it)->getPort();
 		const std::vector<int>& vs_list = (*it)->virtualServerIndices();
-		if (vs_list.empty()) continue;
-
+		if (vs_list.empty())
+			continue;
 		if (default_vs_by_port.find(port) == default_vs_by_port.end())
 			default_vs_by_port[port] = vs_list.front();
 
@@ -326,8 +327,9 @@ void Server::start()
 
 
 void Server::run(int poll_timeout_ms) {
-	if (listeners.empty()) start();
-	loop.run(poll_timeout_ms);
+	if (listeners.empty())
+		start();
+	loop_.run(poll_timeout_ms);
 }
 
 static std::string normalize_host(const std::string &h)

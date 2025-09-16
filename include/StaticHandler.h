@@ -17,7 +17,6 @@ Date: 8/10/2025
 #include "Headers.h"
 #include "HEADER_ENTRIES.h"
 #include "HttpPreconditions.h"
-
 #include <sys/stat.h>
 #include <dirent.h>
 #include <fcntl.h>

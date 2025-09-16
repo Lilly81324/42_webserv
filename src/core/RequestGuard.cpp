@@ -79,19 +79,27 @@ Preflight RequestGuards::preflight(const ServerConfig &cfg,
 		*out_route = dec;
 
 	// If router says error, fail early.
+	// If router says error, DO NOT fail here. Let the pipeline build the response
+	// (so 405 can add Allow and error_page mapping can be used).
 	if (dec.kind == RouteDecision::HK_ERROR)
 	{
-		// Because our headers are elided in the zip, we can’t test dec.kind directly here.
-		// Use a status heuristic: valid routes leave status == 0 in this project’s Router.
-		// If your RouteDecision always has a kind enum, replace this block with a kind check.
-		if (dec.status != 0)
-		{
-			pr.ok = false;
-			pr.reject_status = dec.status;
-			pr.reject_reason = "Routing error";
-			return pr;
-		}
+		pr.ok = true;              // allow pipeline to proceed
+		pr.reject_status = 0;
+		pr.reject_reason.clear();
+		return pr;
 	}
+
+	// Fallback: if your build sometimes can't rely on kind (headers elided),
+	// and the heuristic says we have an error status, still DO NOT reject.
+	// Let the pipeline handle it.
+	if (dec.status != 0)
+	{
+		pr.ok = true;              // allow pipeline to proceed
+		pr.reject_status = 0;
+		pr.reject_reason.clear();
+		return pr;
+	}
+
 
 	// 2) Decide if the chosen handler needs a request body.
 	// Simple default: POST PUT PATCH → needs body; GET/HEAD/DELETE → no body.

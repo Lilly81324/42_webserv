@@ -8,7 +8,9 @@
 ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 {
     if (!socket.valid())
-        return -1;
+	{
+		return -1;
+	}
 
 	in.compactIfNeeded();
 

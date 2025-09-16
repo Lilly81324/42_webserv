@@ -708,9 +708,9 @@ void ClientConnection::onTick(unsigned long long now_ms)
 	// -------------------------------------------------------------------------
 
     if (io.getFlow().shouldPauseRead(outbytes))
-        io.getFlow().setReadPaused(true);
+        {io.getFlow().setReadPaused(true);}
     if (io.getFlow().shouldResumeRead(outbytes))
-        io.getFlow().setReadPaused(false);
+        {io.getFlow().setReadPaused(false);}
 
 	// 2) Try to flush whatever is queued (static or CGI)
 	(void)io.nb_write();
@@ -1294,7 +1294,9 @@ This function implements HTTP/1.1 keep-alive efficiently while ensuring clean st
 void ClientConnection::finishWriteOrNext()
 {
     if (io.getChainBuf().getByteSize() != 0)
-        return;
+	{
+		return;
+	}
 
 	if (cgi.isActive() || cgi.cgiStdoutFD() >= 0 || cgi.hasOutBytes())
 		return;

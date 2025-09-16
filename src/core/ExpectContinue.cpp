@@ -21,9 +21,7 @@ static std::string rtrim(const std::string &s)
 		--i;
 	return s.substr(0, i);
 }
-static std::string trim(const std::string &s) { 
-	return rtrim(ltrim(s)); 
-}
+static std::string trim(const std::string &s) { return rtrim(ltrim(s)); }
 
 static std::string to_lower(const std::string &s)
 {
@@ -58,5 +56,5 @@ bool ExpectContinue::needed(const Headers &h)
 void ExpectContinue::write100(ChainBuf &out)
 {
 	static const char kMsg[] = "HTTP/1.1 100 Continue\r\n\r\n";
-	(void)out.push_copy(kMsg, sizeof(kMsg) - 1); 
+	(void)out.push_copy(kMsg, sizeof(kMsg) - 1);
 }

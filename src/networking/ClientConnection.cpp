@@ -1230,15 +1230,14 @@ Date/Server/Connection and Content-Length are correct or synthesized as needed.
 
 void ClientConnection::routeAndBuild()
 {
-    // Let the pipeline decide and (possibly) start CGI.
-    (void)ServerPipeline::processRequest(
-        server->getConfig(),
-        vs_idx,
-        req,
-        res,
-        *ctx,
-        &cgi,
-		this);
+	// Let the pipeline decide and (possibly) start CGI.
+	const bool done = ServerPipeline::processRequest(
+		server->getConfig(),
+		vs_idx,
+		req,
+		res,
+		*ctx,
+		&cgi);
 
 	// One keep-alive decision used by both paths
 	const std::string connHdr = req.getHeaders().get("Connection");
@@ -1246,16 +1245,20 @@ void ClientConnection::routeAndBuild()
 		(req.getHttpVer() == "HTTP/1.0") ||
 		(connHdr == "close" || connHdr == "Close");
 
+	if (!done)
+	{
+
+		state = PH_WRITE;
+		resetDeadline(WR_TIMEOUT_MS);
+		return;
+	}
+
 	// -------- Synchronous response (static/proxy/put/patch) --------
 	// Reflect the keep-alive policy.
 	if (should_close)
-	{
 		res.headers.set("Connection", "close");
-	}
 	else
-	{
 		res.headers.set("Connection", "keep-alive");
-	}
 
 	// Safe here: will add Content-Length/Date/Server if missing.
 	res.ensureDefaultHeaders();
@@ -1266,6 +1269,8 @@ void ClientConnection::routeAndBuild()
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size());
 
+	state = PH_WRITE;
+	resetDeadline(WR_TIMEOUT_MS);
 	state = PH_WRITE;
 	resetDeadline(WR_TIMEOUT_MS);
 }
@@ -1287,10 +1292,8 @@ This function implements HTTP/1.1 keep-alive efficiently while ensuring clean st
 
 void ClientConnection::finishWriteOrNext()
 {
-    if (io.getChainBuf().getByteSize() != 0)
-	{
+	if (io.getChainBuf().getByteSize() != 0)
 		return;
-	}
 
 	if (cgi.isActive() || cgi.cgiStdoutFD() >= 0 || cgi.hasOutBytes())
 		return;
@@ -1324,6 +1327,7 @@ void ClientConnection::finishWriteOrNext()
 	if (io.getInputRing().readAvail() > 0)
 		parseHeaders();
 }
+
 
 /* 
 
@@ -1403,7 +1407,11 @@ large ones spill to disk safely. It integrates tightly with later stall/flush wa
 
 void ClientConnection::decideBodyReader(std::size_t content_length)
 {
-    if (body) { delete body; body = 0; }
+	if (body)
+	{
+		delete body;
+		body = 0;
+	}
 
 	const std::size_t cap = (max_body_bytes != 0) ? max_body_bytes : static_cast<std::size_t>(~0);
 

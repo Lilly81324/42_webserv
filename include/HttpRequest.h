@@ -179,7 +179,14 @@ class HttpRequest
 		 */
 		bool	headerAsSize(string k, size_t &v) const;
 
-		void appendBody(const char* data, std::size_t len);
+		/**
+		 * @brief Adds data to the Requests Body
+		 * @param data Body to append
+		 * @param len Amount of characters to append
+		 * @returns false, if state is ERROR, len is too small, or new length exceeds bodyLength
+		 * @returns true if succesfull
+		 */
+		bool appendBody(const char* data, std::size_t len);
     	// const std::vector<char>& getBody() const;   // you likely already have this
 
 		/**

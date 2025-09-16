@@ -15,6 +15,9 @@ std::size_t ContentLenghtReader::consume(const char *data, std::size_t len)
 	const std::size_t remaining = need_ - got_;
 	const std::size_t take = (len < remaining) ? len : remaining;
 
+	// You should really check if appendBody returns false 
+	// -> meaning the ContentLength was exceeeded
+
 	if (take) {
 		req_.appendBody(data, take);  // write straight into HttpRequest::body
 		got_ += take;

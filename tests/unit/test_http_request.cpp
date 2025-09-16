@@ -54,75 +54,71 @@ TEST_CASE("HTTP Request", "[https]")
 	}
 	SECTION("Invalid Body")
 	{
-		// Tests were deleted, as the new Body Reader handles bodies differently
+		// Tests were deleted, as the new Content Length Reader handles bodies differently
 
-		// {
-		// 	// Invalid, because no Content Length, but body given
-		// 	HttpRequest x;
-		// 	x.parse("PUT /path HTTP/1.1\r\nkey: value\r\n\r\n", 34);
-		// 	REQUIRE(x.parse("bliblablub\r\n", 12) == false);
-		// 	REQUIRE(errno == HTTP_BAD_REQUEST);
-		// }
-		// {
-		// 	// Invalid, because GET may not have a body
-		// 	HttpRequest x;
-		// 	x.parse("GET /path HTTP/1.1\r\nContent-Length: 5\r\nkey: value\r\n\r\n", 50);
-		// 	REQUIRE(x.parse("12345", 5) == false);
-		// 	REQUIRE(errno == HTTP_BAD_REQUEST);
-		// }
-		// {
-		// 	// Invalid, because GET may not have a body
-		// 	HttpRequest x;
-		// 	x.parse("PUT /path HTTP/1.1\r\nContent-Length:blablabla\r\nkey: value\r\n\r\n", 57);
-		// 	REQUIRE(x.parse("12345", 5) == false);
-		// 	REQUIRE(errno == HTTP_BAD_REQUEST);
-		// }
+		{
+			// Invalid, because no Content Length, but body given
+			HttpRequest x;
+			x.parse("PUT /path HTTP/1.1\r\nkey: value\r\n\r\n", 34);
+			REQUIRE(x.appendBody("bliblablub\r\n", 12) == false);
+		}
+		{
+			// Invalid, because GET may not have a body
+			HttpRequest x;
+			x.parse("GET /path HTTP/1.1\r\nContent-Length: 5\r\nkey: value\r\n\r\n", 50);
+			REQUIRE(x.appendBody("12345", 5) == false);
+		}
+		{
+			// Invalid, because GET may not have a body
+			HttpRequest x;
+			x.parse("PUT /path HTTP/1.1\r\nContent-Length:blablabla\r\nkey: value\r\n\r\n", 57);
+			REQUIRE(x.appendBody("12345", 5) == false);
+		}
 	}
 	SECTION("Content Length Tests")
 	{
 		// Tests were deleted, as the new Body Reader handles bodies differently
 
-		// {
-		// 	// Invalid, because Content Length too low
-		// 	HttpRequest x;
-		// 	x.parse("PUT /path HTTP/1.1\r\nContent-Length:0\r\nkey: value\r\n\r\n", 50);
-		// 	REQUIRE(x.parse("12345", 5) == false);
-		// 	REQUIRE(errno == HTTP_BAD_REQUEST);
-		// }
-		// {
-		// 	// Invalid, because Content Length too low
-		// 	HttpRequest x;
-		// 	x.parse("PUT /path HTTP/1.1\r\nContent-Length: 2\r\nkey: value\r\n\r\n", 50);
-		// 	REQUIRE(x.parse("12345", 5) == false);
-		// 	REQUIRE(errno == HTTP_BAD_REQUEST);
-		// }
-		// {
-		// 	// Invalid, because Content Length too low
-		// 	HttpRequest x;
-		// 	x.parse("PUT /path HTTP/1.1\r\nContent-Length: 5\r\nkey: value\r\n\r\n", 50);
-		// 	REQUIRE(x.parse("abcd", 4) == true);
-		// 	REQUIRE(x.parse("12345", 5) == false);
-		// 	REQUIRE(errno == HTTP_BAD_REQUEST);
-		// }
+		{
+			// Invalid, because Content Length too low
+			HttpRequest x;
+			x.parse("PUT /path HTTP/1.1\r\nContent-Length:0\r\nkey: value\r\n\r\n", 50);
+			REQUIRE(x.appendBody("12345", 5) == false);
+			REQUIRE(errno == HTTP_BAD_REQUEST);
+		}
+		{
+			// Invalid, because Content Length too low
+			HttpRequest x;
+			x.parse("PUT /path HTTP/1.1\r\nContent-Length: 2\r\nkey: value\r\n\r\n", 50);
+			REQUIRE(x.appendBody("12345", 5) == false);
+		}
+		{
+			// Invalid, because Content Length too low
+			HttpRequest x;
+			x.parse("PUT /path HTTP/1.1\r\nContent-Length: 5\r\nkey: value\r\n\r\n", 50);
+			REQUIRE(x.appendBody("abcd", 4) == true);
+			REQUIRE(x.appendBody("12345", 5) == false);
+			REQUIRE(x.appendBody("x", 1) == true);
+		}
 		{ 
 			// Invalid Content Length
 			HttpRequest x;
 			errno = 0;
-			REQUIRE(x.parse("PUT / HTTP/1.1\r\nContent-Length:bla\r\nkey:value\r\n\r\nI", 46) == false);
+			REQUIRE(x.parse("PUT / HTTP/1.1\r\nContent-Length:bla\r\nkey:value\r\n\r\n", 49) == false);
 			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// Negative value for Content Length
 			HttpRequest x;
 			errno = 0;
-			REQUIRE(x.parse("PUT / HTTP/1.1\r\nContent-Length: -1\r\nkey:value\r\n\r\nI", 46) == false);
+			REQUIRE(x.parse("PUT / HTTP/1.1\r\nContent-Length: -1\r\nkey:value\r\n\r\n",  49) == false);
 			REQUIRE(errno == HTTP_BAD_REQUEST);
 		}
 		{
 			// MAX_INT Content Length
 			HttpRequest x;
 			errno = 0;
-			REQUIRE(x.parse("PUT / HTTP/1.1\r\nContent-Length:2147483647\r\nkey:value\r\n\r\nI", 53) == true);
+			REQUIRE(x.parse("PUT / HTTP/1.1\r\nContent-Length:2147483647\r\nkey:value\r\n\r\n", 56) == true);
 			REQUIRE(errno == 0);
 		}
 

@@ -6,8 +6,8 @@ Date: 8/10/2025
 ------------------------------------------ */
 
 // include/ServerPipeline.h
-#ifndef SERVERPIPELINE_H
-#define SERVERPIPELINE_H
+#ifndef SERVER_PIPELINE_H
+#define SERVER_PIPELINE_H
 
 #include "HttpRequest.h"
 #include "HttpResponse.h"
@@ -15,7 +15,6 @@ Date: 8/10/2025
 #include "RouteResolver.h"
 #include "Router.h"
 #include "ServerConfig.h"
-#include "ClientConnection.h"
 
 // Forward declare to avoid heavy include / circular deps
 class CGIStreamer;

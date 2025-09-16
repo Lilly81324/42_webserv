@@ -5,7 +5,6 @@
 #include <vector>
 #include <map>
 #include <poll.h>
-#include "Debug.h"
 
 class ClientConnection; // forward
 

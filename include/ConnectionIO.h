@@ -14,8 +14,6 @@
 #include "ChainBuf.h"
 
 #include <unistd.h>
-
-#include <unistd.h>
 #include <vector>
 #include <cstddef>
 #include <sys/types.h>

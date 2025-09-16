@@ -219,6 +219,7 @@ class Server
 		 * @note Safe to destroy a Server that was never started or already stopped.
 		 */
 		~Server();
+		EventLoop& getLoop();  
 		
 		/**
 		 * @brief Starts the server and begins accepting connections.
@@ -322,12 +323,14 @@ class Server
 				ClientHandler* h = *it;
 				if (h && h->conn() == c)
 				{
-					loop.removeFD(c->getFD());
+					// loop.removeFD(c->getFD());
 					server_handlers.erase(it);
 					delete h;
 					break;
 				}
 			}
+			loop.removeFD(c->getFD());
+			delete c;
 		}
 
 

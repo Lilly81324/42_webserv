@@ -26,6 +26,10 @@ static void throwErr(const char *what)
 	throw std::runtime_error(std::string(what) + ": " + std::strerror(errno));
 }
 
+EventLoop& Server::getLoop() {
+    return loop;
+}
+
 Server::Server(ServerConfig &srvConfig) : srvConfig(srvConfig)
 {
 	this->loop = EventLoop();
@@ -60,12 +64,11 @@ void Server::unregisterListeners()
 		Listener *lst = *it;
 		if (!lst) continue;
 
-		const int fd = lst->getFD();
-		if (fd >= 0) {
-			// Also deletes the per-fd handler inside EventLoop, if any.
-			loop.removeFD(fd);
-		}
-
+        const int fd = lst->getFD();
+        if (fd >= 0) {
+            // Also deletes the per-fd handler inside EventLoop, if any.
+            loop.removeFD(fd);
+        }
 		delete lst;  // Listener dtor should close its fd (RAII)
 		*it = 0;
 	}

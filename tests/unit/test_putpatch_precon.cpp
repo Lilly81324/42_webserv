@@ -80,7 +80,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			
 			writeToFile(file, "123");
 			oldEtag = ETagUtil::generate(file);
-			std::cout << "Old Etag: " << oldEtag << std::endl;
 			std::string parse;
 			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
 			req.parse(parse.c_str(), parse.length());
@@ -88,8 +87,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			REQUIRE(res.getStatusCode() == HTTP_OK);
 			checkFileContent(7, file, "Abc123\n");
 			newEtag = ETagUtil::generate(file);
-			std::cout << "New ETag: " << newEtag << std::endl;
-			std::cout << "Given ETag: " << res.headers.get(HDR_ETAG) << std::endl;
 			REQUIRE(res.headers.get(HDR_ETAG) != oldEtag);
 			REQUIRE(res.headers.get(HDR_ETAG) == newEtag);
 			std::remove(file);
@@ -105,7 +102,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			
 			writeToFile(file, "123");
 			oldEtag = ETagUtil::generate(file);
-			std::cout << "Old Etag: " << oldEtag << std::endl;
 			std::string parse;
 			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\nIf-Match: ";
 			parse += oldEtag;
@@ -115,8 +111,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			REQUIRE(res.getStatusCode() == HTTP_OK);
 			checkFileContent(7, file, "Abc123\n");
 			newEtag = ETagUtil::generate(file);
-			std::cout << "New ETag: " << newEtag << std::endl;
-			std::cout << "Given ETag: " << res.headers.get(HDR_ETAG) << std::endl;
 			REQUIRE(res.headers.get(HDR_ETAG) != oldEtag);
 			REQUIRE(res.headers.get(HDR_ETAG) == newEtag);
 			std::remove(file);
@@ -150,7 +144,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			
 			writeToFile(file, "123");
 			oldEtag = ETagUtil::generate(file);
-			std::cout << "Old Etag: " << oldEtag << std::endl;
 			std::string parse;
 			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\nIf-None-Match: ";
 			parse += "Invalid Etag";
@@ -160,8 +153,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			REQUIRE(res.getStatusCode() == HTTP_OK);
 			checkFileContent(7, file, "Abc123\n");
 			newEtag = ETagUtil::generate(file);
-			std::cout << "New ETag: " << newEtag << std::endl;
-			std::cout << "Given ETag: " << res.headers.get(HDR_ETAG) << std::endl;
 			REQUIRE(res.headers.get(HDR_ETAG) != oldEtag);
 			REQUIRE(res.headers.get(HDR_ETAG) == newEtag);
 			std::remove(file);
@@ -177,7 +168,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 			
 			writeToFile(file, "123");
 			oldEtag = ETagUtil::generate(file);
-			std::cout << "Old Etag: " << oldEtag << std::endl;
 			std::string parse;
 			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\nIf-None-Match: ";
 			parse += oldEtag;
@@ -204,7 +194,6 @@ TEST_CASE("PUT_HANDLER ETag", "[handler][put][etag]")
 				oldEtag = oldEtag.substr(2, oldEtag.length() - 2);
 			else
 				oldEtag = std::string("W/") + oldEtag;
-			std::cout << "Old Etag: " << oldEtag << std::endl;
 			std::string parse;
 			parse = "PUT / HttpVersion/1.1\r\nContent-Length: 7\r\nIf-Match: ";
 			parse += oldEtag;

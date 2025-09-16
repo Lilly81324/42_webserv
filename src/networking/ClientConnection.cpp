@@ -1230,14 +1230,14 @@ Date/Server/Connection and Content-Length are correct or synthesized as needed.
 
 void ClientConnection::routeAndBuild()
 {
-	// Let the pipeline decide and (possibly) start CGI.
-	const bool done = ServerPipeline::processRequest(
-		server->getConfig(),
-		vs_idx,
-		req,
-		res,
-		*ctx,
-		&cgi,
+    // Let the pipeline decide and (possibly) start CGI.
+    (void)ServerPipeline::processRequest(
+        server->getConfig(),
+        vs_idx,
+        req,
+        res,
+        *ctx,
+        &cgi,
 		this);
 
 	// One keep-alive decision used by both paths
@@ -1246,20 +1246,16 @@ void ClientConnection::routeAndBuild()
 		(req.getHttpVer() == "HTTP/1.0") ||
 		(connHdr == "close" || connHdr == "Close");
 
-	if (!done)
-	{
-
-		state = PH_WRITE;
-		resetDeadline(WR_TIMEOUT_MS);
-		return;
-	}
-
 	// -------- Synchronous response (static/proxy/put/patch) --------
 	// Reflect the keep-alive policy.
 	if (should_close)
+	{
 		res.headers.set("Connection", "close");
+	}
 	else
+	{
 		res.headers.set("Connection", "keep-alive");
+	}
 
 	// Safe here: will add Content-Length/Date/Server if missing.
 	res.ensureDefaultHeaders();
@@ -1270,8 +1266,6 @@ void ClientConnection::routeAndBuild()
 	const std::string s = os.str();
 	io.getChainBuf().push_copy(s.data(), s.size());
 
-	state = PH_WRITE;
-	resetDeadline(WR_TIMEOUT_MS);
 	state = PH_WRITE;
 	resetDeadline(WR_TIMEOUT_MS);
 }

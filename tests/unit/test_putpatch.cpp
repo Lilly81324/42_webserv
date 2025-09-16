@@ -61,7 +61,8 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 			
 			std::remove(file);
 			std::string parse;
-			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\n";
+			req.appendBody("Abc123\n", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_FILE_CREATED);
@@ -74,7 +75,8 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 
 			std::remove(file);
 			std::string parse;
-			parse = "PUT / HTTP/1.1\r\nContent-Length: 1\r\n\r\nX";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 1\r\n\r\n";
+			req.appendBody("X", 1);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode()  == HTTP_FILE_CREATED);
@@ -93,8 +95,9 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 				stream.close();
 			}
 			std::string parse;
-			parse = "PUT / HTTP/1.1\r\nContent-Length: 1\r\n\r\nX";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 1\r\n\r\n";
 			req.parse(parse.c_str(), parse.length());
+			req.appendBody("X", 1);
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
 			checkFileContent(1, file, "X");
@@ -143,8 +146,9 @@ TEST_CASE("PUT_HANDLER", "[handler][put]")
 			}
 			chmod(file, S_IRUSR | S_IRGRP | S_IROTH);
 			std::string parse;
-			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\nAbc123\n";
+			parse = "PUT / HTTP/1.1\r\nContent-Length: 7\r\n\r\n";
 			req.parse(parse.c_str(), parse.length());
+			req.appendBody("Abc123\n", 7);
 			REQUIRE(pat.handle(req, res, ctx) == false);
 			REQUIRE(res.getStatusCode() == HTTP_FORBIDDEN);
 			std::remove(file);
@@ -208,7 +212,8 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = "PATCH / HTTP/1.1\r\nContent-Length: 7\r\nContent-Type: application/vnd.webserv.append\r\n\r\nxXNEWXx";
+			parse = "PATCH / HTTP/1.1\r\nContent-Length: 7\r\nContent-Type: application/vnd.webserv.append\r\n\r\n";
+			req.appendBody("xXNEWXx", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -231,7 +236,8 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 				pre.write("OLD", 3);
 				pre.close();
 			}
-			parse = "PATCH / HTTP/1.1\r\nContent-Length: 7\r\n" + std::string(HDR_PATCH_OFFSET) + ": 2\r\nContent-Type: application/vnd.webserv.overwrite\r\n\r\nxXNEWXx";
+			parse = "PATCH / HTTP/1.1\r\nContent-Length: 7\r\n" + std::string(HDR_PATCH_OFFSET) + ": 2\r\nContent-Type: application/vnd.webserv.overwrite\r\n\r\n";
+			req.appendBody("xXNEWXx", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -258,8 +264,8 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 			"Content-Length: 7\r\n" + \
 			std::string(HDR_PATCH_OFFSET) + ": 999999999\r\n" +\
 			"Content-Type: application/vnd.webserv.overwrite\r\n" + \
-			"\r\n" + \
-			"xXNEWXx";
+			"\r\n";
+			req.appendBody("xXNEWXx", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -285,8 +291,8 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
 			"Content-Type: application/vnd.webserv.overwrite\r\n" + \
-			"\r\n" + \
-			"xXNEWXx";
+			"\r\n";
+			req.appendBody("xXNEWXx", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_OK);
@@ -348,8 +354,8 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 			}
 			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
-			"\r\n" + \
-			"xXNEWXx";
+			"\r\n";
+			req.appendBody("xXNEWXx", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == false);
 			REQUIRE(res.getStatusCode() == HTTP_INV_MEDIA);
@@ -377,8 +383,8 @@ TEST_CASE("PATCH HANDLER", "[handler][patch]")
 			parse = std::string("PATCH / HTTP/1.1\r\n") + \
 			"Content-Length: 7\r\n" + \
 			"Content-Type: application/vnd.webserv.bogus\r\n" + \
-			"\r\n" + \
-			"xXNEWXx";
+			"\r\n";
+			req.appendBody("xXNEWXx", 7);
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(pat.handle(req, res, ctx) == false);
 			REQUIRE(res.getStatusCode() == HTTP_INV_MEDIA);	

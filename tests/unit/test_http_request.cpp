@@ -54,8 +54,6 @@ TEST_CASE("HTTP Request", "[https]")
 	}
 	SECTION("Invalid Body")
 	{
-		// Tests were deleted, as the new Content Length Reader handles bodies differently
-
 		{
 			// Invalid, because no Content Length, but body given
 			HttpRequest x;

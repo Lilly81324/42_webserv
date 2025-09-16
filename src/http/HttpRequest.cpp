@@ -205,7 +205,7 @@ int HttpRequest::handleLineHeader(const std::string &in)
 		return (HTTP_BAD_REQUEST);
 	if (!this->headers.set(key, value))
 		return (HTTP_HEADER_TOO_BIG);
-	if (key == "Content-Length")
+	if (key == "Content-Length" && method != "GET")
 	{
 		contLength = Atoi::atoiHttpReq(value.c_str(), atoiError);
 		if (atoiError)
@@ -347,10 +347,22 @@ size_t HttpRequest::getBodyLength(void) const
 	return (this->bodyLength);
 }
 
-void HttpRequest::appendBody(const char* data, size_t len)
+bool HttpRequest::appendBody(const char* data, size_t len)
 {
-    if (len)
-		body.insert(body.end(), data, data + len);
+	if (state == ERROR)
+	{
+		return (false);
+	}
+	if (len <= 0)
+	{
+		return (false);
+	}
+	if (body.size() + len > bodyLength)
+	{
+		return (false);
+	}
+	body.insert(body.end(), data, data + len);
+	return (true);
 }
 
 

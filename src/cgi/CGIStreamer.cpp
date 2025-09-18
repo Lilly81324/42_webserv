@@ -167,28 +167,49 @@ Correct framing enables persistent connections without knowing Content-Length.
 
 */
 
-void CGIStreamer::enqueueOut(const char *data, std::size_t len)
+// In CGIStreamer.cpp
+void CGIStreamer::enqueueOut(const char* data, std::size_t len)
 {
-	if (len == 0)
-		return;
+    if (!data || len == 0) return;
 
-	if (chunked_mode_)
-	{
-		// <hex>\r\n
-		char hex[32];
-		std::sprintf(hex, "%lx\r\n", (unsigned long)len);
-		out_buf_.insert(out_buf_.end(), hex, hex + std::strlen(hex));
-		// payload
-		out_buf_.insert(out_buf_.end(), data, data + len);
-		// \r\n
-		out_buf_.push_back('\r');
-		out_buf_.push_back('\n');
-	}
-	else
-	{
-		out_buf_.insert(out_buf_.end(), data, data + len);
-	}
+    // Allow the head, suppress any body for HEAD after the head is queued
+    if (req_.getMethod() == "HEAD" && http_head_queued_) {
+        return;
+    }
+
+    if (!chunked_mode_) {
+        out_buf_.insert(out_buf_.end(), data, data + len);
+        return;
+    }
+
+    // --- chunked framing: <hex>\r\n<data>\r\n ---
+    // format len in hex (C++98-safe)
+    char hexbuf_rev[32];
+    int h = 0;
+    unsigned long long v = (unsigned long long)len;
+    if (v == 0) hexbuf_rev[h++] = '0';
+    else {
+        while (v) {
+            unsigned d = (unsigned)(v & 0xF);
+            hexbuf_rev[h++] = (char)(d < 10 ? '0'+d : 'a'+(d-10));
+            v >>= 4;
+        }
+    }
+    // write hex digits in forward order + CRLF
+    char sz[36];
+    int k = 0;
+    for (int i = h - 1; i >= 0; --i) sz[k++] = hexbuf_rev[i];
+    sz[k++] = '\r'; sz[k++] = '\n';
+
+    // size line
+    out_buf_.insert(out_buf_.end(), sz, sz + k);
+    // data
+    out_buf_.insert(out_buf_.end(), data, data + len);
+    // CRLF
+    out_buf_.push_back('\r');
+    out_buf_.push_back('\n');
 }
+
 
 
 /* 
@@ -206,12 +227,18 @@ and browsers that depend on unambiguous message boundaries.
 
 void CGIStreamer::enqueueFinalChunk()
 {
-	if (sent_final_chunk_)
-		return;
-	static const char fin[] = "0\r\n\r\n";
-	out_buf_.insert(out_buf_.end(), fin, fin + sizeof(fin) - 1);
-	sent_final_chunk_ = true;
+    if (sent_final_chunk_)
+        return;
+    sent_final_chunk_ = true;
+
+    if (chunked_mode_) {
+        static const char kFinal[] = "0\r\n\r\n";   // C++98-safe
+        out_buf_.insert(out_buf_.end(), kFinal, kFinal + sizeof(kFinal) - 1);
+    }
 }
+
+
+
 
 
 
@@ -330,62 +357,112 @@ keeping browser and proxy behavior correct.
 // Build and queue the HTTP head once (after CGI headers parsed).
 void CGIStreamer::finalizeHeaders()
 {
-	if (http_head_queued_)
-		return;
+    if (http_head_queued_)
+        return;
 
-	const int status = status_code_ ? status_code_ : 200;
-	const std::string reason = status_reason_.empty() ? "OK" : status_reason_;
+    // --- status line pieces ---
+    const int status = status_code_ ? status_code_ : 200;
+    const std::string reason = status_reason_.empty() ? "OK" : status_reason_;
 
-	// Ensure Content-Type exists
-	if (!saw_content_type_)
-		res_.headers.set("Content-Type", "text/plain");
+    // --- ensure basic headers (but don't stomp CGI-provided ones) ---
+    if (!saw_content_type_ && !res_.headers.keyExists("Content-Type"))
+        res_.headers.set("Content-Type", "text/plain");
 
-	// We stream as chunked
-	chunked_mode_ = true;
-	res_.headers.set("Transfer-Encoding", "chunked");
-	res_.headers.set("Connection", "keep-alive");
+    if (!res_.headers.keyExists("Date"))
+        res_.headers.set("Date", http_date_now_gmt());
 
-	std::string head;
-	head.reserve(512);
-	head += "HTTP/1.1 ";
-	{
-		char tmp[16];
-		std::sprintf(tmp, "%d", status);
-		head += tmp;
-	}
-	head += " ";
-	head += reason;
-	head += "\r\n";
+    if (!res_.headers.keyExists("Server"))
+        res_.headers.set("Server", "webserv/1.0");
 
-	// Minimal header set (Date/Server/CT/TE/Conn + multi Set-Cookie)
-	head += "Date: " + http_date_now_gmt() + "\r\n";
-	head += "Server: webserv/1.0\r\n";
+    // --- decide Connection policy unless CGI already set it ---
+    if (!res_.headers.keyExists("Connection"))
+    {
+        bool want_close = false;
 
-	// Content-Type
-	head += "Content-Type: " + res_.headers.get("Content-Type") + "\r\n";
-	// Chunked
-	head += "Transfer-Encoding: chunked\r\n";
-	// Connection
-	{
-		const std::string conn = res_.headers.keyExists("Connection")
-									 ? res_.headers.get("Connection")
-									 : std::string("keep-alive");
-		head += "Connection: " + conn + "\r\n";
-	}
-	// Multiple Set-Cookie
-	for (std::vector<std::string>::size_type i = 0; i < set_cookie_.size(); ++i)
-		head += "Set-Cookie: " + set_cookie_[i] + "\r\n";
+        // Honor client Connection: close (case-insensitive) or HTTP/1.0 default-close
+        const Headers &rq = req_.getHeaders();
+        std::string c = rq.get("Connection");
+        // simple ASCII case-insensitive compare to "close"
+        bool rq_says_close = false;
+        if (!c.empty()) {
+            if (c.size() == 5) { // "close"
+                char a='c',b='l',d='o',e='s',f='e';
+                rq_says_close =
+                    ( (c[0]|32)==a && (c[1]|32)==b && (c[2]|32)==d && (c[3]|32)==e && (c[4]|32)==f );
+            }
+        }
+        if (rq_says_close)
+            want_close = true;
+        else if (req_.getHttpVer() == "HTTP/1.0")
+            want_close = true;
 
-	head += "\r\n"; // end of header block
+        res_.headers.set("Connection", want_close ? "close" : "keep-alive");
+    }
 
-	// Queue head as-is (not chunked)
-	const bool saved = chunked_mode_;
-	chunked_mode_ = false;
-	enqueueOut(head.data(), head.size());
-	chunked_mode_ = saved;
+    // --- choose body framing: prefer CGI's Content-Length; else chunked ---
+    const bool have_cl = res_.headers.keyExists("Content-Length");
+    if (!have_cl)
+    {
+        // enable chunked framing for the message body that follows
+        chunked_mode_ = true;
+        res_.headers.set("Transfer-Encoding", "chunked");
+    }
+    else
+    {
+        // if CGI supplied Content-Length, do NOT set chunked
+        chunked_mode_ = false;
+        // ensure Transfer-Encoding isn't lingering from earlier parsing
+        if (res_.headers.keyExists("Transfer-Encoding"))
+            res_.headers.erase("Transfer-Encoding");
+    }
 
-	http_head_queued_ = true;
+    // --- build and queue the response head (status line + headers) ---
+    std::string head;
+    head.reserve(512);
+
+    // Status line
+    head += "HTTP/1.1 ";
+    {
+        char buf[16];
+        std::sprintf(buf, "%d", status);
+        head += buf;
+    }
+    head += " ";
+    head += reason;
+    head += "\r\n";
+
+    // Required/standard headers (use values from res_.headers)
+    head += "Date: " + res_.headers.get("Date") + "\r\n";
+    head += "Server: " + res_.headers.get("Server") + "\r\n";
+
+    // Content-Type
+    if (res_.headers.keyExists("Content-Type"))
+        head += "Content-Type: " + res_.headers.get("Content-Type") + "\r\n";
+
+    // Either Content-Length or Transfer-Encoding (but not both)
+    if (have_cl)
+        head += "Content-Length: " + res_.headers.get("Content-Length") + "\r\n";
+    else
+        head += "Transfer-Encoding: chunked\r\n";
+
+    // Connection
+    head += "Connection: " + res_.headers.get("Connection") + "\r\n";
+
+    // Multiple Set-Cookie (if any)
+    for (std::vector<std::string>::size_type i = 0; i < set_cookie_.size(); ++i)
+        head += "Set-Cookie: " + set_cookie_[i] + "\r\n";
+
+    head += "\r\n"; // end of headers
+
+    // Queue head bytes unchunked
+    const bool saved = chunked_mode_;
+    chunked_mode_ = false;
+    enqueueOut(head.data(), head.size());
+    chunked_mode_ = saved;
+
+    http_head_queued_ = true;
 }
+
 
 // --- stdin/stdout helpers ---
 
@@ -739,202 +816,200 @@ and marks inactive. Errors set failed_. This is the heart of CGI output handling
 
 void CGIStreamer::onCgiReadable(int fd)
 {
-	if (!cgi_active_ || fd != cgi_out_fd_ || cgi_out_fd_ < 0)
-		return;
+    if (!cgi_active_ || fd != cgi_out_fd_ || cgi_out_fd_ < 0)
+        return;
 
-	// Back-pressure gate
-	if (!wantsRead())
-	{
-		std::fprintf(stderr, "[CGI][RD] outFD=%d wantsRead=0 → defer\n", cgi_out_fd_);
-		return;
-	}
+    // Back-pressure gate
+    if (!wantsRead())
+    {
+        std::fprintf(stderr, "[CGI][RD] outFD=%d wantsRead=0 → defer\n", cgi_out_fd_);
+        return;
+    }
 
-	for (;;)
-	{
-		char buf[16384];
-		ssize_t r = ::read(cgi_out_fd_, buf, sizeof(buf));
+    for (;;)
+    {
+        char buf[16384];
+        ssize_t r = ::read(cgi_out_fd_, buf, sizeof(buf));
 
-		if (r > 0)
-		{
-			const char *p = buf;
-			std::size_t n = static_cast<std::size_t>(r);
-			std::fprintf(stderr, "[CGI][RD] outFD=%d got=%zu bytes (state=%s)\n",
-						 cgi_out_fd_, n, (hdr_state_ == HDR_WAITING ? "HEADERS" : "BODY"));
+        if (r > 0)
+        {
+            const char *p = buf;
+            std::size_t n = static_cast<std::size_t>(r);
+            std::fprintf(stderr, "[CGI][RD] outFD=%d got=%zu bytes (state=%s)\n",
+                         cgi_out_fd_, n, (hdr_state_ == HDR_WAITING ? "HEADERS" : "BODY"));
 
-			if (hdr_state_ == HDR_WAITING)
-			{
-				// Accumulate until CRLFCRLF or LFLF
-				cgi_header_accum_.append(p, n);
-				std::fprintf(stderr, "[CGI][RD] accum=%zu bytes\n",
-							 cgi_header_accum_.size());
+            if (hdr_state_ == HDR_WAITING)
+            {
+                // Accumulate until CRLFCRLF or LFLF
+                cgi_header_accum_.append(p, n);
+                std::fprintf(stderr, "[CGI][RD] accum=%zu bytes\n",
+                             cgi_header_accum_.size());
 
-				// Find header/body cut
-				std::string::size_type cut = std::string::npos;
-				std::string::size_type k = cgi_header_accum_.find("\r\n\r\n");
-				if (k != std::string::npos)
-					cut = k + 4;
-				else
-				{
-					k = cgi_header_accum_.find("\n\n");
-					if (k != std::string::npos)
-						cut = k + 2;
-				}
+                // Find header/body cut
+                std::string::size_type cut = std::string::npos;
+                std::string::size_type k = cgi_header_accum_.find("\r\n\r\n");
+                if (k != std::string::npos)
+                    cut = k + 4;
+                else
+                {
+                    k = cgi_header_accum_.find("\n\n");
+                    if (k != std::string::npos)
+                        cut = k + 2;
+                }
 
-				if (cut == std::string::npos)
-				{
-					// Heuristic: if first line lacks ":" or headers grow too large,
-					// treat the whole thing as body.
-					std::string::size_type eol = cgi_header_accum_.find_first_of("\r\n");
-					std::string first = (eol == std::string::npos)
-											? cgi_header_accum_
-											: cgi_header_accum_.substr(0, eol);
-					const bool first_has_colon = (first.find(':') != std::string::npos);
+                if (cut == std::string::npos)
+                {
+                    // Heuristic: if first line lacks ":" or headers grow too large,
+                    // treat the whole thing as body.
+                    std::string::size_type eol = cgi_header_accum_.find_first_of("\r\n");
+                    std::string first = (eol == std::string::npos)
+                                          ? cgi_header_accum_
+                                          : cgi_header_accum_.substr(0, eol);
+                    const bool first_has_colon = (first.find(':') != std::string::npos);
 
-					if (!first_has_colon || cgi_header_accum_.size() > 8192u)
-					{
-						std::fprintf(stderr,
-									 "[CGI][RD] no header terminator (first_has_colon=%d, size=%zu) → treat as body\n",
-									 (int)first_has_colon, cgi_header_accum_.size());
+                    if (!first_has_colon || cgi_header_accum_.size() > 8192u)
+                    {
+                        std::fprintf(stderr,
+                                     "[CGI][RD] no header terminator (first_has_colon=%d, size=%zu) → treat as body\n",
+                                     (int)first_has_colon, cgi_header_accum_.size());
 
-						if (!http_head_queued_)
-						{
-							std::fprintf(stderr, "[CGI][RD] finalizeHeaders (synth)\n");
-							finalizeHeaders(); // synthesize safe head
-						}
-						if (!cgi_header_accum_.empty())
-						{
-							enqueueOut(cgi_header_accum_.data(), cgi_header_accum_.size());
-							std::fprintf(stderr, "[CGI][RD] queued body spill=%zu\n",
-										 cgi_header_accum_.size());
-						}
-						cgi_header_accum_.clear();
-						hdr_state_ = HDR_DONE;
-					}
-					// else: keep waiting for header terminator
-					continue;
-				}
+                        if (!http_head_queued_)
+                        {
+                            std::fprintf(stderr, "[CGI][RD] finalizeHeaders (synth)\n");
+                            finalizeHeaders(); // synthesize safe head
+                        }
+                        if (!cgi_header_accum_.empty())
+                        {
+                            // enqueueOut will suppress if this is HEAD and the head was already queued
+                            enqueueOut(cgi_header_accum_.data(), cgi_header_accum_.size());
+                            std::fprintf(stderr, "[CGI][RD] queued body spill=%zu\n",
+                                         cgi_header_accum_.size());
+                        }
+                        cgi_header_accum_.clear();
+                        hdr_state_ = HDR_DONE;
+                    }
+                    // else: keep waiting for header terminator
+                    continue;
+                }
 
-				// We have a complete header block → parse it line-by-line
-				const std::string hdr = cgi_header_accum_.substr(0, cut);
-				std::fprintf(stderr, "[CGI][RD] header block complete len=%zu (cut at %zu)\n",
-							 hdr.size(), cut);
+                // We have a complete header block → parse it line-by-line
+                const std::string hdr = cgi_header_accum_.substr(0, cut);
+                std::fprintf(stderr, "[CGI][RD] header block complete len=%zu (cut at %zu)\n",
+                             hdr.size(), cut);
 
-				// Quick counters for debug
-				int set_cookie_count = 0;
-				int parsed_lines = 0;
+                int set_cookie_count = 0;
+                int parsed_lines = 0;
 
-				std::string line;
-				for (std::string::size_type i = 0; i < hdr.size();)
-				{
-					std::string::size_type j = i;
-					while (j < hdr.size() && hdr[j] != '\r' && hdr[j] != '\n')
-						++j;
-					line.assign(hdr, i, j - i);
-					if (j < hdr.size() && hdr[j] == '\r')
-						++j;
-					if (j < hdr.size() && hdr[j] == '\n')
-						++j;
-					i = j;
+                std::string line;
+                for (std::string::size_type i = 0; i < hdr.size();)
+                {
+                    std::string::size_type j = i;
+                    while (j < hdr.size() && hdr[j] != '\r' && hdr[j] != '\n')
+                        ++j;
+                    line.assign(hdr, i, j - i);
+                    if (j < hdr.size() && hdr[j] == '\r') ++j;
+                    if (j < hdr.size() && hdr[j] == '\n') ++j;
+                    i = j;
 
-					if (!line.empty())
-					{
-						// Count Set-Cookie for visibility
-						std::string lower = line;
-						for (size_t q = 0; q < lower.size(); ++q)
-						{
-							char c = lower[q];
-							if (c >= 'A' && c <= 'Z')
-								lower[q] = char(c - 'A' + 'a');
-						}
-						if (lower.size() >= 11 && lower.compare(0, 11, "set-cookie:") == 0)
-							++set_cookie_count;
+                    if (!line.empty())
+                    {
+                        std::string lower = line;
+                        for (size_t q = 0; q < lower.size(); ++q)
+                        {
+                            char c = lower[q];
+                            if (c >= 'A' && c <= 'Z')
+                                lower[q] = char(c - 'A' + 'a');
+                        }
+                        if (lower.size() >= 11 && lower.compare(0, 11, "set-cookie:") == 0)
+                            ++set_cookie_count;
 
-						parseOneHeaderLine(line);
-						++parsed_lines;
-					}
-				}
+                        parseOneHeaderLine(line);
+                        ++parsed_lines;
+                    }
+                }
 
-				std::fprintf(stderr, "[CGI][RD] parsed_lines=%d set-cookie=%d\n",
-							 parsed_lines, set_cookie_count);
+                std::fprintf(stderr, "[CGI][RD] parsed_lines=%d set-cookie=%d\n",
+                             parsed_lines, set_cookie_count);
 
-				// Anything after the terminator is body
-				if (!http_head_queued_)
-				{
-					std::fprintf(stderr, "[CGI][RD] finalizeHeaders\n");
-					finalizeHeaders();
-				}
-				if (cut < cgi_header_accum_.size())
-				{
-					const char *bp = cgi_header_accum_.data() + cut;
-					const std::size_t bn = cgi_header_accum_.size() - cut;
-					if (bn)
-					{
-						enqueueOut(bp, bn);
-						std::fprintf(stderr, "[CGI][RD] queued post-header body=%zu\n", bn);
-					}
-				}
+                // Anything after the terminator is body
+                if (!http_head_queued_)
+                {
+                    std::fprintf(stderr, "[CGI][RD] finalizeHeaders\n");
+                    finalizeHeaders();
+                }
+                if (cut < cgi_header_accum_.size())
+                {
+                    const char *bp = cgi_header_accum_.data() + cut;
+                    const std::size_t bn = cgi_header_accum_.size() - cut;
+                    if (bn)
+                    {
+                        // enqueueOut will suppress post-head body for HEAD
+                        enqueueOut(bp, bn);
+                        std::fprintf(stderr, "[CGI][RD] queued post-header body=%zu\n", bn);
+                    }
+                }
 
-				cgi_header_accum_.clear();
-				hdr_state_ = HDR_DONE;
-				continue;
-			}
+                cgi_header_accum_.clear();
+                hdr_state_ = HDR_DONE;
+                continue;
+            }
 
-			// Normal body streaming (headers already finalized)
-			if (!http_head_queued_)
-			{
-				std::fprintf(stderr, "[CGI][RD] finalizeHeaders (late safety)\n");
-				finalizeHeaders(); // safety net
-			}
-			enqueueOut(p, n);
-			std::fprintf(stderr, "[CGI][RD] queued body=%zu\n", n);
-			continue;
-		}
+            // Normal body streaming (headers already finalized)
+            if (!http_head_queued_)
+            {
+                std::fprintf(stderr, "[CGI][RD] finalizeHeaders (late safety)\n");
+                finalizeHeaders(); // safety net
+            }
+            // enqueueOut will suppress for HEAD when head is already queued
+            enqueueOut(p, n);
+            std::fprintf(stderr, "[CGI][RD] queued body=%zu\n", n);
+            continue;
+        }
 
-		if (r == 0) // EOF from CGI
-		{
-			std::fprintf(stderr, "[CGI][RD] EOF on outFD=%d\n", cgi_out_fd_);
+        if (r == 0) // EOF from CGI
+        {
+            std::fprintf(stderr, "[CGI][RD] EOF on outFD=%d\n", cgi_out_fd_);
 
-			// Make sure we have emitted an HTTP head even if CGI sent no headers
-			if (!http_head_queued_)
-			{
-				std::fprintf(stderr, "[CGI][RD] finalizeHeaders at EOF (no CGI headers)\n");
-				finalizeHeaders();
-			}
+            // Ensure we emitted an HTTP head even if CGI sent no headers
+            if (!http_head_queued_)
+            {
+                std::fprintf(stderr, "[CGI][RD] finalizeHeaders at EOF (no CGI headers)\n");
+                finalizeHeaders();
+            }
 
-			// Close stdout and enqueue the terminating chunk if chunked
-			closeStdout();
-			if (chunked_mode_ && !sent_final_chunk_)
-			{
-				enqueueFinalChunk(); // "0\r\n\r\n"
-				sent_final_chunk_ = true;
-				std::fprintf(stderr, "[CGI][RD] queued final chunk\n");
-			}
+            // Terminate chunked stream (if applicable); skip for HEAD inside helper
+            enqueueFinalChunk();    
 
-			cgi_active_ = false; // streamer done producing
-			return;
-		}
+            // Stop watching/using stdout and mark producer done
+            closeStdout();
+            std::fprintf(stderr, "[CGI][RD] queued final chunk\n");
 
-		// r < 0
-		if (errno == EINTR)
-		{
-			std::fprintf(stderr, "[CGI][RD] read EINTR → retry\n");
-			continue;
-		}
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
-		{
-			std::fprintf(stderr, "[CGI][RD] read EAGAIN → pause loop\n");
-			break;
-		}
+            cgi_active_ = false;       // streamer done producing
+            return;
+        }
 
-		// Hard error → stop this CGI cleanly
-		std::fprintf(stderr, "[CGI][RD] read error errno=%d (%s) → fail\n",
-					 errno, std::strerror(errno));
-		closeStdout();
-		cgi_active_ = false;
-		failed_ = true;
-		return;
-	}
+        // r < 0 (non-blocking read)
+        if (errno == EINTR)
+        {
+            std::fprintf(stderr, "[CGI][RD] read EINTR → retry\n");
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            std::fprintf(stderr, "[CGI][RD] read EAGAIN → pause loop\n");
+            break;
+        }
+
+        // Hard error → stop this CGI cleanly
+        std::fprintf(stderr, "[CGI][RD] read error errno=%d (%s) → fail\n",
+                     errno, std::strerror(errno));
+        closeStdout();
+        cgi_active_ = false;
+        failed_ = true;
+        return;
+    }
 }
+
 
 
 /* 

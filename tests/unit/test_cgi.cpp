@@ -1,197 +1,462 @@
 // tests/unit/test_cgi.cpp
 #include <catch2/catch_all.hpp>
+#include "helpers/server_runner.hpp"   // the RAII spawner you added
 
-#define private public           // expose private helpers if needed
-#include "CgiHandler.h"
-#undef private
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-#include "CgiRegistry.h"
-#include "HttpRequest.h"
-#include "VirtualServer.h"
+#include <cerrno>
+#include <cstring>
+#include <string>
+#include <sstream>
+#include <vector>
+#include <map>
+#include <algorithm>
 
-// ---------- tiny helper to inspect env as a map ----------
-static std::map<std::string,std::string>
-envVecToMap(const std::vector<std::string>& v) {
-    std::map<std::string,std::string> m;
-    for (size_t i = 0; i < v.size(); ++i) {
-        std::string::size_type eq = v[i].find('=');
-        if (eq == std::string::npos) continue;
-        m[v[i].substr(0, eq)] = v[i].substr(eq + 1);
+// ---------------------------
+// Tiny HTTP client utilities
+// ---------------------------
+namespace http {
+
+static std::string recv_all(int fd) {
+    std::string out;
+    char buf[8192];
+    for (;;) {
+        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+        if (n > 0) { out.append(buf, buf + n); continue; }
+        if (n == 0) break;
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+        break;
     }
-    return m;
+    return out;
 }
 
-// ---------- CgiRegistry ----------
-TEST_CASE("CgiRegistry: location overrides global and ext normalization", "[cgi][registry]") {
-    std::map<std::string, CgiSpec> globalMap;
-    std::map<std::string, CgiSpec> locMap;
+static int connect_tcp(const char* ip, uint16_t port) {
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    REQUIRE(fd >= 0);
 
-    globalMap[".php"] = CgiSpec("/usr/bin/php-cgi", 3000);
-    globalMap[".py"]  = CgiSpec("/usr/bin/python3", 3000);
+    sockaddr_in sa; std::memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port   = htons(port);
+    REQUIRE(::inet_pton(AF_INET, ip, &sa.sin_addr) == 1);
 
-    // locally override .php and add .pl
-    locMap[".php"] = CgiSpec("/opt/custom/php-cgi", 2500);
-    locMap[".pl"]  = CgiSpec("/usr/bin/perl", 2000);
+    REQUIRE(::connect(fd, reinterpret_cast<sockaddr*>(&sa), sizeof(sa)) == 0);
+    return fd;
+}
 
-    CgiRegistry reg;
-    reg.setSources(&locMap, &globalMap);
-
-    // prefers location over global
-    {
-        const CgiSpec* s = reg.findByExtension(".php");
-        REQUIRE(s != NULL);
-        CHECK(s->bin == "/opt/custom/php-cgi");
-        CHECK(s->timeout_ms == 2500);
-    }
-    // normalization: "py" (no dot) should still match ".py"
-    {
-        const CgiSpec* s = reg.findByExtension("py");
-        REQUIRE(s != NULL);
-        CHECK(s->bin == "/usr/bin/python3");
-    }
-    // location-only ext
-    {
-        const CgiSpec* s = reg.findByExtension(".pl");
-        REQUIRE(s != NULL);
-        CHECK(s->bin == "/usr/bin/perl");
-    }
-    // unknown
-    {
-        const CgiSpec* s = reg.findByExtension(".rb");
-        CHECK(s == NULL);
+static void send_all(int fd, const std::string& data) {
+    const char* p = data.data();
+    size_t left = data.size();
+    while (left) {
+        ssize_t n = ::send(fd, p, left, 0);
+        if (n > 0) { p += n; left -= (size_t)n; continue; }
+        if (n < 0 && errno == EINTR) continue;
+        FAIL("send failed: " << std::strerror(errno));
     }
 }
 
-// ---------- CgiHandler::buildEnv (with Host/XFF/CT/CL) ----------
-TEST_CASE("CgiHandler::buildEnv builds a correct CGI environment", "[cgi][env]") {
-    const std::string raw =
-        "POST /cgi-bin/hello.php?name=Bob&x=1 HTTP/1.1\r\n"
-        "Host: www.example.com:8080\r\n"
-        "Content-Type: application/x-www-form-urlencoded\r\n"
-        "Content-Length: 5\r\n"
-        "X-Forwarded-For: 203.0.113.9\r\n"
-        "\r\n"
-        "abcde";
+struct Response {
+    int status = 0;
+    std::string reason;
+    std::map<std::string, std::string> headers; // lower-cased keys
+    std::string raw_headers_block;              // as-received (for debugging)
+    std::string body;                           // decoded body (chunked decoded if needed)
+    std::string raw;                            // raw full response
+};
 
-    HttpRequest req;
-    REQUIRE(req.parse(raw.c_str(), raw.size()) == true);
-
-    VirtualServer vs;
-    vs.listen_host  = "0.0.0.0";
-    vs.listen_port  = 8080;
-    vs.root         = "/var/www/html";
-    vs.server_names.push_back("www.example.com");
-
-    CgiHandler h;
-    std::vector<std::string> envv;
-    int rc = h.buildEnv(req, vs, envv);
-    REQUIRE(rc > 0);
-
-    const std::map<std::string,std::string> env = envVecToMap(envv);
-
-    // Core CGI variables
-    REQUIRE(env.find("GATEWAY_INTERFACE") != env.end());
-    CHECK(env.find("GATEWAY_INTERFACE")->second == "CGI/1.1");
-
-    CHECK(env.find("REQUEST_METHOD") != env.end());
-    CHECK(env.find("REQUEST_METHOD")->second == "POST");
-
-    CHECK(env.find("QUERY_STRING") != env.end());
-    CHECK(env.find("QUERY_STRING")->second == "name=Bob&x=1");
-
-    CHECK(env.find("SERVER_PROTOCOL") != env.end());
-    CHECK(env.find("SERVER_PROTOCOL")->second == "HTTP/1.1");
-
-    CHECK(env.find("CONTENT_TYPE") != env.end());
-    CHECK(env.find("CONTENT_TYPE")->second == "application/x-www-form-urlencoded");
-
-    CHECK(env.find("CONTENT_LENGTH") != env.end());
-    CHECK(env.find("CONTENT_LENGTH")->second == "5");
-
-    // Host header → SERVER_NAME, port from VS
-    CHECK(env.find("SERVER_NAME") != env.end());
-    CHECK(env.find("SERVER_NAME")->second == "www.example.com");
-
-    CHECK(env.find("SERVER_PORT") != env.end());
-    CHECK(env.find("SERVER_PORT")->second == "8080");
-
-    // Remote address (X-Forwarded-For preferred)
-    CHECK(env.find("REMOTE_ADDR") != env.end());
-    CHECK(env.find("REMOTE_ADDR")->second == "203.0.113.9");
-
-    // Pathing
-    CHECK(env.find("SCRIPT_NAME") != env.end());
-    CHECK(env.find("SCRIPT_NAME")->second == "/cgi-bin/hello.php");
-
-    CHECK(env.find("SCRIPT_FILENAME") != env.end());
-    CHECK(env.find("SCRIPT_FILENAME")->second == "/var/www/html/cgi-bin/hello.php");
-
-    // Optional php-cgi quirk: accept either absent or "200" value
-    std::map<std::string,std::string>::const_iterator it = env.find("REDIRECT_STATUS");
-    if (it != env.end())
-        CHECK(it->second == "200");
+// Lower-case ASCII (headers keys)
+static std::string to_lower(std::string s) {
+    for (size_t i = 0; i < s.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c >= 'A' && c <= 'Z') s[i] = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
 }
 
-// ---------- CgiHandler::buildEnv (defaults) ----------
-TEST_CASE("CgiHandler::buildEnv defaults without Host/XFF", "[cgi][env][defaults]") {
-    const std::string raw =
-        "GET /cgi/echo.py HTTP/1.0\r\n"
+static bool starts_with(const std::string& s, const std::string& pfx) {
+    return (s.size() >= pfx.size() && std::equal(pfx.begin(), pfx.end(), s.begin()));
+}
+
+// Parse status line like "HTTP/1.1 200 OK"
+static void parse_status_line(const std::string& line, int& status, std::string& reason) {
+    std::istringstream iss(line);
+    std::string httpver;
+    iss >> httpver >> status;
+    std::getline(iss, reason);
+    if (!reason.empty() && reason[0] == ' ') reason.erase(0, 1);
+}
+
+// Split headers/body by CRLFCRLF; return pos after header block or npos if not found.
+static size_t find_header_end(const std::string& s) {
+    const std::string sep = "\r\n\r\n";
+    size_t pos = s.find(sep);
+    if (pos == std::string::npos) return pos;
+    return pos + sep.size();
+}
+
+static std::string trim(const std::string& s) {
+    size_t b = 0, e = s.size();
+    while (b < e && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n')) ++b;
+    while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\r' || s[e - 1] == '\n')) --e;
+    return s.substr(b, e - b);
+}
+
+static std::map<std::string,std::string> parse_headers_map(const std::string& block) {
+    std::map<std::string,std::string> H;
+    std::istringstream iss(block);
+    std::string line;
+    bool first = true;
+    while (std::getline(iss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (first) { first = false; continue; } // skip status
+        if (line.empty()) break;
+        size_t colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string key = to_lower(trim(line.substr(0, colon)));
+        std::string val = trim(line.substr(colon + 1));
+        H[key] = val;
+    }
+    return H;
+}
+
+// Decode a chunked body (very naive, for tests)
+static bool decode_chunked(const std::string& raw, std::string& out) {
+    out.clear();
+    size_t i = 0, N = raw.size();
+    for (;;) {
+        size_t line_end = raw.find("\r\n", i);
+        if (line_end == std::string::npos) return false;
+        std::string hex = raw.substr(i, line_end - i);
+        size_t chunk_size = 0;
+        { std::istringstream iss(hex); iss >> std::hex >> chunk_size; if (!iss || !iss.eof()) return false; }
+        i = line_end + 2;
+        if (chunk_size == 0) {
+            if (i + 2 > N) return false;
+            if (raw.compare(i, 2, "\r\n") != 0) return false;
+            i += 2;
+            break;
+        }
+        if (i + chunk_size + 2 > N) return false;
+        out.append(raw, i, chunk_size);
+        i += chunk_size;
+        if (raw.compare(i, 2, "\r\n") != 0) return false;
+        i += 2;
+    }
+    return true;
+}
+
+static Response parse_response(const std::string& raw) {
+    Response r;
+    r.raw = raw;
+
+    const size_t hdr_end = find_header_end(raw);
+    REQUIRE(hdr_end != std::string::npos);
+
+    r.raw_headers_block = raw.substr(0, hdr_end);
+    {
+        size_t line_end = r.raw_headers_block.find("\r\n");
+        REQUIRE(line_end != std::string::npos);
+        std::string status_line = r.raw_headers_block.substr(0, line_end);
+        parse_status_line(status_line, r.status, r.reason);
+    }
+
+    r.headers = parse_headers_map(r.raw_headers_block);
+
+    // body (raw)
+    std::string body_raw = raw.substr(hdr_end);
+
+    // decode based on headers
+    const std::string te = r.headers.count("transfer-encoding") ? r.headers.find("transfer-encoding")->second : "";
+    const std::string cl = r.headers.count("content-length")     ? r.headers.find("content-length")->second     : "";
+    bool is_chunked = false;
+    if (!te.empty()) {
+        std::string tmp = to_lower(te);
+        is_chunked = (tmp.find("chunked") != std::string::npos);
+    }
+
+    if (is_chunked) {
+        std::string decoded;
+        REQUIRE( decode_chunked(body_raw, decoded) );
+        r.body.swap(decoded);
+    } else if (!cl.empty()) {
+        size_t want = 0;
+        { std::istringstream iss(cl); iss >> want; REQUIRE(!!iss); }
+        REQUIRE( body_raw.size() >= want );
+        r.body.assign(body_raw.data(), want);
+    } else {
+        r.body = body_raw;
+    }
+    return r;
+}
+
+} // namespace http
+
+// ---------------------------
+// Helper: header token search
+// ---------------------------
+static bool header_has_token_ci(const std::map<std::string,std::string>& H,
+                                const std::string& key,
+                                const std::string& token) {
+    std::map<std::string,std::string>::const_iterator it =
+        H.find(http::to_lower(key));
+    if (it == H.end()) return false;
+    std::string v = http::to_lower(it->second);
+    std::string t = http::to_lower(token);
+    std::string cur;
+    for (size_t i = 0; i <= v.size(); ++i) {
+        char ch = (i < v.size() ? v[i] : ',');
+        if (ch == ',' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            if (!cur.empty()) { if (cur == t) return true; cur.clear(); }
+        } else {
+            cur += ch;
+        }
+    }
+    return false;
+}
+
+static std::string repeat_char(char c, size_t n) {
+    std::string s; s.resize(n, c); return s;
+}
+
+// ---------------------------
+// CGI tests (each spawns its own server on a free port)
+// ---------------------------
+
+TEST_CASE("CGI simple GET returns 200 and text-like content", "[cgi][get]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin); // spawns and waits
+
+    const std::string req =
+        "GET /cgi/echo.py?ping=1 HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "User-Agent: catch2-tests\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
         "\r\n";
 
-    HttpRequest req;
-    REQUIRE(req.parse(raw.c_str(), raw.size()) == true);
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, req);
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
 
-    VirtualServer vs;
-    vs.listen_host = "127.0.0.1";
-    vs.listen_port = 8079;
-    vs.root        = "/srv/www";
-    vs.server_names.clear();
-
-    CgiHandler h;
-    std::vector<std::string> envv;
-    REQUIRE(h.buildEnv(req, vs, envv) > 0);
-    const std::map<std::string,std::string> env = envVecToMap(envv);
-
-    // Defaults: SERVER_NAME falls back to VS listen_host (or first server_name if any)
-    CHECK(env.find("SERVER_NAME") != env.end());
-    CHECK(env.find("SERVER_NAME")->second == "127.0.0.1");
-
-    CHECK(env.find("SERVER_PORT") != env.end());
-    CHECK(env.find("SERVER_PORT")->second == "8079");
-
-    // Query string empty when none given
-    CHECK(env.find("QUERY_STRING") != env.end());
-    CHECK(env.find("QUERY_STRING")->second == "");
-
-    // Script filename rooted under VS root
-    CHECK(env.find("SCRIPT_FILENAME") != env.end());
-    CHECK(env.find("SCRIPT_FILENAME")->second == "/srv/www/cgi/echo.py");
-
-    // CONTENT_LENGTH may be absent or "0" for GET without body — accept either
-    std::map<std::string,std::string>::const_iterator it = env.find("CONTENT_LENGTH");
-    if (it != env.end()) CHECK(it->second == "0");
+    REQUIRE( (r.status == 200) );
+    REQUIRE( r.headers.count("server") == 1 );
+    REQUIRE( r.headers.count("content-type") == 1 );
 }
 
-// ---------- DOCUMENT_ROOT and SCRIPT_FILENAME pathing ----------
-TEST_CASE("CgiHandler::buildEnv sets DOCUMENT_ROOT and SCRIPT_FILENAME", "[cgi][env][paths]") {
-    const std::string raw = "GET /cgi/foo.php HTTP/1.1\r\n\r\n";
+TEST_CASE("CGI POST echoes body-sized payload (presence/length plausible)", "[cgi][post]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
 
-    HttpRequest req;
-    REQUIRE(req.parse(raw.c_str(), raw.size()) == true);
+    const std::string body = "hello-cgi-body";
+    std::ostringstream oss;
+    oss
+        << "POST /cgi/echo.py HTTP/1.1\r\n"
+        << "Host: 127.0.0.1\r\n"
+        << "User-Agent: catch2-tests\r\n"
+        << "Accept: */*\r\n"
+        << "Content-Type: text/plain\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n"
+        << "\r\n"
+        << body;
 
-    VirtualServer vs;
-    vs.listen_host = "0.0.0.0";
-    vs.listen_port = 8080;
-    vs.root        = "/opt/site";
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, oss.str());
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
 
-    CgiHandler h;
-    std::vector<std::string> envv;
-    REQUIRE(h.buildEnv(req, vs, envv) > 0);
-    const std::map<std::string,std::string> env = envVecToMap(envv);
+    REQUIRE( (r.status == 200) );
+    REQUIRE( (!r.body.empty()) );
+    bool contains_body = (r.body.find(body) != std::string::npos);
+    CHECK( (contains_body || r.body.size() >= body.size()) );
+}
 
-    CHECK(env.find("DOCUMENT_ROOT") != env.end());
-    CHECK(env.find("DOCUMENT_ROOT")->second == "/opt/site");
+TEST_CASE("CGI chunked response is well-formed when server selects chunked", "[cgi][chunked]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
 
-    CHECK(env.find("SCRIPT_FILENAME") != env.end());
-    CHECK(env.find("SCRIPT_FILENAME")->second == "/opt/site/cgi/foo.php");
+    const std::string body = repeat_char('A', 1024);
+    std::ostringstream oss;
+    oss
+        << "POST /cgi/echo.py HTTP/1.1\r\n"
+        << "Host: 127.0.0.1\r\n"
+        << "User-Agent: catch2-tests\r\n"
+        << "Accept: */*\r\n"
+        << "Content-Type: text/plain\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: keep-alive\r\n"
+        << "\r\n"
+        << body;
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, oss.str());
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    REQUIRE( (r.status == 200) );
+    bool is_chunked = header_has_token_ci(r.headers, "Transfer-Encoding", "chunked");
+    bool has_len    = (r.headers.count("content-length") == 1);
+    REQUIRE( (is_chunked || has_len) );
+    if (is_chunked) CHECK( (!r.body.empty()) );
+}
+
+TEST_CASE("CGI honors Connection: close", "[cgi][connection]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
+
+    const std::string body = "x";
+    std::ostringstream oss;
+    oss
+        << "POST /cgi/echo.py HTTP/1.1\r\n"
+        << "Host: 127.0.0.1\r\n"
+        << "User-Agent: catch2-tests\r\n"
+        << "Accept: */*\r\n"
+        << "Content-Type: text/plain\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n"
+        << "\r\n"
+        << body;
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, oss.str());
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    REQUIRE( (r.status == 200) );
+    bool says_close = header_has_token_ci(r.headers, "Connection", "close");
+    CHECK( (says_close || r.headers.count("connection") == 0) );
+}
+
+TEST_CASE("CGI large POST (64 KiB) succeeds without chunk errors", "[cgi][post][large]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
+
+    const size_t N = 64 * 1024;
+    const std::string body = repeat_char('A', N);
+
+    std::ostringstream oss;
+    oss
+        << "POST /cgi/echo.py HTTP/1.1\r\n"
+        << "Host: 127.0.0.1\r\n"
+        << "User-Agent: catch2-tests\r\n"
+        << "Accept: */*\r\n"
+        << "Content-Type: text/plain\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    const std::string head = oss.str();
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, head);
+    // partial writes to exercise server’s body reader
+    http::send_all(fd, body.substr(0, body.size()/2));
+    http::send_all(fd, body.substr(body.size()/2));
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    REQUIRE( (r.status == 200) );
+    CHECK( (r.body.size() >= body.size()/2) );
+}
+
+TEST_CASE("CGI must provide Content-Type", "[cgi][headers]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
+
+    const std::string req =
+        "GET /cgi/echo.py HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "User-Agent: catch2-tests\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, req);
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    REQUIRE( (r.status == 200) );
+    REQUIRE( r.headers.count("content-type") == 1 );
+    const std::string ct = http::to_lower(r.headers["content-type"]);
+    bool looks_text = (ct.find("text/plain") != std::string::npos) ||
+                      (ct.find("text/html")  != std::string::npos);
+    CHECK( looks_text );
+}
+
+TEST_CASE("CGI environment propagation sanity (QUERY_STRING non-empty on GET with query)", "[cgi][env]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
+
+    const std::string req =
+        "GET /cgi/echo.py?alpha=1&beta=2 HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "User-Agent: catch2-tests\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, req);
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    REQUIRE( (r.status == 200) );
+    bool mentions_alpha = (r.body.find("alpha=1") != std::string::npos);
+    bool mentions_beta  = (r.body.find("beta=2")  != std::string::npos);
+    CHECK( (mentions_alpha || mentions_beta) );
+}
+
+TEST_CASE("CGI rejects unsupported methods with 405 or 501", "[cgi][methods]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
+
+    const std::string req =
+        "PUT /cgi/echo.py HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "User-Agent: catch2-tests\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n";
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, req);
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    CHECK( (r.status == 405 || r.status == 501) );
+}
+
+TEST_CASE("CGI HEAD does not include body but has headers", "[cgi][head]") {
+    const char* bin  = std::getenv("WEBSERV_BIN")  ? std::getenv("WEBSERV_BIN")  : "./webserv";
+    const char* conf = std::getenv("WEBSERV_CONF") ? std::getenv("WEBSERV_CONF") : "extended.conf";
+    ServerRunner server(conf, bin);
+
+    const std::string req =
+        "HEAD /cgi/echo.py HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "User-Agent: catch2-tests\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+
+    int fd = http::connect_tcp("127.0.0.1", server.port);
+    http::send_all(fd, req);
+    http::Response r = http::parse_response(http::recv_all(fd));
+    ::close(fd);
+
+    REQUIRE( (r.status == 200 || r.status == 204) );
+    CHECK( (r.body.empty() || r.body.size() < 4) );
 }

@@ -119,54 +119,50 @@ int HttpRequest::handleLineStart(const std::string &in)
     size_t i = 0;
     size_t pos = 0;
 
+    // --- METHOD ---
     pos = in.find(' ', i);
-    if (pos == (size_t)-1)
-        return (HTTP_BAD_REQUEST);
-    this->method = in.substr(i, pos);
-    if (!isMethodValid(this->method))
-        return HTTP_NOT_IMPLEMENTED; // 501
+    if (pos == (size_t)-1) return HTTP_BAD_REQUEST;
+    this->method = in.substr(i, pos - i);
+    if (!isMethodValid(this->method)) return HTTP_NOT_IMPLEMENTED; // 501
 
-    i = ++pos;
-    pos = in.find('?', i);
-    if (pos != (size_t)-1)
-    {
-        this->path = in.substr(i, pos - i);
-        if (!isPathValid(this->path))
-            return (HTTP_BAD_REQUEST); // FIX: was HTTP_VERSION_NOT_SUPP
-        i = ++pos;
-        pos = in.find(' ', i);
-        if (pos == (size_t)-1)
-            return (HTTP_BAD_REQUEST);
-        this->query = in.substr(i, pos - i);
-        if (!isQueryValid(this->query))
-            return (HTTP_BAD_REQUEST);
-    }
-    else
-    {
-        pos = in.find(' ', i);
-        if (pos == (size_t)-1)
-            return (HTTP_BAD_REQUEST);
-        this->path = in.substr(i, pos - i);
-        if (!isPathValid(this->path))
-            return (HTTP_BAD_REQUEST);
-    }
+    // --- REQUEST-TARGET (raw) ---
+    i = pos + 1;
+    pos = in.find(' ', i);
+    if (pos == (size_t)-1) return HTTP_BAD_REQUEST;
+    const std::string request_target = in.substr(i, pos - i);
+    if (request_target.empty() || request_target[0] != '/') return HTTP_BAD_REQUEST;
 
-    i = ++pos;
+    // Preserve the raw request-target for CGI fallbacks (path[?query])
+    this->uri = request_target;
+
+    // Split into path + optional query
+    std::string::size_type qpos = request_target.find('?');
+    if (qpos == std::string::npos) {
+        this->path  = request_target;
+        this->query.clear();
+    } else {
+        this->path  = request_target.substr(0, qpos);
+        this->query = (qpos + 1 < request_target.size())
+                      ? request_target.substr(qpos + 1)
+                      : std::string();
+    }
+    if (!isPathValid(this->path)) return HTTP_BAD_REQUEST;
+    if (!this->query.empty() && !isQueryValid(this->query)) return HTTP_BAD_REQUEST;
+
+    // --- HTTP-VERSION ---
+    i = pos + 1;
     pos = in.find("\r\n", i);
-    if (pos == (size_t)-1)
-        return (HTTP_BAD_REQUEST);
+    if (pos == (size_t)-1) return HTTP_BAD_REQUEST;
     this->http_version = in.substr(i, pos - i);
-    if (!isHttpVerValid(this->http_version))
-        return (HTTP_VERSION_NOT_SUPP); // FIX: 505
+    if (!isHttpVerValid(this->http_version)) return HTTP_VERSION_NOT_SUPP; // 505
 
+    // Reject trailing junk after CRLF (defensive)
     i = pos + 2;
-    if (i < in.size() && in[i])
-        return (HTTP_BAD_REQUEST); // avoid out-of-bounds & reject trailing junk
+    if (i < in.size() && in[i]) return HTTP_BAD_REQUEST;
 
     this->state = HEADER;
-    return (0);
+    return 0;
 }
-
 
 int HttpRequest::handleLineHeader(const std::string &in)
 {

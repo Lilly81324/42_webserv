@@ -1004,6 +1004,7 @@ It also caches the chosen virtual-server index for subsequent decisions, includi
 
 // ClientConnection.cpp
 // ClientConnection.cpp
+// ClientConnection.cpp
 void ClientConnection::selectRouteOnce()
 {
     if (route_selected) { state = PH_PRECHECK; return; }
@@ -1011,13 +1012,12 @@ void ClientConnection::selectRouteOnce()
     plan.needs_body = false;
     plan.max_body_bytes = 0;
 
-    // Use actual Host header (strip :port; lowercase; keep [v6])
+    // Use actual Host header (strip :port; lowercase; keep [v6] brackets)
     std::string host = req.getHeaders().get("Host");
     if (!host.empty()) {
         if (host[0] == '[') {
             std::string::size_type rb = host.find(']');
             if (rb != std::string::npos) {
-                // Keep "[v6]" only (drop optional :port)
                 if (rb + 1 < host.size() && host[rb + 1] == ':')
                     host = host.substr(0, rb + 1);
                 else
@@ -1035,10 +1035,8 @@ void ClientConnection::selectRouteOnce()
         host = "localhost";
     }
 
-    // Pick the VS by (local_port, host)
     vs_idx = server->resolveVirtualServerByPort(local_port, host);
 
-    // Run guards (fills needs_body + max_body_bytes)
     pr = RequestGuards::preflight(server->getConfig(),
                                   vs_idx,
                                   req.getMethod(),
@@ -1049,6 +1047,7 @@ void ClientConnection::selectRouteOnce()
     state = PH_PRECHECK;
     resetDeadline(BODY_TIMEOUT_MS);
 }
+
 
 
 

@@ -1,7 +1,7 @@
-
+// RequestGuard.cpp
 #if !defined(REQUEST_GUARDS_DEFAULT_MAX_BODY)
 #define REQUEST_GUARDS_DEFAULT_MAX_BODY 2000
-#endif // REQUEST_GUARDS_DEFAULT_MAX_BODY
+#endif
 
 #include "RequestGuards.h"
 #include "ServerConfig.h"
@@ -10,10 +10,6 @@
 #include "RouteResolver.h"
 #include <cstdlib>
 #include <cctype>
-
-
-
-
 
 static std::string path_from_uri(const std::string &uri)
 {
@@ -34,7 +30,7 @@ static bool header_has_chunked(const Headers &hdrs)
     const std::string &te = hdrs.get("Transfer-Encoding");
     if (te.empty()) return false;
     std::string s = te;
-    for (std::string::size_type i = 0; i < s.size(); ++i)
+    for (std::size_t i = 0; i < s.size(); ++i)
         s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
     return s.find("chunked") != std::string::npos;
 }
@@ -58,7 +54,7 @@ static std::size_t lookup_max_body_vs(const ServerConfig &cfg, int vs_idx)
         return REQUEST_GUARDS_DEFAULT_MAX_BODY;  // invalid vs -> conservative default
 
     int m = v[vs_idx].client_max_body_size; // bytes; 0 = unlimited
-    return (m <= 0) ? 0 : static_cast<std::size_t>(m); // **FIX**: 0 means unlimited
+    return (m <= 0) ? 0 : static_cast<std::size_t>(m); // <-- FIXED
 }
 
 Preflight RequestGuards::preflight(const ServerConfig &cfg,
@@ -70,7 +66,6 @@ Preflight RequestGuards::preflight(const ServerConfig &cfg,
 {
     Preflight pr;
 
-    // Router decision
     RouteDecision dec;
     const std::string path = path_from_uri(uri_in);
     Router::makeDecisionForVS(cfg, vs_idx, method_in, path, dec);
@@ -84,10 +79,9 @@ Preflight RequestGuards::preflight(const ServerConfig &cfg,
     const std::string method = upper_copy(method_in);
     pr.needs_body = (method == "POST") || (method == "PUT") || (method == "PATCH");
 
-    // **FIXED CAP**
+    // apply cap (server-level; 0 = unlimited)
     pr.max_body_bytes = lookup_max_body_vs(cfg, vs_idx);
 
-    // 411 / early 413
     const bool chunked = header_has_chunked(hdrs);
     std::size_t cl = 0;
     const bool hasCL = parse_content_length(hdrs, cl);
@@ -102,6 +96,5 @@ Preflight RequestGuards::preflight(const ServerConfig &cfg,
             return pr;
         }
     }
-
     return pr;
 }

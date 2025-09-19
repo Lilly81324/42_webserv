@@ -997,29 +997,62 @@ It also caches the chosen virtual-server index for subsequent decisions, includi
 
 */
 
+// ClientConnection.cpp  (in selectRouteOnce)
+
+// ClientConnection.cpp
+
+
+// ClientConnection.cpp
+// ClientConnection.cpp
 void ClientConnection::selectRouteOnce()
 {
-	if (route_selected)
-	{
-		state = PH_PRECHECK;
-		return;
-	}
+    if (route_selected) { state = PH_PRECHECK; return; }
 
-	plan.needs_body = false;
-	plan.max_body_bytes = 0;
-	// replace 'localhost' with HttpRequest actual domainName
-	vs_idx = server->resolveVirtualServerByPort(local_port, "localhost");
+    plan.needs_body = false;
+    plan.max_body_bytes = 0;
 
-	pr = RequestGuards::preflight(server->getConfig(),
-								  vs_idx,
-								  req.getMethod(),
-								  req.getPath(),
-								  req.getHeaders(),
-								  ctx);
-	route_selected = true;
-	state = PH_PRECHECK;
-	resetDeadline(BODY_TIMEOUT_MS);
+    // Use actual Host header (strip :port; lowercase; keep [v6])
+    std::string host = req.getHeaders().get("Host");
+    if (!host.empty()) {
+        if (host[0] == '[') {
+            std::string::size_type rb = host.find(']');
+            if (rb != std::string::npos) {
+                // Keep "[v6]" only (drop optional :port)
+                if (rb + 1 < host.size() && host[rb + 1] == ':')
+                    host = host.substr(0, rb + 1);
+                else
+                    host = host.substr(0, rb + 1);
+            }
+        } else {
+            std::string::size_type c = host.find(':');
+            if (c != std::string::npos) host = host.substr(0, c);
+        }
+        for (size_t i = 0; i < host.size(); ++i) {
+            char &ch = host[i];
+            if (ch >= 'A' && ch <= 'Z') ch = char(ch - 'A' + 'a');
+        }
+    } else {
+        host = "localhost";
+    }
+
+    // Pick the VS by (local_port, host)
+    vs_idx = server->resolveVirtualServerByPort(local_port, host);
+
+    // Run guards (fills needs_body + max_body_bytes)
+    pr = RequestGuards::preflight(server->getConfig(),
+                                  vs_idx,
+                                  req.getMethod(),
+                                  req.getPath(),
+                                  req.getHeaders(),
+                                  ctx);
+    route_selected = true;
+    state = PH_PRECHECK;
+    resetDeadline(BODY_TIMEOUT_MS);
 }
+
+
+
+
 
 
 /* 
@@ -1039,62 +1072,52 @@ void ClientConnection::runPreflight()
 {
     const Headers &H = req.getHeaders();
 
-	HeaderCheck hc = HeaderProcessor::analyze(req, H, max_body_bytes);
-	if (!hc.ok)
-	{
-		fail(hc.error_status, 0);
-		return;
-	}
+    HeaderCheck hc = HeaderProcessor::analyze(req, H, max_body_bytes);
+    if (!hc.ok) { fail(hc.error_status, 0); return; }
 
     if (!pr.ok) { fail(pr.reject_status ? pr.reject_status : 400, pr.reject_reason.c_str()); return; }
 
+    // take cap from guards
     max_body_bytes = pr.max_body_bytes;
 
-	if (hc.expect_continue && ExpectContinue::needed(req.getHeaders()))
-	{
-		ExpectContinue::write100(io.getChainBuf());
-	}
+    if (hc.expect_continue && ExpectContinue::needed(req.getHeaders())) {
+        ExpectContinue::write100(io.getChainBuf());
+    }
 
     if (!pr.needs_body) {
         state = PH_ROUTE;
         return;
     }
 
-	if (hc.chunked)
-	{
-		decideBodyReader(/* chunked */);
-	}
-	else if (hc.content_length > 0)
-	{
-		if (max_body_bytes && hc.content_length > max_body_bytes)
-		{
-			fail(413, "Payload Too Large");
-			return;
-		}
-		decideBodyReader(hc.content_length);
-	}
-	else
-	{
-		fail(411, "Length Required");
-		return;
-	}
+    if (hc.chunked) {
+        decideBodyReader(/* chunked */);              // builds ChunkedReader
+        plan.max_body_bytes = max_body_bytes;         // **NEW: propagate cap to plan (spill threshold)**
+    } else if (hc.content_length > 0) {
+        if (max_body_bytes && hc.content_length > max_body_bytes) {
+            fail(413, "Payload Too Large");
+            return;
+        }
+        decideBodyReader(hc.content_length);
+    } else {
+        fail(411, "Length Required");
+        return;
+    }
 
-	// ---- INSERT THIS SAFETY NET *after* decideBodyReader(...) ----
-	if (body)
-	{
-		std::string tail = req.takeBuffer(); // may contain body bytes that arrived with headers
-		if (!tail.empty())
-			(void)body->consume(tail.data(), tail.size());
-	}
-	// --------------------------------------------------------------
+    // Feed any tail bytes that arrived with headers
+    if (body) {
+        std::string tail = req.takeBuffer();
+        if (!tail.empty())
+            (void)body->consume(tail.data(), tail.size());
+    }
 
-	body_bytes_prev = 0;
-	body_no_progress_ticks = 0;
-	flush_no_progress_ticks = 0;
+    body_bytes_prev = 0;
+    body_no_progress_ticks = 0;
+    flush_no_progress_ticks = 0;
 
-	state = PH_READ_BODY;
-	resetDeadline(BODY_TIMEOUT_MS);
+    state = PH_READ_BODY;
+    resetDeadline(BODY_TIMEOUT_MS);
 }
+
 
 /* 
 // --- in ClientConnection.cpp ---

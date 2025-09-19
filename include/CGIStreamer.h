@@ -146,6 +146,18 @@ private:
 	std::size_t         client_out_bytes_; // last known queued bytes on client socket
 
 	bool stdout_paused_; 
+
+	// in CGIStreamer.h (private:)
+	std::vector<char> mem_body_;   // staged in-memory request body
+	std::size_t       mem_off_;    // how many bytes already written to CGI stdin
+	bool              using_mem_;  // true if we're feeding from mem_body_
+
+	// ---- stdin feed (request body → CGI) ----
+	std::vector<char> in_mem_body_;  // snapshot of in-RAM request body
+	std::size_t       in_mem_off_;   // bytes already written to CGI stdin
+	bool              using_mem_body_; // true if feeding from in_mem_body_
+
+
 };
 
 #endif // CGI_STREAMER_H

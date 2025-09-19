@@ -123,7 +123,17 @@ CGIStreamer::CGIStreamer(HttpRequest &req, HttpResponse &res)
 	  client_out_bytes_(0)
 	  // ---- Read throttling ----
 	  ,
-	  stdout_paused_(false)
+	  stdout_paused_(false),
+
+      // in CGIStreamer.cpp ctor init list
+      mem_body_(), 
+      mem_off_(0), 
+      using_mem_(false),
+
+    in_mem_body_(), 
+    in_mem_off_(0), 
+    using_mem_body_(false)
+
 {
 	// nothing else to do
 }
@@ -469,6 +479,8 @@ void CGIStreamer::finalizeHeaders()
 #include <poll.h> // POLLIN, POLLOUT
 
 
+
+
 /* 
 
 void closeStdin() / void closeStdout()
@@ -600,111 +612,112 @@ Returns true when the streamer is active and ready for polling; otherwise failed
 */
 
 bool CGIStreamer::beginCgi(const CgiSpec &spec,
-						   const std::string &script_path,
-						   const std::vector<std::string> &envv)
+                           const std::string &script_path,
+                           const std::vector<std::string> &envv)
 {
-	// ---- reset runtime state ----
-	failed_ = false;
-	cgi_active_ = false;
+    // ---- reset runtime state ----
+    failed_         = false;
+    cgi_active_     = false;
 
-	cgi_in_fd_ = -1;  // server → child stdin (we write here)
-	cgi_out_fd_ = -1; // child  → server stdout (we read here)
+    cgi_in_fd_      = -1;   // server → child stdin (we write here)
+    cgi_out_fd_     = -1;   // child  → server stdout (we read here)
 
-	cgi_body_off_ = 0;
-	if (body_fd_ >= 0)
-	{
-		::close(body_fd_);
-		body_fd_ = -1;
-	}
-	body_file_off_ = 0;
-	body_path_.clear();
-	if (req_.isBodyOnDisk())
-		body_path_ = req_.getBodyFilePath();
+    cgi_body_off_   = 0;    // generic progress counter (kept for logs)
+    if (body_fd_ >= 0) { ::close(body_fd_); body_fd_ = -1; }
+    body_file_off_  = 0;
+    body_path_.clear();
+    if (req_.isBodyOnDisk()) body_path_ = req_.getBodyFilePath();
 
-	hdr_state_ = HDR_WAITING;
-	cgi_header_accum_.clear();
-	saw_content_type_ = false;
-	status_code_ = 0;
-	status_reason_.clear();
-	set_cookie_.clear();
+    // stdout parsing / response framing
+    hdr_state_         = HDR_WAITING;
+    cgi_header_accum_.clear();
+    saw_content_type_  = false;
+    status_code_       = 0;
+    status_reason_.clear();
+    set_cookie_.clear();
 
-	http_head_queued_ = false;
-	chunked_mode_ = true;
-	sent_final_chunk_ = false;
-	out_buf_.clear();
-	out_off_ = 0;
-	stdout_paused_ = false;
+    http_head_queued_  = false;
+    chunked_mode_      = true;
+    sent_final_chunk_  = false;
+    out_buf_.clear();
+    out_off_           = 0;
+    stdout_paused_     = false;
 
-	// ---- spawn & set fds non-blocking ----
-	if (!proc_.spawn(spec, script_path, envv))
-		return false;
+    // ---- spawn child ----
+    if (!proc_.spawn(spec, script_path, envv)) {
+        failed_ = true;
+        return false;
+    }
+    cgi_in_fd_  = proc_.inFD();
+    cgi_out_fd_ = proc_.outFD();
 
-	cgi_in_fd_ = proc_.inFD();
-	cgi_out_fd_ = proc_.outFD();
-
+    // ---- set pipes non-blocking + CLOEXEC ----
 #ifdef F_GETFL
-	if (cgi_in_fd_ >= 0)
-	{
-		int fl = ::fcntl(cgi_in_fd_, F_GETFL, 0);
-		if (fl >= 0)
-			::fcntl(cgi_in_fd_, F_SETFL, fl | O_NONBLOCK);
+    if (cgi_in_fd_ >= 0) {
+        int fl = ::fcntl(cgi_in_fd_, F_GETFL, 0);
+        if (fl >= 0) ::fcntl(cgi_in_fd_, F_SETFL, fl | O_NONBLOCK);
 #ifdef F_GETFD
-		fl = ::fcntl(cgi_in_fd_, F_GETFD, 0);
-		if (fl >= 0)
-			::fcntl(cgi_in_fd_, F_SETFD, fl | FD_CLOEXEC);
+        fl = ::fcntl(cgi_in_fd_, F_GETFD, 0);
+        if (fl >= 0) ::fcntl(cgi_in_fd_, F_SETFD, fl | FD_CLOEXEC);
 #endif
-	}
-	if (cgi_out_fd_ >= 0)
-	{
-		int fl = ::fcntl(cgi_out_fd_, F_GETFL, 0);
-		if (fl >= 0)
-			::fcntl(cgi_out_fd_, F_SETFL, fl | O_NONBLOCK);
+    }
+    if (cgi_out_fd_ >= 0) {
+        int fl = ::fcntl(cgi_out_fd_, F_GETFL, 0);
+        if (fl >= 0) ::fcntl(cgi_out_fd_, F_SETFL, fl | O_NONBLOCK);
 #ifdef F_GETFD
-		fl = ::fcntl(cgi_out_fd_, F_GETFD, 0);
-		if (fl >= 0)
-			::fcntl(cgi_out_fd_, F_SETFD, fl | FD_CLOEXEC);
+        fl = ::fcntl(cgi_out_fd_, F_GETFD, 0);
+        if (fl >= 0) ::fcntl(cgi_out_fd_, F_SETFD, fl | FD_CLOEXEC);
 #endif
-	}
+    }
 #endif
 
-	if (cgi_out_fd_ < 0)
-	{
-		failed_ = true;
-		return false;
-	}
+    if (cgi_out_fd_ < 0) { failed_ = true; return false; }
 
-	// ---- initial event-loop interest (right after O_NONBLOCK) ----
-	if (loop_)
-	{
-		// always read child's stdout
-		loop_->modFD(cgi_out_fd_, POLLIN);
-		// be ready to feed child's stdin; if we later decide there's no body,
-		// closeStdin() will clear this and close the fd.
-		if (cgi_in_fd_ >= 0)
-			loop_->modFD(cgi_in_fd_, POLLOUT);
-	}
+    // ---- prime stdin feed (the missing piece that fixes big-body hangs) ----
+    // If body is kept in memory, take a stable snapshot ONCE and write it across ticks.
+    in_mem_body_.clear();
+    in_mem_off_     = 0;
+    using_mem_body_ = false;
 
-	// If no body at all, close stdin now so the CGI won’t block on read()
-	if (req_.getBodyLength() == 0 && !req_.isBodyOnDisk())
-		closeStdin(); // this also clears POLLOUT via loop_->modFD(fd, 0)
+    if (!req_.isBodyOnDisk()) {
+        const std::size_t blen = req_.getBodyLength();
+        if (blen > 0) {
+            in_mem_body_ = req_.readBodyToVector();   // snapshot
+            using_mem_body_ = !in_mem_body_.empty();
+        }
+    } else {
+        // for on-disk bodies we’ll open body_fd_ lazily on first POLLOUT in pump
+        body_file_off_ = 0;
+    }
 
-	// ---- deadlines ----
-	struct timeval tv;
-	::gettimeofday(&tv, 0);
-	const unsigned long long now_ms =
-		(unsigned long long)tv.tv_sec * 1000ULL +
-		(unsigned long long)tv.tv_usec / 1000ULL;
+    // ---- register fds with event loop right after O_NONBLOCK ----
+    if (loop_) {
+        loop_->modFD(cgi_out_fd_, POLLIN);           // always read child's stdout
+        if (cgi_in_fd_ >= 0) loop_->modFD(cgi_in_fd_, POLLOUT); // to feed stdin progressively
+    }
 
-	const int HDR_WAIT_MS = 3000;	  // header-phase timeout
-	const int TOTAL_LIMIT_MS = 15000; // total runtime timeout
+    // If there is truly no body, close stdin now so the CGI doesn’t block on read()
+    if (!using_mem_body_ && !req_.isBodyOnDisk() && req_.getBodyLength() == 0) {
+        closeStdin(); // also clears POLLOUT via loop_->modFD(fd, 0)
+    }
 
-	hdr_deadline_.reset(now_ms, HDR_WAIT_MS);
-	total_deadline_.reset(now_ms, TOTAL_LIMIT_MS);
-	resetWriteDeadline(); // arms WRITE_TIMEOUT_MS from "now"
+    // ---- arm deadlines ----
+    struct timeval tv; ::gettimeofday(&tv, 0);
+    const unsigned long long now_ms =
+        (unsigned long long)tv.tv_sec * 1000ULL +
+        (unsigned long long)tv.tv_usec / 1000ULL;
 
-	cgi_active_ = true;
-	return true;
+    const int HDR_WAIT_MS    = 3000;   // time to see CGI headers
+    const int TOTAL_LIMIT_MS = 15000;  // total runtime cap
+
+    hdr_deadline_.reset(now_ms, HDR_WAIT_MS);
+    total_deadline_.reset(now_ms, TOTAL_LIMIT_MS);
+    resetWriteDeadline();
+
+    cgi_active_ = true;
+    return true;
 }
+
 
 /* 
 

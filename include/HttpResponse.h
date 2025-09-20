@@ -12,6 +12,7 @@ Date: 8/10/2025
 #include <vector>
 #include <ostream>
 #include "Headers.h"
+#include "HttpRequest.h"
 #include "CookieJar.h"
 
 class HttpResponse {
@@ -26,13 +27,21 @@ public:
 
 		// Headers & cookies
 		Headers           headers;
-		CookieJar         cookies;
+		CookieJar         *cookies;
 
 		// Legacy names for compatibility
 		int               status;         // e.g. 200
 		std::string       reason;         // e.g. "OK"
 
+		/**
+		 * @warning Legacy support, you should realistically be giving 
+		 * this a Request, to steal its CookieJar from
+		 */
 		HttpResponse();
+		/**
+		 * Use this Constructor for Responses that may need Cookies
+		 */
+		HttpResponse(HttpRequest &req);
 		~HttpResponse();
 
 		// Helpers

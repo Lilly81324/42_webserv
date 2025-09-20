@@ -44,7 +44,7 @@ ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	  server(s),
 	  io(fd, 64 * 1024),
 	  req(),
-	  res(),
+	  res(req),
 	  body(0),
 	  cgi(req, res),
 	  dl(),
@@ -616,7 +616,7 @@ bool ClientConnection::pumpCgiToSocket(std::size_t max_bytes)
 			// Ready for the next request on this keep-alive connection
 			// Reinitialize request/response to defaults
 			req = HttpRequest();
-			res = HttpResponse();
+			res = HttpResponse(req);
 
 			state = PH_READ_HEADERS; // wait for the next request
 		}
@@ -1255,7 +1255,7 @@ void ClientConnection::finishWriteOrNext()
 	plan = RoutePlan();
 	ctx->reset();
 	req = HttpRequest();
-	res = HttpResponse();
+	res = HttpResponse(req);
 	route_selected = false;
 
 	fixed_body_target_ = (std::size_t)-1; // <— reset here too

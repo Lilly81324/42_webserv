@@ -7,40 +7,71 @@ Date: 11/08/2025
 
 #include "Headers.h"
 
-Headers::Headers() : map(), byteSize(0)
+Headers::Headers() : map(), byteSize(0), realByteSize(0), entryCount(0), realEntryCount(0)
 {
 }
 
 Headers::~Headers()
 {
-	this->byteSize = 0;
 	this->map.clear();
+}
+
+bool Headers::phantomReSet(const std::string &oldValue, const std::string &newValue)
+{
+	// If Key already exists, account for the differenc of old and new value
+	int diff = (int)newValue.size() - (int)oldValue.size();
+	if (this->byteSize + diff > HEADER_BYTE_LIMIT)
+		return (false);
+	this->byteSize += diff;
+	return (true);
+}
+
+bool Headers::phantomSet(const std::string &key, const std::string &value)
+{
+	// If key doesnt exist, account for keys length and values length
+	if (entryCount + 1 > HEADER_ENTRY_LIMIT)
+		return (false);
+	if (this->byteSize + key.size() + value.size() > HEADER_BYTE_LIMIT)
+		return (false);
+	this->byteSize += key.size() + value.size();
+	this->entryCount++;
+	return (true);
 }
 
 bool Headers::set(std::string key, std::string value)
 {
-	if (this->getLength() + 1 > HEADER_ENTRY_LIMIT)
+	if (entryCount + 1 > HEADER_ENTRY_LIMIT)
 		return (false);
+	std::size_t keySize = key.size();
+	std::size_t oldSize = this->get(key).size();
+	std::size_t newSize = value.size();
+	int diff;
 	if (this->keyExists(key))
 	{
-		if (this->byteSize + (value.size() - this->get(key).size()) > HEADER_BYTE_LIMIT)
+		// If Key already exists, account for the differenc of old and new value
+		diff = (int)newSize - (int)oldSize;
+		if (this->byteSize + diff > HEADER_BYTE_LIMIT)
 			return (false);
-		this->byteSize -= this->get(key).size();
+		this->byteSize += diff;
+		this->realByteSize += diff;
 	}
 	else
 	{
-		if (this->byteSize + key.size() + value.size() > HEADER_BYTE_LIMIT)
+		// If key doesnt exist, account for keys length and values length
+		if (this->byteSize + keySize + newSize > HEADER_BYTE_LIMIT)
 			return (false);
-		this->byteSize += key.size();
+		this->byteSize += keySize + newSize;
+		this->realByteSize += keySize + newSize;
+		this->entryCount++;
+		this->realEntryCount++;
 	}
-	this->byteSize += value.size();
 	this->map[key] = value;
 	return (true);
 }
 
-bool Headers::mergeFrom(const Headers &src)
+bool Headers::mergeFrom(Headers &src)
 {
-	std::map<std::string, std::string, CiLess>::const_iterator it;
+	std::map<std::string, std::string, CiLess>::iterator it;
 	bool okay = true;
 
 	for (it = src.getBegin(); okay && it != src.getEnd(); it++)
@@ -52,6 +83,8 @@ bool Headers::mergeFrom(const Headers &src)
 
 void Headers::erase(const std::string &key)
 {
+	if (!keyExists(key))
+		return ;
 	this->byteSize -= (key.size() + get(key).size());
 	this->map.erase(key);
 }
@@ -60,14 +93,17 @@ void Headers::clear(void)
 {
 	this->map.clear();
 	this->byteSize = 0;
+	this->realByteSize = 0;
+	this->entryCount = 0;
+	this->realEntryCount = 0;
 }
 
-std::map<std::string, std::string, CiLess>::const_iterator Headers::getBegin(void) const
+std::map<std::string, std::string, CiLess>::iterator Headers::getBegin(void)
 {
 	return (this->map.begin());
 }
 
-std::map<std::string, std::string, CiLess>::const_iterator Headers::getEnd(void) const
+std::map<std::string, std::string, CiLess>::iterator Headers::getEnd(void)
 {
 	return (this->map.end());
 }
@@ -103,7 +139,7 @@ std::string Headers::serialize(void) const
 		out.append(it->second);
 		out.append("\r\n");
 	}
-	out += "\r\n";
+	out.append("\r\n");
 	return (out);
 }
 
@@ -128,6 +164,21 @@ bool Headers::isEmpty(void) const
 size_t Headers::getByteSize(void) const
 {
 	return (this->byteSize);
+}
+
+size_t Headers::getRealByteSize(void) const
+{
+	return (this->realByteSize);
+}
+
+size_t Headers::getEntryCount(void) const
+{
+	return (this->entryCount);
+}
+
+size_t Headers::getRealEntryCount(void) const
+{
+	return (this->realEntryCount);
 }
 
 std::ostream &operator<<(std::ostream &out, const Headers &target)

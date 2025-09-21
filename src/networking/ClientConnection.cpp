@@ -161,6 +161,9 @@ void ClientConnection::drainRingIntoBody()
 	}
 }
 
+
+
+
 /* 
 
 ClientConnection::~ClientConnection()
@@ -1071,44 +1074,71 @@ void ClientConnection::runPreflight()
 {
     const Headers &H = req.getHeaders();
 
+    // Parse/validate headers first
     HeaderCheck hc = HeaderProcessor::analyze(req, H, max_body_bytes);
-    if (!hc.ok) { fail(hc.error_status, 0); return; }
-
-    if (!pr.ok) { fail(pr.reject_status ? pr.reject_status : 400, pr.reject_reason.c_str()); return; }
-
-    // take cap from guards
-    max_body_bytes = pr.max_body_bytes;
-
-    if (hc.expect_continue && ExpectContinue::needed(req.getHeaders())) {
-        ExpectContinue::write100(io.getChainBuf());
+    if (!hc.ok) {
+        fail(hc.error_status, 0);
+        return;
     }
 
+    // Guards (method allowed, etc.)
+    if (!pr.ok) {
+        fail(pr.reject_status ? pr.reject_status : 400, pr.reject_reason.c_str());
+        return;
+    }
+
+    // Adopt stricter cap from guards if provided
+    if (pr.max_body_bytes && (!max_body_bytes || pr.max_body_bytes < max_body_bytes))
+        max_body_bytes = pr.max_body_bytes;
+
+    // If this request doesn't need a body, route immediately.
     if (!pr.needs_body) {
         state = PH_ROUTE;
         return;
     }
 
+    // *** KEY FIX ***
+    // If Content-Length is known and exceeds the cap, reject with 413
+    // BEFORE we emit 100-continue or construct any body reader.
+    if (!hc.chunked && hc.content_length > 0 &&
+        max_body_bytes && hc.content_length > max_body_bytes)
+    {
+        fail(413, "Payload Too Large");
+        return;
+    }
+
+    // Only now consider Expect: 100-continue
+    if (hc.expect_continue && ExpectContinue::needed(H)) {
+        ExpectContinue::write100(io.getChainBuf());
+    }
+
+    // Decide how we'll read the body
     if (hc.chunked) {
-        decideBodyReader(/* chunked */);              // builds ChunkedReader
-        plan.max_body_bytes = max_body_bytes;         // **NEW: propagate cap to plan (spill threshold)**
-    } else if (hc.content_length > 0) {
-        if (max_body_bytes && hc.content_length > max_body_bytes) {
-            fail(413, "Payload Too Large");
-            return;
-        }
+        // Build your chunked reader
+        decideBodyReader(/* chunked */);
+
+        // Optional: if you have a plan/spill threshold tied to the cap, set it here.
+        // (No-op if you don't use 'plan'.)
+        // plan.max_body_bytes = max_body_bytes;
+    }
+    else if (hc.content_length > 0) {
+        // Content-Length already validated above against max_body_bytes
         decideBodyReader(hc.content_length);
-    } else {
+    }
+    else {
+        // No CL and not chunked -> 411
         fail(411, "Length Required");
         return;
     }
 
-    // Feed any tail bytes that arrived with headers
+    // Feed any tail bytes that arrived with headers to the body reader
     if (body) {
         std::string tail = req.takeBuffer();
         if (!tail.empty())
             (void)body->consume(tail.data(), tail.size());
     }
 
+    // Reset progress/timeout bookkeeping and switch state
     body_bytes_prev = 0;
     body_no_progress_ticks = 0;
     flush_no_progress_ticks = 0;
@@ -1116,6 +1146,15 @@ void ClientConnection::runPreflight()
     state = PH_READ_BODY;
     resetDeadline(BODY_TIMEOUT_MS);
 }
+
+
+
+
+
+
+
+
+
 
 
 /* 
@@ -1135,18 +1174,14 @@ honoring server limits configured per location or server block.
 // --- in ClientConnection.cpp ---
 void ClientConnection::readBody()
 {
-	if (!body)
-	{
-		fail(400, "Bad Request");
-		return;
-	}
+    if (!body) { fail(400, "Bad Request"); return; }
 
-	IoRing &ring = io.getInputRing();
+    IoRing &ring = io.getInputRing();
 
-	// Progress baseline
-	const std::size_t before_bytes = body->bytes_received();
+    // Progress baselines
+    const std::size_t before_bytes = body->bytes_received();
 
-	// 1) Drain as much as the reader will accept
+    // 1) Drain as much as the reader will accept from the socket ring
 	for (;;)
 	{
 		const char *buf = ring.readPtr();
@@ -1160,78 +1195,82 @@ void ClientConnection::readBody()
 
 		ring.consumed(used);
 		resetDeadline(BODY_TIMEOUT_MS);
-	}
 
-	const std::size_t after_bytes = body->bytes_received();
-
-	// 2) Enforce total body cap (post-read, on de-chunked length)
-	if (max_body_bytes && after_bytes > max_body_bytes)
-	{
-		fail(413, "Payload Too Large");
-		return;
-	}
-
-	// 3) Watchdogs: read progress + staging flush progress
-	if (after_bytes == before_bytes && ring.readAvail() == 0)
-		++body_no_progress_ticks;
-	else
-		body_no_progress_ticks = 0;
-
-	std::size_t pending_before = 0, flushed = 0;
-	if (FileBodyReader *fr = dynamic_cast<FileBodyReader *>(body))
-	{
-		pending_before = fr->pending_size();
-		if (pending_before)
-			flushed = fr->flush_to_disk(64 * 1024);
-	}
-	else if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body))
-	{
-		pending_before = cr->pending_size();
-		if (pending_before)
-			flushed = cr->flush_to_disk(64 * 1024);
-	}
-
-	if (pending_before > 0 && flushed == 0)
-		++flush_no_progress_ticks;
-	else
-		flush_no_progress_ticks = 0;
-
-	if (body_no_progress_ticks >= BODY_STALL_TICK_LIMIT)
-	{
-		fail(408, "Request Timeout");
-		return;
-	}
-	if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT)
-	{
-		fail(507, "Insufficient Storage");
-		return;
-	}
-
-	// 4) Completion check
-	bool done = false;
-	if (fixed_body_target_ != (std::size_t)-1)
-	{
-		if (body->bytes_received() >= fixed_body_target_)
-		{
-			if (FileBodyReader *fr2 = dynamic_cast<FileBodyReader *>(body))
-				done = (fr2->pending_size() == 0);
-			else
-				done = true;
+		// 🔴 Enforce cap immediately on the decoded total.
+		//     (ChunkedReader::bytes_received() tracks *decoded* bytes.)
+		if (max_body_bytes && body->bytes_received() > max_body_bytes) {
+			fail(413, "Payload Too Large");
+			
+			return;
 		}
 	}
-	else
-	{
-		if (ChunkedReader *cr2 = dynamic_cast<ChunkedReader *>(body))
-			done = cr2->complete();
-	}
 
-	if (!done)
-		return;
 
-	// 5) Body complete → advance pipeline
-	state = PH_ROUTE; // or PH_ROUTE_SELECT if that’s your next step
-	resetDeadline(WR_TIMEOUT_MS);
+
+    // 2) Flush any staged/decoded bytes to disk (ChunkedReader/FileBodyReader)
+    std::size_t pending_before = 0, flushed = 0;
+    if (FileBodyReader *fr = dynamic_cast<FileBodyReader *>(body))
+    {
+        pending_before = fr->pending_size();
+        if (pending_before)
+            flushed = fr->flush_to_disk(64 * 1024);
+    }
+    else if (ChunkedReader *cr = dynamic_cast<ChunkedReader *>(body))
+    {
+        pending_before = cr->pending_size();
+        if (pending_before)
+            flushed = cr->flush_to_disk(64 * 1024);
+    }
+
+    // Enforce runtime cap again in case bytes_received() advanced during flush
+    if (max_body_bytes && body->bytes_received() > max_body_bytes) {
+        fail(413, "Payload Too Large");
+        return;
+    }
+
+    // 3) Watchdogs: read progress + flush progress
+    const std::size_t after_bytes = body->bytes_received();
+    if (after_bytes == before_bytes && ring.readAvail() == 0)
+        ++body_no_progress_ticks;
+    else
+        body_no_progress_ticks = 0;
+
+    if (pending_before > 0 && flushed == 0)
+        ++flush_no_progress_ticks;
+    else
+        flush_no_progress_ticks = 0;
+
+    if (body_no_progress_ticks >= BODY_STALL_TICK_LIMIT) {
+        fail(408, "Request Timeout");
+        return;
+    }
+    if (flush_no_progress_ticks >= FLUSH_STALL_TICK_LIMIT) {
+        fail(507, "Insufficient Storage");
+        return;
+    }
+
+    // 4) Completion check
+    bool done = false;
+    if (fixed_body_target_ != (std::size_t)-1) {
+        if (after_bytes >= fixed_body_target_) {
+            if (FileBodyReader *fr2 = dynamic_cast<FileBodyReader *>(body))
+                done = (fr2->pending_size() == 0);
+            else
+                done = true;
+        }
+    } else {
+        if (ChunkedReader *cr2 = dynamic_cast<ChunkedReader *>(body))
+            done = cr2->complete();
+    }
+
+    if (!done)
+        return;
+
+    // Body complete → advance pipeline
+    state = PH_ROUTE;
+    resetDeadline(WR_TIMEOUT_MS);
 }
+
 
 
 

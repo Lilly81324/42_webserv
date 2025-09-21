@@ -13,45 +13,45 @@ Date: 8/11/2025
 class UniqueFD
 {
 
-	public:
-		explicit UniqueFD(int fd = -1)
-			: fd(fd) {}
+public:
+	explicit UniqueFD(int fd = -1)
+		: fd(fd) {}
 
-		~UniqueFD()
+	~UniqueFD()
+	{
+		if (fd != -1)
 		{
-			if (fd != -1)
-			{
-				::close(fd);
-			}
+			::close(fd);
 		}
+	}
 
-	private:
-		int fd;
-		UniqueFD(const UniqueFD &);
-		UniqueFD &operator=(const UniqueFD &);
+private:
+	int fd;
+	UniqueFD(const UniqueFD &);
+	UniqueFD &operator=(const UniqueFD &);
 
-	public:
-		int get() const { return fd; }
-		
-		bool valid() const { return fd >= 0 ;}
+public:
+	int get() const { return fd; }
+	
+	bool valid() const { return fd >= 0 ;}
 
-		operator bool() const { return fd != -1; }
+	operator bool() const { return fd != -1; }
 
-		int release()
+	int release()
+	{
+		int temp = fd;
+		fd = -1;
+		return temp;
+	}
+
+	void reset(int newFd = -1)
+	{
+		if (fd != -1)
 		{
-			int temp = fd;
-			fd = -1;
-			return temp;
+			::close(fd);
 		}
-
-		void reset(int newFd = -1)
-		{
-			if (fd != -1)
-			{
-				::close(fd);
-			}
-			fd = newFd;
-		}
+		fd = newFd;
+	}
 };
 
 #endif // UNIQUEFD_H

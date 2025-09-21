@@ -132,27 +132,27 @@ static bool isValidVSIndex(const ServerConfig &cfg, int vs_idx)
 // Helper: Check allowed methods (except PUT/PATCH)
 static bool isMethodAllowed(const Location *L, const std::string &method)
 {
-    if (!L || L->allowed_methods.empty() || method == "PUT" || method == "PATCH")
-        return true;
+	if (!L || L->allowed_methods.empty() || method == "PUT" || method == "PATCH")
+		return true;
 
-    // Treat HEAD as allowed when GET is allowed
-    if (method == "HEAD") {
-        for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin();
-             it != L->allowed_methods.end(); ++it)
-        {
-            if (*it == "HEAD" || *it == "GET")
-                return true;
-        }
-        return false;
-    }
+	// Treat HEAD as allowed when GET is allowed
+	if (method == "HEAD") {
+		for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin();
+			it != L->allowed_methods.end(); ++it)
+		{
+			if (*it == "HEAD" || *it == "GET")
+				return true;
+		}
+		return false;
+	}
 
-    for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin();
-         it != L->allowed_methods.end(); ++it)
-    {
-        if (*it == method)
-            return true;
-    }
-    return false;
+	for (std::vector<std::string>::const_iterator it = L->allowed_methods.begin();
+		it != L->allowed_methods.end(); ++it)
+	{
+		if (*it == method)
+			return true;
+	}
+	return false;
 }
 
 
@@ -183,10 +183,10 @@ static bool isCGI(const Location *L, const std::string &ext)
 }
 
 void Router::makeDecisionForVS(const ServerConfig &cfg,
-							   int vs_idx,
-							   const std::string &method,
-							   const std::string &uri,
-							   RouteDecision &out)
+							int vs_idx,
+							const std::string &method,
+							const std::string &uri,
+							RouteDecision &out)
 {
 	if (!isValidVSIndex(cfg, vs_idx))
 	{
@@ -271,13 +271,13 @@ void Router::makeDecisionForVS(const ServerConfig &cfg,
 		return;
 	}
 
-	 // Uploads (multipart/form-data handled by UploadHandler)
-    if (method == "POST" && L && !L->upload_store.empty())
-    {
-        out.kind = RouteDecision::HK_UPLOAD;
-        out.status = HTTP_OK;
-        return;
-    }
+	// Uploads (multipart/form-data handled by UploadHandler)
+	if (method == "POST" && L && !L->upload_store.empty())
+	{
+		out.kind = RouteDecision::HK_UPLOAD;
+		out.status = HTTP_OK;
+		return;
+	}
 
 	// Proxy
 	if (isProxy(L))

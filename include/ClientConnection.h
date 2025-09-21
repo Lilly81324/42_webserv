@@ -26,18 +26,18 @@ class ClientConnection
 		~ClientConnection();
 
 		bool beginProxyTunnel(int upstream_fd,
-                          const std::string& host,
-                          const std::string& port,
-                          int connect_timeout_ms,
-                          int io_idle_timeout_ms,
-                          const HttpRequest& req,
-                          const std::string& target_path);
+						const std::string& host,
+						const std::string& port,
+						int connect_timeout_ms,
+						int io_idle_timeout_ms,
+						const HttpRequest& req,
+						const std::string& target_path);
 		bool beginProxyTunnel(int upstream_fd,
-                      const std::string& host,
-                      const std::string& port,
-                      int connect_timeout_ms,
-                      int io_idle_timeout_ms,
-                      const HttpRequest& req);
+					const std::string& host,
+					const std::string& port,
+					int connect_timeout_ms,
+					int io_idle_timeout_ms,
+					const HttpRequest& req);
 
 		void onTick(unsigned long long now_ms);
 		bool isClosed() const;
@@ -79,28 +79,28 @@ class ClientConnection
 	private:
 
 	struct ProxyState {
-        bool active;
-        bool connect_done;
-        int  ufd;
+		bool active;
+		bool connect_done;
+		int  ufd;
 
-        unsigned long long connect_deadline_ms;
-        unsigned long long io_idle_deadline_ms;
+		unsigned long long connect_deadline_ms;
+		unsigned long long io_idle_deadline_ms;
 
-        // upstream send buffers
-        std::string       to_upstream;  // request head
-        std::size_t       to_up_off;
-        std::vector<char> body_mem;     // optional buffered body
-        std::size_t       body_off;
+		// upstream send buffers
+		std::string       to_upstream;  // request head
+		std::size_t       to_up_off;
+		std::vector<char> body_mem;     // optional buffered body
+		std::size_t       body_off;
 
-        std::string uh;  // upstream host
-        std::string up;  // upstream port
+		std::string uh;  // upstream host
+		std::string up;  // upstream port
 
-        ProxyState()
-        : active(false), connect_done(false), ufd(-1),
-          connect_deadline_ms(0), io_idle_deadline_ms(0),
-          to_upstream(), to_up_off(0), body_mem(), body_off(0),
-          uh(), up() {}
-    } proxy_;
+		ProxyState()
+		: active(false), connect_done(false), ufd(-1),
+		connect_deadline_ms(0), io_idle_deadline_ms(0),
+		to_upstream(), to_up_off(0), body_mem(), body_off(0),
+		uh(), up() {}
+	} proxy_;
 		void parseHeaders();
 		void selectRouteOnce();
 		void runPreflight();
@@ -110,7 +110,7 @@ class ClientConnection
 		void routeAndBuild();
 		void finishWriteOrNext();
 		void fail(int code, const char *reason);
- 		
+		
 		Phase state;
 		Server *server;
 		ConnectionIO io;
@@ -147,7 +147,7 @@ class ClientConnection
 
 		static const size_t MEM_BODY_LIMIT = 32u * 1024u; // spill threshold
 
-		  void serviceProxyTunnel();
+		void serviceProxyTunnel();
 		
 
 		enum

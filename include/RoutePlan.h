@@ -13,7 +13,7 @@ struct RoutePlan
 
 	RoutePlan()
 		: vhost_idx(-1), location_idx(-1), handler_kind(0),
-		  needs_body(false), max_body_bytes(0) {}
+		needs_body(false), max_body_bytes(0) {}
 };
 
 #endif //  ROUTEPLAN_H

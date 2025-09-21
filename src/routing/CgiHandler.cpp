@@ -73,129 +73,134 @@ Finally, it appends REDIRECT_STATUS=200 for php-cgi compatibility. Returns the c
 */
 
 int CgiHandler::buildEnv(const HttpRequest &req,
-						const VirtualServer &vs,
-						std::vector<std::string> &envv) const
+                         const VirtualServer &vs,
+                         std::vector<std::string> &envv) const
 {
-	envv.clear();
-	const Headers &H = req.getHeaders();
+    envv.clear();
+    const Headers &H = req.getHeaders();
 
-	// ---- SERVER_NAME / SERVER_PORT (prefer Host:) ----
-	std::string host = H.get(HDR_HOST);
-	int server_port = vs.listen_port;
-	if (!host.empty()) {
-		if (host[0] == '[') {
-			// [ipv6]:port
-			std::string::size_type rb = host.find(']');
-			if (rb != std::string::npos) {
-				if (rb + 1 < host.size() && host[rb + 1] == ':') {
-					const std::string pstr = host.substr(rb + 2);
-					int p = 0;
-					for (size_t i = 0; i < pstr.size(); ++i) {
-						if (pstr[i] < '0' || pstr[i] > '9') { p = 0; break; }
-						p = p * 10 + (pstr[i]-'0');
-					}
-					if (p > 0 && p <= 65535) server_port = p;
-				}
-				host = host.substr(0, rb + 1);
-			}
-		} else {
-			// name[:port]
-			std::string::size_type c = host.find(':');
-			if (c != std::string::npos) {
-				const std::string pstr = host.substr(c + 1);
-				int p = 0; bool ok = !pstr.empty();
-				for (size_t i = 0; i < pstr.size(); ++i) {
-					if (pstr[i] < '0' || pstr[i] > '9') { ok = false; break; }
-					p = p * 10 + (pstr[i]-'0');
-				}
-				if (ok && p > 0 && p <= 65535) server_port = p;
-				host = host.substr(0, c);
-			}
-		}
-	}
+    // ---- SERVER_NAME / SERVER_PORT (prefer Host:) ----
+    std::string host = H.get(HDR_HOST);
+    int server_port = vs.listen_port;
+    if (!host.empty()) {
+        if (host[0] == '[') {
+            // [ipv6]:port
+            std::string::size_type rb = host.find(']');
+            if (rb != std::string::npos) {
+                if (rb + 1 < host.size() && host[rb + 1] == ':') {
+                    const std::string pstr = host.substr(rb + 2);
+                    int p = 0;
+                    for (size_t i = 0; i < pstr.size(); ++i) {
+                        if (pstr[i] < '0' || pstr[i] > '9') { p = 0; break; }
+                        p = p * 10 + (pstr[i]-'0');
+                    }
+                    if (p > 0 && p <= 65535) server_port = p;
+                }
+                host = host.substr(0, rb + 1);
+            }
+        } else {
+            // name[:port]
+            std::string::size_type c = host.find(':');
+            if (c != std::string::npos) {
+                const std::string pstr = host.substr(c + 1);
+                int p = 0; bool ok = !pstr.empty();
+                for (size_t i = 0; i < pstr.size(); ++i) {
+                    if (pstr[i] < '0' || pstr[i] > '9') { ok = false; break; }
+                    p = p * 10 + (pstr[i]-'0');
+                }
+                if (ok && p > 0 && p <= 65535) server_port = p;
+                host = host.substr(0, c);
+            }
+        }
+    }
 
-	std::string server_name;
-	if (!host.empty())                 server_name = host;
-	else if (!vs.server_names.empty()) server_name = vs.server_names[0];
-	else if (!vs.listen_host.empty())  server_name = vs.listen_host;
-	else                               server_name = "localhost";
+    std::string server_name;
+    if (!host.empty())                 server_name = host;
+    else if (!vs.server_names.empty()) server_name = vs.server_names[0];
+    else if (!vs.listen_host.empty())  server_name = vs.listen_host;
+    else                               server_name = "localhost";
 
-	std::ostringstream port_ss; port_ss << server_port;
+    std::ostringstream port_ss; port_ss << server_port;
 
-	// ---- CONTENT_* ----
-	std::string ctype = H.get(HDR_CONTENT_TYPE);
-	std::string clen  = H.get(HDR_CONTENT_LENGTH);
-	if (clen.empty()) {
-		size_t blen = req.getBodyLength();
-		if (blen > 0) { std::ostringstream cl; cl << blen; clen = cl.str(); }
-	}
+    // ---- CONTENT_* ----
+    std::string ctype = H.get(HDR_CONTENT_TYPE);
+    std::string clen  = H.get(HDR_CONTENT_LENGTH);
+    if (clen.empty()) {
+        size_t blen = req.getBodyLength();
+        if (blen > 0) { std::ostringstream cl; cl << blen; clen = cl.str(); }
+    }
 
-	// ---- REMOTE_ADDR (X-Forwarded-For first token if present) ----
-	std::string remote = H.get(HDR_X_FORWARDED_FOR);
-	if (!remote.empty()) {
-		std::string::size_type comma = remote.find(',');
-		if (comma != std::string::npos) remote = remote.substr(0, comma);
-		while (!remote.empty() && (remote[0]==' '||remote[0]=='\t')) remote.erase(0,1);
-		while (!remote.empty() && (remote[remote.size()-1]==' '||remote[remote.size()-1]=='\t')) remote.erase(remote.size()-1);
-	}
+    // ---- REMOTE_ADDR (X-Forwarded-For first token if present) ----
+    std::string remote = H.get(HDR_X_FORWARDED_FOR);
+    if (!remote.empty()) {
+        std::string::size_type comma = remote.find(',');
+        if (comma != std::string::npos) remote = remote.substr(0, comma);
+        while (!remote.empty() && (remote[0]==' '||remote[0]=='\t')) remote.erase(0,1);
+        while (!remote.empty() && (remote[remote.size()-1]==' '||remote[remote.size()-1]=='\t')) remote.erase(remote.size()-1);
+    }
 
-	// ---- SCRIPT_NAME / DOCUMENT_ROOT / SCRIPT_FILENAME ----
-	const std::string script_name = req.getPath();   // e.g. "/cgi/echo.py"
+    // ---- SCRIPT_NAME / DOCUMENT_ROOT / SCRIPT_FILENAME ----
+    const std::string script_name = req.getPath();   // e.g. "/cgi/echo.py"
 
-	std::string docroot = vs.root;
-	if (!docroot.empty() && docroot[docroot.size()-1] == '/')
-		docroot.erase(docroot.size()-1);
+    std::string docroot = vs.root;
+    if (!docroot.empty() && docroot[docroot.size()-1] == '/')
+        docroot.erase(docroot.size()-1);
 
-	std::string script_filename;
-	if (docroot.empty())                                    script_filename = script_name;
-	else if (!script_name.empty() && script_name[0] == '/') script_filename = docroot + script_name;
-	else                                                    script_filename = docroot + "/" + script_name;
+    std::string script_filename;
+    if (docroot.empty())                                    script_filename = script_name;
+    else if (!script_name.empty() && script_name[0] == '/') script_filename = docroot + script_name;
+    else                                                    script_filename = docroot + "/" + script_name;
 
-	// ---- QUERY_STRING & REQUEST_URI (defensive) ----
-	std::string query = req.getQuery();          // preferred source
-	std::string request_uri = script_name;
+    // ---- QUERY_STRING & REQUEST_URI (extra-defensive) ----
+    std::string query = req.getQuery();          // primary source
+    std::string request_uri;                     // prefer raw if available
+    const std::string raw_target = req.getUri(); // raw path[?query] if preserved
 
-	// Fallback: extract from full request-target if query was lost during normalization
-	if (query.empty()) {
-		const std::string uri = req.getUri();   // e.g. "/cgi/echo.py?alpha=1&beta=2"
-		std::string::size_type qpos = uri.find('?');
-		if (qpos != std::string::npos && qpos + 1 < uri.size())
-			query = uri.substr(qpos + 1);
-		if (request_uri == script_name && qpos != std::string::npos)
-			request_uri = uri;                  // include "?…"
-	} else {
-		request_uri = script_name;
-		request_uri += "?";
-		request_uri += query;
-	}
+    if (query.empty() && !raw_target.empty()) {
+        std::string::size_type qpos = raw_target.find('?');
+        if (qpos != std::string::npos && qpos + 1 < raw_target.size())
+            query = raw_target.substr(qpos + 1);
+    }
 
-	// ---- Standard CGI variables ----
-	envv.push_back("GATEWAY_INTERFACE=CGI/1.1");
-	envv.push_back(std::string("REQUEST_METHOD=")   + req.getMethod());
-	envv.push_back(std::string("SERVER_PROTOCOL=")  + req.getHttpVer());
-	envv.push_back(std::string("SERVER_NAME=")      + server_name);
-	envv.push_back(std::string("SERVER_PORT=")      + port_ss.str());
-	envv.push_back(std::string("SCRIPT_NAME=")      + script_name);
-	envv.push_back(std::string("SCRIPT_FILENAME=")  + script_filename);
-	envv.push_back(std::string("DOCUMENT_ROOT=")    + docroot);
-	envv.push_back(std::string("REMOTE_ADDR=")      + remote);
+    if (!raw_target.empty()) {
+        request_uri = raw_target; // exact original, including ?query if present
+    } else {
+        request_uri = script_name;
+        if (!query.empty()) { request_uri += "?"; request_uri += query; }
+    }
 
-	// The test looks for the query terms in the CGI output, so make sure these two are set:
-	envv.push_back(std::string("REQUEST_URI=")      + request_uri);
-	envv.push_back(std::string("QUERY_STRING=")     + query);
+    // ---- Standard CGI variables ----
+    envv.push_back("GATEWAY_INTERFACE=CGI/1.1");
+    envv.push_back(std::string("REQUEST_METHOD=")   + req.getMethod());
+    envv.push_back(std::string("SERVER_PROTOCOL=")  + req.getHttpVer());
+    envv.push_back(std::string("SERVER_NAME=")      + server_name);
+    envv.push_back(std::string("SERVER_PORT=")      + port_ss.str());
+    envv.push_back(std::string("SCRIPT_NAME=")      + script_name);
+    envv.push_back(std::string("SCRIPT_FILENAME=")  + script_filename);
+    envv.push_back(std::string("DOCUMENT_ROOT=")    + docroot);
+    envv.push_back(std::string("REMOTE_ADDR=")      + remote);
 
-	if (!ctype.empty()) envv.push_back(std::string("CONTENT_TYPE=")   + ctype);
-	if (!clen.empty())  envv.push_back(std::string("CONTENT_LENGTH=") + clen);
+    // The test checks that the CGI output mentions the query terms:
+    envv.push_back(std::string("REQUEST_URI=")      + request_uri);
+    envv.push_back(std::string("QUERY_STRING=")     + query);
 
-	// Common for php-cgi; harmless otherwise
-	envv.push_back("REDIRECT_STATUS=200");
+    if (!ctype.empty()) envv.push_back(std::string("CONTENT_TYPE=")   + ctype);
+    if (!clen.empty())  envv.push_back(std::string("CONTENT_LENGTH=") + clen);
 
-	// Optional CGI vars you may fill later:
-	// envv.push_back("PATH_INFO=");
-	// envv.push_back("PATH_TRANSLATED=");
+    // Common for php-cgi; harmless otherwise
+    envv.push_back("REDIRECT_STATUS=200");
 
-	return static_cast<int>(envv.size());
+#ifdef CGI_ENV_DEBUG
+    for (size_t i = 0; i < envv.size(); ++i) {
+        if (envv[i].rfind("QUERY_STRING=", 0) == 0 || envv[i].rfind("REQUEST_URI=", 0) == 0)
+            std::fprintf(stderr, "[CGI-ENV] %s\n", envv[i].c_str());
+    }
+#endif
+
+    return static_cast<int>(envv.size());
 }
+
+
 
 
 

@@ -8,6 +8,8 @@ date: 8/10/2025
 #include <sstream>
 #include <ctime>
 
+class HttpRequest;
+
 // --- tiny internal helpers --------------------------------------------------
 
 namespace
@@ -83,8 +85,13 @@ namespace
 
 // --- HttpResponse implementation -------------------------------------------
 
-HttpResponse::HttpResponse()
-	: http_version("HTTP/1.1"), session_id(""), bodyLength(0), body(), headers(), cookies(), status(200), reason("OK")
+HttpResponse::HttpResponse(void)
+	: http_version("HTTP/1.1"), session_id(""), bodyLength(0), body(), headers(), cookies(NULL), status(200), reason("OK")
+{
+}
+
+HttpResponse::HttpResponse(HttpRequest &req)
+	: http_version("HTTP/1.1"), session_id(""), bodyLength(0), body(), headers(), cookies(&req.cookies), status(200), reason("OK")
 {
 }
 
@@ -145,9 +152,17 @@ void HttpResponse::ensureDefaultHeaders()
 // HttpResponse.cpp
 std::ostream& operator<<(std::ostream& out, const HttpResponse& r)
 {
+	// Starting Line
     out << r.http_version << " " << r.status << " " << r.reason << "\r\n";
+	
+	// Cookiejar
+	if (r.cookies != NULL)
+		out << r.cookies->serialize();
+
+	// Headers
     out << r.headers.serialize();
 
+	// Body
     if (!r.body.empty())
         out.write(&r.body[0], std::streamsize(r.body.size())); // ✅ write exact bytes
 

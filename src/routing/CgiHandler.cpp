@@ -130,14 +130,22 @@ int CgiHandler::buildEnv(const HttpRequest &req,
         if (blen > 0) { std::ostringstream cl; cl << blen; clen = cl.str(); }
     }
 
-    // ---- REMOTE_ADDR (X-Forwarded-For first token if present) ----
-    std::string remote = H.get(HDR_X_FORWARDED_FOR);
-    if (!remote.empty()) {
-        std::string::size_type comma = remote.find(',');
-        if (comma != std::string::npos) remote = remote.substr(0, comma);
-        while (!remote.empty() && (remote[0]==' '||remote[0]=='\t')) remote.erase(0,1);
-        while (!remote.empty() && (remote[remote.size()-1]==' '||remote[remote.size()-1]=='\t')) remote.erase(remote.size()-1);
-    }
+	// --- REMOTE_ADDR: prefer X-Forwarded-For first token if present ---
+	std::string remote = H.get(HDR_X_FORWARDED_FOR);
+	if (!remote.empty())
+	{
+		std::string::size_type comma = remote.find(',');
+		if (comma != std::string::npos)
+			remote = remote.substr(0, comma);
+		// trim spaces
+		while (!remote.empty() && (remote[0] == ' ' || remote[0] == '\t'))
+			remote.erase(0, 1);
+		while (!remote.empty() && (remote[remote.size() - 1] == ' ' || remote[remote.size() - 1] == '\t'))
+			remote.erase(remote.size() - 1);
+	}
+
+	// --- HTTP_COOKIE ---
+	std::string cookie_string = req.cookies.prepareForCgi();
 
     // ---- SCRIPT_NAME / DOCUMENT_ROOT / SCRIPT_FILENAME ----
     const std::string script_name = req.getPath();   // e.g. "/cgi/echo.py"
@@ -186,6 +194,7 @@ int CgiHandler::buildEnv(const HttpRequest &req,
 
     if (!ctype.empty()) envv.push_back(std::string("CONTENT_TYPE=")   + ctype);
     if (!clen.empty())  envv.push_back(std::string("CONTENT_LENGTH=") + clen);
+    if (!cookie_string.empty()) envv.push_back(std::string("HTTP_COOKIE=") + cookie_string);
 
     // Common for php-cgi; harmless otherwise
     envv.push_back("REDIRECT_STATUS=200");

@@ -41,7 +41,7 @@ and inconsistent parsing produces incorrect environment values. By centralizing 
 we avoid duplicating tricky edge-case handling across the codebase and ensure consistent 
 behavior across platforms and requests.
 
- */
+*/
 
 #ifdef KEEP_HOST_HELPER
 static std::string hostWithoutPort(const std::string &hostHdr)
@@ -73,97 +73,62 @@ Finally, it appends REDIRECT_STATUS=200 for php-cgi compatibility. Returns the c
 */
 
 int CgiHandler::buildEnv(const HttpRequest &req,
-						const VirtualServer &vs,
-						std::vector<std::string> &envv) const
+                         const VirtualServer &vs,
+                         std::vector<std::string> &envv) const
 {
-	envv.clear();
+    envv.clear();
+    const Headers &H = req.getHeaders();
 
-	const Headers &H = req.getHeaders();
+    // ---- SERVER_NAME / SERVER_PORT (prefer Host:) ----
+    std::string host = H.get(HDR_HOST);
+    int server_port = vs.listen_port;
+    if (!host.empty()) {
+        if (host[0] == '[') {
+            // [ipv6]:port
+            std::string::size_type rb = host.find(']');
+            if (rb != std::string::npos) {
+                if (rb + 1 < host.size() && host[rb + 1] == ':') {
+                    const std::string pstr = host.substr(rb + 2);
+                    int p = 0;
+                    for (size_t i = 0; i < pstr.size(); ++i) {
+                        if (pstr[i] < '0' || pstr[i] > '9') { p = 0; break; }
+                        p = p * 10 + (pstr[i]-'0');
+                    }
+                    if (p > 0 && p <= 65535) server_port = p;
+                }
+                host = host.substr(0, rb + 1);
+            }
+        } else {
+            // name[:port]
+            std::string::size_type c = host.find(':');
+            if (c != std::string::npos) {
+                const std::string pstr = host.substr(c + 1);
+                int p = 0; bool ok = !pstr.empty();
+                for (size_t i = 0; i < pstr.size(); ++i) {
+                    if (pstr[i] < '0' || pstr[i] > '9') { ok = false; break; }
+                    p = p * 10 + (pstr[i]-'0');
+                }
+                if (ok && p > 0 && p <= 65535) server_port = p;
+                host = host.substr(0, c);
+            }
+        }
+    }
 
-	// --- SERVER_NAME / SERVER_PORT (prefer Host header if present) ---
-	std::string host = H.get(HDR_HOST);
-	int server_port = vs.listen_port;
-	if (!host.empty())
-	{
-		// strip optional port from Host
-		if (host.size() && host[0] == '[')
-		{
-			// IPv6 in brackets: [::1]:8080
-			std::string::size_type rb = host.find(']');
-			if (rb != std::string::npos)
-			{
-				// try to parse ":PORT" after the closing bracket
-				if (rb + 1 < host.size() && host[rb + 1] == ':')
-				{
-					const std::string pstr = host.substr(rb + 2);
-					int p = 0;
-					for (size_t i = 0; i < pstr.size(); ++i)
-					{
-						if (pstr[i] < '0' || pstr[i] > '9')
-						{
-							p = 0;
-							break;
-						}
-						p = p * 10 + (pstr[i] - '0');
-					}
-					if (p > 0 && p <= 65535)
-						server_port = p;
-				}
-				host = host.substr(0, rb + 1); // keep the [ipv6] part only
-			}
-		}
-		else
-		{
-			// IPv4 / hostname form: host[:port]
-			std::string::size_type c = host.find(':');
-			if (c != std::string::npos)
-			{
-				const std::string pstr = host.substr(c + 1);
-				int p = 0;
-				bool ok = !pstr.empty();
-				for (size_t i = 0; i < pstr.size(); ++i)
-				{
-					if (pstr[i] < '0' || pstr[i] > '9')
-					{
-						ok = false;
-						break;
-					}
-					p = p * 10 + (pstr[i] - '0');
-				}
-				if (ok && p > 0 && p <= 65535)
-					server_port = p;
-				host = host.substr(0, c); // strip port from name
-			}
-		}
-	}
+    std::string server_name;
+    if (!host.empty())                 server_name = host;
+    else if (!vs.server_names.empty()) server_name = vs.server_names[0];
+    else if (!vs.listen_host.empty())  server_name = vs.listen_host;
+    else                               server_name = "localhost";
 
-	std::string server_name;
-	if (!host.empty())
-		server_name = host;
-	else if (!vs.server_names.empty())
-		server_name = vs.server_names[0];
-	else if (!vs.listen_host.empty())
-		server_name = vs.listen_host;
-	else
-		server_name = "localhost";
+    std::ostringstream port_ss; port_ss << server_port;
 
-	std::ostringstream port_ss;
-	port_ss << server_port;
-
-	// --- CONTENT_* from headers/body ---
-	std::string ctype = H.get(HDR_CONTENT_TYPE);
-	std::string clen = H.get(HDR_CONTENT_LENGTH);
-	if (clen.empty())
-	{
-		// if parser already buffered body, expose its length
-		size_t blen = req.getBodyLength();
-		if (blen > 0)
-		{
-			std::ostringstream cl;
-			cl << blen;
-			clen = cl.str();
-		}
-	}
+    // ---- CONTENT_* ----
+    std::string ctype = H.get(HDR_CONTENT_TYPE);
+    std::string clen  = H.get(HDR_CONTENT_LENGTH);
+    if (clen.empty()) {
+        size_t blen = req.getBodyLength();
+        if (blen > 0) { std::ostringstream cl; cl << blen; clen = cl.str(); }
+    }
 
 	// --- REMOTE_ADDR: prefer X-Forwarded-For first token if present ---
 	std::string remote = H.get(HDR_X_FORWARDED_FOR);
@@ -182,45 +147,70 @@ int CgiHandler::buildEnv(const HttpRequest &req,
 	// --- HTTP_COOKIE ---
 	std::string cookie_string = req.cookies.prepareForCgi();
 
-	// --- SCRIPT_NAME / DOCUMENT_ROOT / SCRIPT_FILENAME ---
-	const std::string script_name = req.getPath(); // already a path like "/cgi/foo.php"
+    // ---- SCRIPT_NAME / DOCUMENT_ROOT / SCRIPT_FILENAME ----
+    const std::string script_name = req.getPath();   // e.g. "/cgi/echo.py"
 
-	std::string docroot = vs.root;
-	if (!docroot.empty() && docroot[docroot.size() - 1] == '/')
-		docroot.erase(docroot.size() - 1); // avoid double slashes
+    std::string docroot = vs.root;
+    if (!docroot.empty() && docroot[docroot.size()-1] == '/')
+        docroot.erase(docroot.size()-1);
 
-	// join docroot + script_name
-	std::string script_filename;
-	if (docroot.empty())
-		script_filename = script_name;
-	else if (!script_name.empty() && script_name[0] == '/')
-		script_filename = docroot + script_name;
-	else
-		script_filename = docroot + "/" + script_name;
+    std::string script_filename;
+    if (docroot.empty())                                    script_filename = script_name;
+    else if (!script_name.empty() && script_name[0] == '/') script_filename = docroot + script_name;
+    else                                                    script_filename = docroot + "/" + script_name;
 
-	// --- Required / common CGI variables ---
-	envv.push_back("GATEWAY_INTERFACE=CGI/1.1");
-	envv.push_back(std::string("REQUEST_METHOD=") + req.getMethod());
-	envv.push_back(std::string("SCRIPT_NAME=") + script_name);
-	envv.push_back(std::string("QUERY_STRING=") + req.getQuery());
-	envv.push_back(std::string("SERVER_PROTOCOL=") + req.getHttpVer());
-	envv.push_back(std::string("SERVER_NAME=") + server_name);
-	envv.push_back(std::string("SERVER_PORT=") + port_ss.str());
-	if (!ctype.empty())
-		envv.push_back(std::string("CONTENT_TYPE=") + ctype);
-	if (!clen.empty())
-		envv.push_back(std::string("CONTENT_LENGTH=") + clen);
-	envv.push_back(std::string("REMOTE_ADDR=") + remote);
-	envv.push_back(std::string("DOCUMENT_ROOT=") + docroot);
-	envv.push_back(std::string("SCRIPT_FILENAME=") + script_filename);
-	if (!cookie_string.empty())
-		envv.push_back(std::string("HTTP_COOKIE=") + cookie_string);
+    // ---- QUERY_STRING & REQUEST_URI (extra-defensive) ----
+    std::string query = req.getQuery();          // primary source
+    std::string request_uri;                     // prefer raw if available
+    const std::string raw_target = req.getUri(); // raw path[?query] if preserved
 
-	// For php-cgi compatibility; harmless for others.
-	envv.push_back("REDIRECT_STATUS=200");
+    if (query.empty() && !raw_target.empty()) {
+        std::string::size_type qpos = raw_target.find('?');
+        if (qpos != std::string::npos && qpos + 1 < raw_target.size())
+            query = raw_target.substr(qpos + 1);
+    }
 
-	return static_cast<int>(envv.size()); // tests expect >0
+    if (!raw_target.empty()) {
+        request_uri = raw_target; // exact original, including ?query if present
+    } else {
+        request_uri = script_name;
+        if (!query.empty()) { request_uri += "?"; request_uri += query; }
+    }
+
+    // ---- Standard CGI variables ----
+    envv.push_back("GATEWAY_INTERFACE=CGI/1.1");
+    envv.push_back(std::string("REQUEST_METHOD=")   + req.getMethod());
+    envv.push_back(std::string("SERVER_PROTOCOL=")  + req.getHttpVer());
+    envv.push_back(std::string("SERVER_NAME=")      + server_name);
+    envv.push_back(std::string("SERVER_PORT=")      + port_ss.str());
+    envv.push_back(std::string("SCRIPT_NAME=")      + script_name);
+    envv.push_back(std::string("SCRIPT_FILENAME=")  + script_filename);
+    envv.push_back(std::string("DOCUMENT_ROOT=")    + docroot);
+    envv.push_back(std::string("REMOTE_ADDR=")      + remote);
+
+    // The test checks that the CGI output mentions the query terms:
+    envv.push_back(std::string("REQUEST_URI=")      + request_uri);
+    envv.push_back(std::string("QUERY_STRING=")     + query);
+
+    if (!ctype.empty()) envv.push_back(std::string("CONTENT_TYPE=")   + ctype);
+    if (!clen.empty())  envv.push_back(std::string("CONTENT_LENGTH=") + clen);
+    if (!cookie_string.empty()) envv.push_back(std::string("HTTP_COOKIE=") + cookie_string);
+
+    // Common for php-cgi; harmless otherwise
+    envv.push_back("REDIRECT_STATUS=200");
+
+#ifdef CGI_ENV_DEBUG
+    for (size_t i = 0; i < envv.size(); ++i) {
+        if (envv[i].rfind("QUERY_STRING=", 0) == 0 || envv[i].rfind("REQUEST_URI=", 0) == 0)
+            std::fprintf(stderr, "[CGI-ENV] %s\n", envv[i].c_str());
+    }
+#endif
+
+    return static_cast<int>(envv.size());
 }
+
+
+
 
 
 /* 

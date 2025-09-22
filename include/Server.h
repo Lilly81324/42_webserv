@@ -9,11 +9,11 @@ Date: 8/10/2025
 #define SERVER_H
 
 #ifdef USE_STUBS
-  #include "stubs/EventLoop.h"
-  #include "stubs/ServerConfig.h"
+#include "stubs/EventLoop.h"
+#include "stubs/ServerConfig.h"
 #else
-  #include "EventLoop.h"
-  #include "ServerConfig.h"
+#include "EventLoop.h"
+#include "ServerConfig.h"
 #endif
 
 #include "Listener.h"
@@ -181,12 +181,12 @@ class Server
 		void shutdownAllHandlers() {
 			std::set<ClientHandler*>::iterator it = server_handlers.begin();
 			while (it != server_handlers.end()) {
-			  ClientHandler* h = *it;
-			  ++it;
-			  delete h;
+			ClientHandler* h = *it;
+			++it;
+			delete h;
 			}
 			server_handlers.clear();
-		  }
+		}
 
 	public:
 		/**

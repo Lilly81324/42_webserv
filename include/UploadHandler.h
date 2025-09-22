@@ -1,15 +1,15 @@
-	// src/http/handlers/UploadHandler.h
-	#ifndef UPLOAD_HANDLER_H
-	#define UPLOAD_HANDLER_H
+// src/http/handlers/UploadHandler.h
+#ifndef UPLOAD_HANDLER_H
+#define UPLOAD_HANDLER_H
 
-	#include "Handler.h"
-	#include "MultipartReader.h"
-	#include <string>
-	#include <vector>
+#include "Handler.h"
+#include "MultipartReader.h"
+#include <string>
+#include <vector>
 
 
 
-	class UploadHandler : public Handler, public IMultipartSink {
+class UploadHandler : public Handler, public IMultipartSink {
 	public:
 		UploadHandler();
 		virtual ~UploadHandler();
@@ -45,6 +45,6 @@
 
 		// for building a JSON-ish response of saved files (optional)
 		std::vector<std::string> saved_;
-	};
+};
 
-	#endif
+#endif

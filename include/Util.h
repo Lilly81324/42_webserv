@@ -3,9 +3,9 @@
 
 # include <string>
 # include <vector>
-# include <unistd.h>   // getcwd, access
-# include <limits.h>   // PATH_MAX
-# include <sys/stat.h> // stat
+# include <unistd.h>
+# include <limits.h>
+# include <sys/stat.h>
 # include <sys/types.h>
 # include <dirent.h>
 # include <cstring>

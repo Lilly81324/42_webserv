@@ -4,15 +4,20 @@
 #include "EventLoop.h"
 #include "ClientConnection.h"
 #include <sys/time.h>
+#include <ctime>   // instead of <sys/time.h>
+#include <climits> 
 
 class ClientHandler : public EventLoop::Handler {
 
 	private:
 		unsigned long long nowMs() const
-		{
-			struct timeval tv; gettimeofday(&tv, 0);
-			return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
-		}
+    {
+        std::time_t sec = std::time(NULL);       // seconds since epoch
+        std::clock_t ticks = std::clock();       // CPU ticks since program start
+        unsigned long long ms = static_cast<unsigned long long>(sec) * 1000ULL;
+        ms += static_cast<unsigned long long>(ticks) * 1000ULL / CLOCKS_PER_SEC;
+        return ms;
+    }
 		void updateInterests();
 
 	public:

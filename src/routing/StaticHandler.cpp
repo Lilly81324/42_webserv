@@ -6,6 +6,7 @@ date: 8/10/2025
 ------------------------------------------ */
 
 #include "StaticHandler.h"
+#include <iomanip>
 
 // ---------------- small helpers ----------------
 
@@ -77,14 +78,29 @@ it returns an empty string, and callers simply skip the header rather than emitt
 */
 
 
-static std::string httpDate(time_t t)
+static std::string httpDate(std::time_t t)
 {
-	char buf[64];
-	struct tm g = *::gmtime(&t);
-	if (std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &g))
-		return std::string(buf);
-	return std::string();
+    std::tm gmt;
+#if defined(_WIN32)
+    gmtime_s(&gmt, &t);
+#else
+    gmt = *std::gmtime(&t);
+#endif
+
+    static const char* WDAY[7] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
+    static const char* MON[12] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
+
+    std::ostringstream oss;
+    oss << WDAY[gmt.tm_wday] << ", "
+        << std::setw(2) << std::setfill('0') << gmt.tm_mday << ' '
+        << MON[gmt.tm_mon] << ' '
+        << (gmt.tm_year + 1900) << ' '
+        << std::setw(2) << std::setfill('0') << gmt.tm_hour << ':'
+        << std::setw(2) << std::setfill('0') << gmt.tm_min  << ':'
+        << std::setw(2) << std::setfill('0') << gmt.tm_sec  << " GMT";
+    return oss.str();
 }
+
 
 /* 
 

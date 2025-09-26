@@ -51,10 +51,16 @@ bytes_received_(0)
 	pending_.clear();
 }
 
+// Replace the destructor' with a safe truncate (no forbidden calls)
 ChunkedReader::~ChunkedReader() {
-	if (fd_ >= 0) ::close(fd_);
-	if (on_disk_ && !path_.empty()) ::unlink(path_.c_str());
+    if (fd_ >= 0) ::close(fd_);
+    if (on_disk_ && !path_.empty()) {
+        int tfd = ::open(path_.c_str(), O_WRONLY | O_TRUNC, 0600);
+        if (tfd >= 0) ::close(tfd);
+        // Note: file remains on disk (0 bytes). Consider periodic cleanup elsewhere.
+    }
 }
+
 
 // ===== internal I/O buffers ==================================================
 
@@ -72,24 +78,32 @@ void ChunkedReader::drop_pending(std::size_t n) {
 }
 
 bool ChunkedReader::ensure_spill_file() {
-	if (on_disk_ && fd_ >= 0) return true;
+    if (on_disk_ && fd_ >= 0) return true;
 
-	// make "tmp_dir_/chunk-XXXXXX"
-	std::string tpl = tmp_dir_;
-	if (!tpl.empty() && tpl[tpl.size() - 1] != '/') tpl += "/";
-	tpl += "chunk-XXXXXX";
+    std::string dir = tmp_dir_;
+    if (!dir.empty() && dir[dir.size() - 1] == '/')
+        dir.erase(dir.size() - 1);
 
-	std::vector<char> c(tpl.begin(), tpl.end());
-	c.push_back('\0');
+    const int MAX_ATTEMPTS = 256;
+    unsigned int salt = (unsigned int)rand();
 
-	int fd = ::mkstemp(&c[0]);
-	if (fd < 0) return false;
+    for (int i = 0; i < MAX_ATTEMPTS; ++i) {
+        std::ostringstream oss;
+        oss << (dir.empty() ? "." : dir) << "/chunk-tmp-" << salt << "-" << i;
+        const std::string candidate = oss.str();
 
-	path_.assign(&c[0]);
-	fd_ = fd;
-	on_disk_ = true;
-	return true;
+        int fd = ::open(candidate.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd >= 0) {
+            (void)fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) | FD_CLOEXEC);
+            path_   = candidate;
+            fd_     = fd;
+            on_disk_= true;
+            return true;
+        }
+    }
+    return false;
 }
+
 
 bool ChunkedReader::write_payload(const char *p, std::size_t n) {
 	// track decoded size regardless of storage

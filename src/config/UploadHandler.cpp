@@ -4,6 +4,7 @@
 #include "VirtualServer.h"
 #include "ResponseFactory.h"
 #include "HEADER_ENTRIES.h"
+#include "Util.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,7 +22,7 @@
 
 static bool realpathString(const std::string& in, std::string& out) {
 	char tmp[4096];
-	if (::realpath(in.c_str(), tmp) == 0) return false;
+	if (Util::realpath(in.c_str(), tmp) == 0) return false;
 	out.assign(tmp);
 	return true;
 }

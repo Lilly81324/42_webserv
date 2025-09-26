@@ -172,7 +172,7 @@ sequences could otherwise escape the document root unintentionally
 static bool realpathString(const std::string &in, std::string &out)
 {
 	char tmp[PATH_MAX];
-	if (::realpath(in.c_str(), tmp) == 0)
+	if (Util::realpath(in.c_str(), tmp) == 0)
 		return false;
 	out.assign(tmp);
 	return true;

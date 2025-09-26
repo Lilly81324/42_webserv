@@ -9,12 +9,13 @@
 #include <climits> // INT_MAX
 #include <limits.h>   // PATH_MAX
 #include <stdlib.h>   // realpath
+#include "Util.h"
 
 
 
 static std::string makeAbsolute(const std::string &path) {
 	char buf[PATH_MAX];
-	if (::realpath(path.c_str(), buf))
+	if (Util::realpath(path.c_str(), buf))
 		return std::string(buf);
 	return path; // fallback if resolution fails
 }

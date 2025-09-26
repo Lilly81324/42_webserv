@@ -82,7 +82,7 @@ bool PathUtil::canonicalize(const std::string &in, std::string &out)
 	}
 	char buf[PATH_MAX];
 #if defined(__linux__) || defined(__APPLE__)
-	if (realpath(in.c_str(), buf) != 0)
+	if (Util::realpath(in.c_str(), buf) != 0)
 	{
 		out = buf;
 		return true;

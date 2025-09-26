@@ -13,7 +13,7 @@ bool Util::realpath(const char *path, char *resolved)
 	std::string abs;
 	if (path[0] == '/')
 	{
-		// Already absolutee
+		// Already absolute
 		abs = path;
 	}
 	else

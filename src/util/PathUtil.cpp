@@ -92,7 +92,7 @@ bool PathUtil::canonicalize(const std::string &in, std::string &out)
 	if (s[0] != '/')
 	{
 		char cwd[PATH_MAX];
-		if (getcwd(cwd, sizeof(cwd)) == 0)
+		if (Util::getcwd(cwd, sizeof(cwd)) == 0)
 			return false;
 		s = std::string(cwd) + "/" + s;
 	}

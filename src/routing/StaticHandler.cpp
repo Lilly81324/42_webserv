@@ -81,11 +81,7 @@ it returns an empty string, and callers simply skip the header rather than emitt
 static std::string httpDate(std::time_t t)
 {
     std::tm gmt;
-#if defined(_WIN32)
-    gmtime_s(&gmt, &t);
-#else
     gmt = *std::gmtime(&t);
-#endif
 
     static const char* WDAY[7] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
     static const char* MON[12] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
@@ -311,7 +307,7 @@ static std::string buildAutoindex(const std::string &urlBase, const std::string 
 	while ((de = ::readdir(d)) != 0)
 	{
 		const char *name = de->d_name;
-		if (!::strcmp(name, ".") || !::strcmp(name, ".."))
+		if (!std::strcmp(name, ".") || !std::strcmp(name, ".."))
 			continue;
 		entries.push_back(name);
 	}
@@ -423,7 +419,7 @@ static bool serveErrorPage(int code,
 		if (c_path)
 		{
 			base = std::string(c_path) + std::string("/www");
-			free(c_path);
+			std::free(c_path);
 		}
 	}
 

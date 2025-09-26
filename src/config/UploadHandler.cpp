@@ -109,7 +109,7 @@ bool UploadHandler::finishMoveAtomic() {
 			return false; // will cause parser to stop with sink error
 		}
 	}
-	if (::rename(cur_tmp_path_.c_str(), dst.c_str()) != 0) {
+	if (std::rename(cur_tmp_path_.c_str(), dst.c_str()) != 0) {
 		last_error_code_ = 500;
 		last_error_msg_  = "Rename failed";
 		return false;

@@ -27,7 +27,6 @@ const std::string& FileBodyReader::get_path() const {
     return path;
 }
 
-// Build a mkstemp template like "<dir>/<prefix>.XXXXXX"
 std::string FileBodyReader::make_template(const std::string &dir, const std::string &prefix)
 {
 	std::string pfx = prefix.empty() ? std::string("webserv_body") : prefix;
@@ -110,7 +109,7 @@ std::size_t FileBodyReader::consume(const char *data, std::size_t len)
 		{
 			const std::size_t tail = pending.size() - pending_off;
 			if (tail)
-				::memmove(&pending[0], &pending[0] + pending_off, tail);
+				std::memmove(&pending[0], &pending[0] + pending_off, tail);
 			pending.resize(tail);
 			pending_off = 0;
 		}

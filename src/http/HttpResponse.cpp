@@ -78,12 +78,7 @@ namespace
 {
     std::time_t t = std::time(0);
     std::tm gmt;
-#if defined(_WIN32)
-    gmtime_s(&gmt, &t);
-#else
     gmt = *std::gmtime(&t);
-#endif
-
     static const char* WDAY[7] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
     static const char* MON[12] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
 

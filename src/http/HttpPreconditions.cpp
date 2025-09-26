@@ -95,31 +95,6 @@ static void split_commas(const std::string& s, std::vector<std::string>& out) {
 }
 
 
-/* 
-
-static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out)
-
-Parses an RFC-1123 HTTP date like Wed, 03 Sep 2025 15:56:30 GMT into a UTC time_t. 
-On POSIX systems, it uses  with the exact format, then  (or mktime fallback) to get a timestamp. 
-Returning false on parse failure protects callers from trusting malformed dates. 
-Correct parsing is crucial for If-Modified-Since handling; an invalid date must not incorrectly pass/deny preconditions. 
-By zero-initializing tm fields and requiring full string consumption, 
-the function avoids lenient parsing pitfalls and locale surprises, yielding deterministic behavior across platforms.
-
-*/
-
-/* static time_t portable(struct tm *tm) {
-    char *tz = getenv("TZ");
-    setenv("TZ", "", 1); // force UTC
-    tzset();
-    time_t t = mktime(tm);
-    if (tz) setenv("TZ", tz, 1);
-    else unsetenv("TZ");
-    tzset();
-    return t;
-} */
-
-
 // RFC 1123 date → time_t (UTC). Example: "Wed, 03 Sep 2025 15:56:30 GMT"
 static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out) {
     if (s.size() < 29) return false;
@@ -150,7 +125,7 @@ static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out) {
     tmv.tm_isdst = 0;
 
     // Use mktime (interprets as local time)
-    out = ::mktime(&tmv);
+    out = std::mktime(&tmv);
     return out != (time_t)-1;
 }
 

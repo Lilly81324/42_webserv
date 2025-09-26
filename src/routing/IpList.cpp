@@ -170,7 +170,7 @@ std::string IpList::ipDeniedResponse(void)
 	if (c_path)
 	{
 		path = std::string(c_path) + std::string("/www/errors/403.html");
-		free(c_path);
+		std::free(c_path);
 	}
 
 	// Check the error file

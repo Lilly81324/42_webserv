@@ -4,6 +4,7 @@
 #include "ChainBuf.h"
 #include "CgiProcess.h"
 #include "EventLoop.h"
+#include <time.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -14,9 +15,9 @@
 #include <fcntl.h>	  // fcntl, O_NONBLOCK, FD_CLOEXEC
 #include <signal.h>	  // SIGKILL
 #include <sys/stat.h> // fstat
-#include <sys/time.h> // gettimeofday
+#include <sys/time.h> // 
 #include <unistd.h>	  // read, write, pread, close
-#include <sys/time.h> // gettimeofday
+#include <sys/time.h> //
 
 // void CGIStreamer::attachLoop(EventLoop* L) { loop_ = L; }
 
@@ -238,15 +239,24 @@ and browsers that depend on unambiguous message boundaries.
 
 void CGIStreamer::enqueueFinalChunk()
 {
-	if (sent_final_chunk_)
-		return;
-	sent_final_chunk_ = true;
+    if (sent_final_chunk_)
+        return;
 
-	if (chunked_mode_) {
-		static const char kFinal[] = "0\r\n\r\n";
-		out_buf_.insert(out_buf_.end(), kFinal, kFinal + sizeof(kFinal) - 1);
-	}
+    // For HEAD, there is no body at all — skip any chunk terminator.
+    if (req_.getMethod() == "HEAD") {
+        sent_final_chunk_ = true; // mark done so callers don’t retry
+        return;
+    }
+
+    sent_final_chunk_ = true;
+
+    if (chunked_mode_) {
+        static const char kFinal[] = "0\r\n\r\n";
+        out_buf_.insert(out_buf_.end(), kFinal, kFinal + sizeof(kFinal) - 1);
+    }
 }
+
+
 
 
 
@@ -368,111 +378,109 @@ keeping browser and proxy behavior correct.
 // Build and queue the HTTP head once (after CGI headers parsed).
 void CGIStreamer::finalizeHeaders()
 {
-	if (http_head_queued_)
-		return;
+    if (http_head_queued_)
+        return;
 
-	// --- status line pieces ---
-	const int status = status_code_ ? status_code_ : 200;
-	const std::string reason = status_reason_.empty() ? "OK" : status_reason_;
+    const bool is_head = (req_.getMethod() == "HEAD");
 
-	// --- ensure basic headers (but don't stomp CGI-provided ones) ---
-	if (!saw_content_type_ && !res_.headers.keyExists("Content-Type"))
-		res_.headers.set("Content-Type", "text/plain");
+    // --- status line pieces ---
+    const int status = status_code_ ? status_code_ : 200;
+    const std::string reason = status_reason_.empty() ? "OK" : status_reason_;
 
-	if (!res_.headers.keyExists("Date"))
-		res_.headers.set("Date", http_date_now_gmt());
+    // --- ensure basic headers (but don't stomp CGI-provided ones) ---
+    if (!saw_content_type_ && !res_.headers.keyExists("Content-Type"))
+        res_.headers.set("Content-Type", "text/plain");
 
-	if (!res_.headers.keyExists("Server"))
-		res_.headers.set("Server", "webserv/1.0");
+    if (!res_.headers.keyExists("Date"))
+        res_.headers.set("Date", http_date_now_gmt());
 
-	// --- decide Connection policy unless CGI already set it ---
-	if (!res_.headers.keyExists("Connection"))
-	{
-		bool want_close = false;
+    if (!res_.headers.keyExists("Server"))
+        res_.headers.set("Server", "webserv/1.0");
 
-		// Honor client Connection: close (case-insensitive) or HTTP/1.0 default-close
-		const Headers &rq = req_.getHeaders();
-		std::string c = rq.get("Connection");
-		// simple ASCII case-insensitive compare to "close"
-		bool rq_says_close = false;
-		if (!c.empty()) {
-			if (c.size() == 5) { // "close"
-				char a='c',b='l',d='o',e='s',f='e';
-				rq_says_close =
-					( (c[0]|32)==a && (c[1]|32)==b && (c[2]|32)==d && (c[3]|32)==e && (c[4]|32)==f );
-			}
-		}
-		if (rq_says_close)
-			want_close = true;
-		else if (req_.getHttpVer() == "HTTP/1.0")
-			want_close = true;
+    // Connection policy unless CGI already set it
+    if (!res_.headers.keyExists("Connection"))
+    {
+        bool want_close = false;
+        const Headers &rq = req_.getHeaders();
+        std::string c = rq.get("Connection");
+        bool rq_says_close = false;
+        if (!c.empty() && c.size() == 5) {
+            // ASCII case-insensitive compare to "close"
+            rq_says_close =
+                ((c[0]|32)=='c' && (c[1]|32)=='l' && (c[2]|32)=='o' && (c[3]|32)=='s' && (c[4]|32)=='e');
+        }
+        if (rq_says_close || req_.getHttpVer() == "HTTP/1.0")
+            want_close = true;
 
-		res_.headers.set("Connection", want_close ? "close" : "keep-alive");
-	}
+        res_.headers.set("Connection", want_close ? "close" : "keep-alive");
+    }
 
-	// --- choose body framing: prefer CGI's Content-Length; else chunked ---
-	const bool have_cl = res_.headers.keyExists("Content-Length");
-	if (!have_cl)
-	{
-		// enable chunked framing for the message body that follows
-		chunked_mode_ = true;
-		res_.headers.set("Transfer-Encoding", "chunked");
-	}
-	else
-	{
-		// if CGI supplied Content-Length, do NOT set chunked
-		chunked_mode_ = false;
-		// ensure Transfer-Encoding isn't lingering from earlier parsing
-		if (res_.headers.keyExists("Transfer-Encoding"))
-			res_.headers.erase("Transfer-Encoding");
-	}
+    // --- choose body framing ---
+    const bool have_cl = res_.headers.keyExists("Content-Length");
 
-	// --- build and queue the response head (status line + headers) ---
-	std::string head;
-	head.reserve(512);
+    if (is_head) {
+        // For HEAD: never advertise chunked and don't enable chunking.
+        chunked_mode_ = false;
+        if (res_.headers.keyExists("Transfer-Encoding"))
+            res_.headers.erase("Transfer-Encoding");
+        // Keep Content-Length if CGI set it; otherwise send neither CL nor TE.
+    } else {
+        // For non-HEAD: use chunked if no Content-Length was provided.
+        if (!have_cl) {
+            chunked_mode_ = true;
+            res_.headers.set("Transfer-Encoding", "chunked");
+        } else {
+            chunked_mode_ = false;
+            if (res_.headers.keyExists("Transfer-Encoding"))
+                res_.headers.erase("Transfer-Encoding");
+        }
+    }
 
-	// Status line
-	head += "HTTP/1.1 ";
-	{
-		char buf[16];
-		std::sprintf(buf, "%d", status);
-		head += buf;
-	}
-	head += " ";
-	head += reason;
-	head += "\r\n";
+    // --- build and queue the response head ---
+    std::string head;
+    head.reserve(512);
 
-	// Required/standard headers (use values from res_.headers)
-	head += "Date: " + res_.headers.get("Date") + "\r\n";
-	head += "Server: " + res_.headers.get("Server") + "\r\n";
+    // Status line
+    head += "HTTP/1.1 ";
+    {
+        char buf[16];
+        std::sprintf(buf, "%d", status);
+        head += buf;
+    }
+    head += " ";
+    head += reason;
+    head += "\r\n";
 
-	// Content-Type
-	if (res_.headers.keyExists("Content-Type"))
-		head += "Content-Type: " + res_.headers.get("Content-Type") + "\r\n";
+    head += "Date: " + res_.headers.get("Date") + "\r\n";
+    head += "Server: " + res_.headers.get("Server") + "\r\n";
 
-	// Either Content-Length or Transfer-Encoding (but not both)
-	if (have_cl)
-		head += "Content-Length: " + res_.headers.get("Content-Length") + "\r\n";
-	else
-		head += "Transfer-Encoding: chunked\r\n";
+    if (res_.headers.keyExists("Content-Type"))
+        head += "Content-Type: " + res_.headers.get("Content-Type") + "\r\n";
 
-	// Connection
-	head += "Connection: " + res_.headers.get("Connection") + "\r\n";
+    // For HEAD: include Content-Length if present; never include Transfer-Encoding.
+    // For others: include either CL or TE (already decided above).
+    if (have_cl) {
+        head += "Content-Length: " + res_.headers.get("Content-Length") + "\r\n";
+    } else if (!is_head) {
+        head += "Transfer-Encoding: chunked\r\n";
+    }
 
-	// Multiple Set-Cookie (if any)
-	for (std::vector<std::string>::size_type i = 0; i < set_cookie_.size(); ++i)
-		head += "Set-Cookie: " + set_cookie_[i] + "\r\n";
+    head += "Connection: " + res_.headers.get("Connection") + "\r\n";
 
-	head += "\r\n"; // end of headers
+    for (std::vector<std::string>::size_type i = 0; i < set_cookie_.size(); ++i)
+        head += "Set-Cookie: " + set_cookie_[i] + "\r\n";
 
-	// Queue head bytes unchunked
-	const bool saved = chunked_mode_;
-	chunked_mode_ = false;
-	enqueueOut(head.data(), head.size());
-	chunked_mode_ = saved;
+    head += "\r\n";
 
-	http_head_queued_ = true;
+    // Queue head bytes unchunked
+    const bool saved = chunked_mode_;
+    chunked_mode_ = false;
+    enqueueOut(head.data(), head.size());
+    chunked_mode_ = saved;
+
+    http_head_queued_ = true;
 }
+
 
 
 // --- stdin/stdout helpers ---
@@ -581,20 +589,60 @@ void resetWriteDeadline()
 Arms/refreshes a write-progress watchdog (write_deadline_ms_ = now + WRITE_TIMEOUT_MS). 
 If stdin writes don’t progress by the deadline, onTick() will close stdin to unblock the child. 
 This protects the server from scripts that read slowly (or stop reading) while still 
-allowing normal streaming. Implemented with gettimeofday for lightweight millisecond precision, 
+allowing normal streaming. Implemented with  for lightweight millisecond precision, 
 it’s called after successful writes in onCgiWritable.
 
 */
 
-void CGIStreamer::resetWriteDeadline()
+
+
+
+
+// ---- monotonic milliseconds () ----
+static unsigned long long monotonic_ms()
 {
-	struct timeval tv;
-	::gettimeofday(&tv, 0);
-	const unsigned long long now_ms =
-		(unsigned long long)tv.tv_sec * 1000ULL +
-		(unsigned long long)tv.tv_usec / 1000ULL;
-	write_deadline_ms_ = now_ms + WRITE_TIMEOUT_MS;
+#if defined(CLOCK_MONOTONIC)
+	struct timespec ts;
+	if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+		return (unsigned long long)ts.tv_sec * 1000ULL +
+		       (unsigned long long)ts.tv_nsec / 1000000ULL;
+	}
+#endif
+	// Fallback if CLOCK_MONOTONIC unavailable; still avoids 
+	std::time_t t = std::time(0);
+	return (unsigned long long)t * 1000ULL;
 }
+
+
+
+// single, unique definition somewhere near the top of CGIStreamer.cpp
+static unsigned long long now_ms_mono() {
+#if defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        return (unsigned long long)ts.tv_sec * 1000ULL
+             + (unsigned long long)ts.tv_nsec / 1000000ULL;
+    }
+#endif
+    return (unsigned long long)std::time(0) * 1000ULL; // coarse fallback
+}
+
+
+
+
+// In CGIStreamer.cpp
+void CGIStreamer::resetWriteDeadline(unsigned long long now_ms) {
+    write_deadline_ms_ = now_ms + WRITE_TIMEOUT_MS;
+}
+
+void CGIStreamer::resetWriteDeadline() {
+    write_deadline_ms_ = now_ms_mono() + WRITE_TIMEOUT_MS;
+}
+
+
+
+
+
 
 // --- public API ---
 
@@ -613,111 +661,107 @@ Returns true when the streamer is active and ready for polling; otherwise failed
 */
 
 bool CGIStreamer::beginCgi(const CgiSpec &spec,
-						const std::string &script_path,
-						const std::vector<std::string> &envv)
+                           const std::string &script_path,
+                           const std::vector<std::string> &envv)
 {
-	// ---- reset runtime state ----
-	failed_         = false;
-	cgi_active_     = false;
+    // ---- reset runtime state ----
+    failed_     = false;
+    cgi_active_ = false;
 
-	cgi_in_fd_      = -1;   // server → child stdin (we write here)
-	cgi_out_fd_     = -1;   // child  → server stdout (we read here)
+    cgi_in_fd_  = -1;   // server → child stdin (we write here)
+    cgi_out_fd_ = -1;   // child  → server stdout (we read here)
 
-	cgi_body_off_   = 0;    // generic progress counter (kept for logs)
-	if (body_fd_ >= 0) { ::close(body_fd_); body_fd_ = -1; }
-	body_file_off_  = 0;
-	body_path_.clear();
-	if (req_.isBodyOnDisk()) body_path_ = req_.getBodyFilePath();
+    cgi_body_off_  = 0;
+    if (body_fd_ >= 0) { ::close(body_fd_); body_fd_ = -1; }
+    body_file_off_ = 0;
+    body_path_.clear();
+    if (req_.isBodyOnDisk()) body_path_ = req_.getBodyFilePath();
 
-	// stdout parsing / response framing
-	hdr_state_         = HDR_WAITING;
-	cgi_header_accum_.clear();
-	saw_content_type_  = false;
-	status_code_       = 0;
-	status_reason_.clear();
-	set_cookie_.clear();
+    // stdout parsing / response framing
+    hdr_state_        = HDR_WAITING;
+    cgi_header_accum_.clear();
+    saw_content_type_ = false;
+    status_code_      = 0;
+    status_reason_.clear();
+    set_cookie_.clear();
 
-	http_head_queued_  = false;
-	chunked_mode_      = true;
-	sent_final_chunk_  = false;
-	out_buf_.clear();
-	out_off_           = 0;
-	stdout_paused_     = false;
+    http_head_queued_ = false;
+    chunked_mode_     = true;
+    sent_final_chunk_ = false;
+    out_buf_.clear();
+    out_off_          = 0;
+    stdout_paused_    = false;
 
-	// ---- spawn child ----
-	if (!proc_.spawn(spec, script_path, envv)) {
-		failed_ = true;
-		return false;
-	}
-	cgi_in_fd_  = proc_.inFD();
-	cgi_out_fd_ = proc_.outFD();
+    // ---- spawn child ----
+    if (!proc_.spawn(spec, script_path, envv)) {
+        failed_ = true;
+        return false;
+    }
+    cgi_in_fd_  = proc_.inFD();
+    cgi_out_fd_ = proc_.outFD();
 
-	// ---- set pipes non-blocking + CLOEXEC ----
+    // ---- set pipes non-blocking + CLOEXEC ----
 #ifdef F_GETFL
-	if (cgi_in_fd_ >= 0) {
-		int fl = ::fcntl(cgi_in_fd_, F_GETFL, 0);
-		if (fl >= 0) ::fcntl(cgi_in_fd_, F_SETFL, fl | O_NONBLOCK);
-#ifdef F_GETFD
-		fl = ::fcntl(cgi_in_fd_, F_GETFD, 0);
-		if (fl >= 0) ::fcntl(cgi_in_fd_, F_SETFD, fl | FD_CLOEXEC);
+    if (cgi_in_fd_ >= 0) {
+        int fl = ::fcntl(cgi_in_fd_, F_GETFL, 0);
+        if (fl >= 0) ::fcntl(cgi_in_fd_, F_SETFL, fl | O_NONBLOCK);
+#  ifdef F_GETFD
+        fl = ::fcntl(cgi_in_fd_, F_GETFD, 0);
+        if (fl >= 0) ::fcntl(cgi_in_fd_, F_SETFD, fl | FD_CLOEXEC);
+#  endif
+    }
+    if (cgi_out_fd_ >= 0) {
+        int fl = ::fcntl(cgi_out_fd_, F_GETFL, 0);
+        if (fl >= 0) ::fcntl(cgi_out_fd_, F_SETFL, fl | O_NONBLOCK);
+#  ifdef F_GETFD
+        fl = ::fcntl(cgi_out_fd_, F_GETFD, 0);
+        if (fl >= 0) ::fcntl(cgi_out_fd_, F_SETFD, fl | FD_CLOEXEC);
+#  endif
+    }
 #endif
-	}
-	if (cgi_out_fd_ >= 0) {
-		int fl = ::fcntl(cgi_out_fd_, F_GETFL, 0);
-		if (fl >= 0) ::fcntl(cgi_out_fd_, F_SETFL, fl | O_NONBLOCK);
-#ifdef F_GETFD
-		fl = ::fcntl(cgi_out_fd_, F_GETFD, 0);
-		if (fl >= 0) ::fcntl(cgi_out_fd_, F_SETFD, fl | FD_CLOEXEC);
-#endif
-	}
-#endif
 
-	if (cgi_out_fd_ < 0) { failed_ = true; return false; }
+    if (cgi_out_fd_ < 0) { failed_ = true; return false; }
 
-	// ---- prime stdin feed (the missing piece that fixes big-body hangs) ----
-	// If body is kept in memory, take a stable snapshot ONCE and write it across ticks.
-	in_mem_body_.clear();
-	in_mem_off_     = 0;
-	using_mem_body_ = false;
+    // ---- prime stdin feed (snapshot for in-mem body; lazy-open for disk) ----
+    in_mem_body_.clear();
+    in_mem_off_     = 0;
+    using_mem_body_ = false;
 
-	if (!req_.isBodyOnDisk()) {
-		const std::size_t blen = req_.getBodyLength();
-		if (blen > 0) {
-			in_mem_body_ = req_.readBodyToVector();   // snapshot
-			using_mem_body_ = !in_mem_body_.empty();
-		}
-	} else {
-		// for on-disk bodies we’ll open body_fd_ lazily on first POLLOUT in pump
-		body_file_off_ = 0;
-	}
+    if (!req_.isBodyOnDisk()) {
+        const std::size_t blen = req_.getBodyLength();
+        if (blen > 0) {
+            in_mem_body_ = req_.readBodyToVector();   // stable snapshot
+            using_mem_body_ = !in_mem_body_.empty();
+        }
+    } else {
+        body_file_off_ = 0; // open file lazily in onCgiWritable()
+    }
 
-	// ---- register fds with event loop right after O_NONBLOCK ----
-	if (loop_) {
-		loop_->modFD(cgi_out_fd_, POLLIN);           // always read child's stdout
-		if (cgi_in_fd_ >= 0) loop_->modFD(cgi_in_fd_, POLLOUT); // to feed stdin progressively
-	}
+    // ---- register fds with event loop right after O_NONBLOCK ----
+    if (loop_) {
+        loop_->modFD(cgi_out_fd_, POLLIN);                 // read child's stdout
+        if (cgi_in_fd_ >= 0) loop_->modFD(cgi_in_fd_, POLLOUT); // feed stdin
+    }
 
-	// If there is truly no body, close stdin now so the CGI doesn’t block on read()
-	if (!using_mem_body_ && !req_.isBodyOnDisk() && req_.getBodyLength() == 0) {
-		closeStdin(); // also clears POLLOUT via loop_->modFD(fd, 0)
-	}
+    // If there is truly no body, close stdin so the CGI doesn’t block on read()
+    if (!using_mem_body_ && !req_.isBodyOnDisk() && req_.getBodyLength() == 0) {
+        closeStdin();
+    }
 
-	// ---- arm deadlines ----
-	struct timeval tv; ::gettimeofday(&tv, 0);
-	const unsigned long long now_ms =
-		(unsigned long long)tv.tv_sec * 1000ULL +
-		(unsigned long long)tv.tv_usec / 1000ULL;
+    // ---- arm deadlines (monotonic) ----
+    const unsigned long long now_ms = now_ms_mono();
+    const int HDR_WAIT_MS    = 3000;   // time to see CGI headers
+    const int TOTAL_LIMIT_MS = 15000;  // total runtime cap
 
-	const int HDR_WAIT_MS    = 3000;   // time to see CGI headers
-	const int TOTAL_LIMIT_MS = 15000;  // total runtime cap
+    hdr_deadline_.reset(now_ms, HDR_WAIT_MS);
+    total_deadline_.reset(now_ms, TOTAL_LIMIT_MS);
+    resetWriteDeadline(now_ms);
 
-	hdr_deadline_.reset(now_ms, HDR_WAIT_MS);
-	total_deadline_.reset(now_ms, TOTAL_LIMIT_MS);
-	resetWriteDeadline();
-
-	cgi_active_ = true;
-	return true;
+    cgi_active_ = true;
+    return true;
 }
+
+
 
 
 /* 
@@ -753,25 +797,24 @@ architecture, guaranteeing requests never hang forever.
 
 */
 
-void CGIStreamer::onTick(unsigned long long now_ms)
+void CGIStreamer::onTick(unsigned long long /*now_ms_ignored*/)
 {
-	if (hdr_state_ == HDR_WAITING && hdr_deadline_.expired(now_ms))
-	{
+	const unsigned long long now_ms = monotonic_ms();
+
+	if (hdr_state_ == HDR_WAITING && hdr_deadline_.expired(now_ms)) {
 		timeout504();
 		return;
 	}
-	if (total_deadline_.expired(now_ms))
-	{
+	if (total_deadline_.expired(now_ms)) {
 		timeout504();
 		return;
 	}
-	if (write_deadline_ms_ && now_ms > write_deadline_ms_)
-	{
-		// Child not draining stdin in time → close stdin to unblock it.
-		closeStdin();
-		write_deadline_ms_ = 0; // avoid repeated triggers
+	if (write_deadline_ms_ && now_ms > write_deadline_ms_) {
+		closeStdin();          // unblock child that isn’t draining stdin
+		write_deadline_ms_ = 0;
 	}
 }
+
 
 
 /* 

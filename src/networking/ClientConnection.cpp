@@ -69,7 +69,8 @@ ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	  flush_no_progress_ticks(0),
 	  now_cached_ms(nowMs),
 	  ready_to_close(false),
-	  fixed_body_target_((std::size_t)-1) // <— add this
+	  fixed_body_target_((std::size_t)-1), // <— add this
+	  ip()
 
 {
 	// Wire the loop once

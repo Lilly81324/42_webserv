@@ -54,6 +54,8 @@ public:
     CGIStreamer &getCGIStreamer() { return cgi; }
 
     Phase getState() { return state; }
+    void setIp(std::string ip) { this->ip = ip; }
+    std::string getIp() { return ip; }
     FlowControl &getFlow() { return io.getFlow(); }
     void resetDeadline(int ms){ dl.reset(now_cached_ms, ms); };
 
@@ -154,6 +156,7 @@ private:
     unsigned long long now_cached_ms;
     bool ready_to_close;
     std::size_t fixed_body_target_;  
+    std::string   ip; // Ip of the client (socket)
 
     size_t        body_expected_;     // from Content-Length
     size_t        body_received_;     // progresses to body_expected_

@@ -60,6 +60,7 @@ class AcceptorHandler : public EventLoop::Handler {
 
 					// register client handler
 					ClientConnection* c = new ClientConnection(cfd,&_srv, nowMs());
+					c->setIp(ip);
 					ClientHandler *h = new ClientHandler(eventLoop,c);
 					_srv.trackHandler(h);
 					eventLoop.addFD(cfd, POLLIN, h);

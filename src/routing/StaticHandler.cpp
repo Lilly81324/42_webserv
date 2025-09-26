@@ -596,101 +596,6 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
     std::string rel = !ctx.rel_path.empty() ? ctx.rel_path : req.getPath();
     if (rel.empty() || rel[0] != '/') rel = "/" + rel;
 
-    // ---------------- try_files resolution (if configured) ----------------
-    // Build candidate list from location.try_files; support $uri expansion and =CODE
-    int terminal_code = 0;               // e.g., =404
-    std::string final_rewrite_uri;       // last token if not =CODE (internal rewrite)
-
-    if (ctx.loc && !ctx.loc->try_files.empty()) {
-        // Prepare expanded candidates
-        std::vector<std::string> cand;
-        cand.reserve(ctx.loc->try_files.size());
-
-        for (size_t i = 0; i < ctx.loc->try_files.size(); ++i) {
-            const std::string tok = ctx.loc->try_files[i];
-            if (!tok.empty() && tok[0] == '=') {
-                // terminal -> record code, skip as a FS candidate
-                if (tok.size() > 1) {
-                    terminal_code = std::atoi(tok.c_str() + 1);
-                    if (terminal_code <= 0) terminal_code = 404;
-                } else {
-                    terminal_code = 404;
-                }
-                continue;
-            }
-            std::string t = tok;
-
-            // Expand $uri -> current rel (already begins with '/')
-            for (std::string::size_type pos = 0;
-                 (pos = t.find("$uri", pos)) != std::string::npos; ) {
-                t.replace(pos, 4, rel);
-                pos += rel.size();
-            }
-
-            // Ensure it starts with '/'
-            if (!t.empty() && t[0] != '/')
-                t.insert(t.begin(), '/');
-
-            cand.push_back(t);
-        }
-
-        // If last token was not =code and exists, remember it for fallback rewrite
-        if (!ctx.loc->try_files.empty()) {
-            const std::string &last = ctx.loc->try_files.back();
-            if (!( !last.empty() && last[0] == '=' )) {
-                final_rewrite_uri = last;
-                // expand $uri in rewrite too
-                for (std::string::size_type pos = 0;
-                     (pos = final_rewrite_uri.find("$uri", pos)) != std::string::npos; ) {
-                    final_rewrite_uri.replace(pos, 4, rel);
-                    pos += rel.size();
-                }
-                if (!final_rewrite_uri.empty() && final_rewrite_uri[0] != '/')
-                    final_rewrite_uri.insert(final_rewrite_uri.begin(), '/');
-            }
-        }
-
-        // Probe candidates against filesystem; choose the first that exists
-        // We’ll set 'rel' to the chosen URI and continue into the normal code path.
-        struct FS {
-            static bool exists(const std::string& p) {
-                struct stat st; return ::stat(p.c_str(), &st) == 0;
-            }
-            static std::string join(const std::string& a, const std::string& b) {
-                if (a.empty()) return b;
-                if (b.empty()) return a;
-                const bool as = (a[a.size()-1] == '/');
-                const bool bs = (b[0] == '/');
-                if (as && bs) return a + b.substr(1);
-                if (as || bs)  return a + b;
-                return a + "/" + b;
-            }
-        };
-
-        bool picked = false;
-        for (size_t i = 0; i < cand.size(); ++i) {
-            const std::string full = FS::join(base, cand[i]);
-            if (FS::exists(full)) {
-                rel = cand[i]; // adopt this URI
-                picked = true;
-                break;
-            }
-        }
-
-        if (!picked) {
-            // No candidate existed: if terminal code given, return it.
-            if (terminal_code > 0) {
-                return serveErrorPage(terminal_code, ctx, res, is_head);
-            }
-            // Else if rewrite URI present, adopt it (even if it doesn't exist,
-            // we’ll let normal path resolution (handleGet) decide 404/autoindex/index)
-            if (!final_rewrite_uri.empty()) {
-                rel = final_rewrite_uri;
-            }
-            // Otherwise, leave rel as original $uri
-        }
-    }
-
     // ---------------------------------------------------------------------
 
     // Build FS candidate from (possibly updated) rel
@@ -712,9 +617,6 @@ bool StaticHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &
         // Illegal traversal or bad root — show 404 page if available
         return serveErrorPage(HTTP_NOT_FOUND, ctx, res, is_head);
     }
-
-    // Update ctx.rel_path so downstream uses the resolved URI (strip leading '/')
-    ctx.rel_path = (rel.size() && rel[0] == '/') ? rel.substr(1) : rel;
 
     if (m == "GET")
         return (handleGet(canonPath, rel, false, req, res, ctx));

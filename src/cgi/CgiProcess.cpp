@@ -58,14 +58,14 @@ By wrapping this call, other parts of the server can enforce time-based rules (l
 
 unsigned long long CgiProcess::nowMs() {
 #if defined(CLOCK_MONOTONIC)
-    struct timespec ts;
-    if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return (unsigned long long)ts.tv_sec * 1000ULL
-             + (unsigned long long)ts.tv_nsec / 1000000ULL;
-    }
+	struct timespec ts;
+	if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+		return (unsigned long long)ts.tv_sec * 1000ULL
+			+ (unsigned long long)ts.tv_nsec / 1000000ULL;
+	}
 #endif
-    // Fallback (coarse) if CLOCK_MONOTONIC isn't available
-    return (unsigned long long)std::time(0) * 1000ULL;
+	// Fallback (coarse) if CLOCK_MONOTONIC isn't available
+	return (unsigned long long)std::time(0) * 1000ULL;
 }
 
 
@@ -150,103 +150,103 @@ enabling handlers to run CGIs without worrying about low-level pipe setup.
 
 // High-level convenience overload: build argv/envp and delegate
 bool CgiProcess::spawn(const CgiSpec &spec,
-                       const std::string &script_path,
-                       const std::vector<std::string> &envv)
+					const std::string &script_path,
+					const std::vector<std::string> &envv)
 {
-    closeBoth(); // if previously used
-    _pid = -1;
-    _in  = -1;  // parent will WRITE to child's stdin
-    _out = -1;  // parent will READ  from child's stdout
+	closeBoth(); // if previously used
+	_pid = -1;
+	_in  = -1;  // parent will WRITE to child's stdin
+	_out = -1;  // parent will READ  from child's stdout
 
-    int pin[2]  = { -1, -1 }; // pipe for child's stdin  (parent writes -> child reads)
-    int pout[2] = { -1, -1 }; // pipe for child's stdout (child writes -> parent reads)
+	int pin[2]  = { -1, -1 }; // pipe for child's stdin  (parent writes -> child reads)
+	int pout[2] = { -1, -1 }; // pipe for child's stdout (child writes -> parent reads)
 
-    if (::pipe(pin) < 0)
-        return false;
-    if (::pipe(pout) < 0)
-    {
-        ::close(pin[0]);
-        ::close(pin[1]);
-        return false;
-    }
+	if (::pipe(pin) < 0)
+		return false;
+	if (::pipe(pout) < 0)
+	{
+		::close(pin[0]);
+		::close(pin[1]);
+		return false;
+	}
 
-    pid_t pid = ::fork();
-    if (pid < 0)
-    {
-        ::close(pin[0]);
-        ::close(pin[1]);
-        ::close(pout[0]);
-        ::close(pout[1]);
-        return false;
-    }
+	pid_t pid = ::fork();
+	if (pid < 0)
+	{
+		::close(pin[0]);
+		::close(pin[1]);
+		::close(pout[0]);
+		::close(pout[1]);
+		return false;
+	}
 
-    if (pid == 0)
-    {
-        // ---- Child ----
-        // stdin: read end of pin
-        ::dup2(pin[0], STDIN_FILENO);
-        // stdout: write end of pout
-        ::dup2(pout[1], STDOUT_FILENO);
+	if (pid == 0)
+	{
+		// ---- Child ----
+		// stdin: read end of pin
+		::dup2(pin[0], STDIN_FILENO);
+		// stdout: write end of pout
+		::dup2(pout[1], STDOUT_FILENO);
 
-        // close all pipe fds in child
-        ::close(pin[0]);
-        ::close(pin[1]);
-        ::close(pout[0]);
-        ::close(pout[1]);
+		// close all pipe fds in child
+		::close(pin[0]);
+		::close(pin[1]);
+		::close(pout[0]);
+		::close(pout[1]);
 
-        // Build argv and envp (you already have helpers; keep minimal here)
-        std::vector<char*> argv;
-        argv.push_back(const_cast<char*>(spec.bin.c_str()));     // /usr/bin/python3 (or interpreter)
-        argv.push_back(const_cast<char*>(script_path.c_str()));  // /path/to/script.py
-        argv.push_back(0);
+		// Build argv and envp (you already have helpers; keep minimal here)
+		std::vector<char*> argv;
+		argv.push_back(const_cast<char*>(spec.bin.c_str()));     // /usr/bin/python3 (or interpreter)
+		argv.push_back(const_cast<char*>(script_path.c_str()));  // /path/to/script.py
+		argv.push_back(0);
 
-        std::vector<char*> envp;
-        envp.reserve(envv.size() + 1);
-        for (size_t i = 0; i < envv.size(); ++i)
-            envp.push_back(const_cast<char*>(envv[i].c_str()));
-        envp.push_back(0);
+		std::vector<char*> envp;
+		envp.reserve(envv.size() + 1);
+		for (size_t i = 0; i < envv.size(); ++i)
+			envp.push_back(const_cast<char*>(envv[i].c_str()));
+		envp.push_back(0);
 
-        ::execve(spec.bin.c_str(), &argv[0], &envp[0]);
+		::execve(spec.bin.c_str(), &argv[0], &envp[0]);
 
-        // ---- execve failed: stay within allowed calls ----
-        // Best effort message (ignore errors)
-        const char msg[] = "execve failed\n";
-        (void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+		// ---- execve failed: stay within allowed calls ----
+		// Best effort message (ignore errors)
+		const char msg[] = "execve failed\n";
+		(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
 
-        // Close stdio so we don't hold any pipe ends
-        (void)::close(STDIN_FILENO);
-        (void)::close(STDOUT_FILENO);
-        (void)::close(STDERR_FILENO);
+		// Close stdio so we don't hold any pipe ends
+		(void)::close(STDIN_FILENO);
+		(void)::close(STDOUT_FILENO);
+		(void)::close(STDERR_FILENO);
 
-        // Block forever; parent will enforce timeouts and reap us.
-        // select() is allowed; this avoids CPU spin.
-        for (;;)
-            (void)::select(0, 0, 0, 0, 0);
-    }
+		// Block forever; parent will enforce timeouts and reap us.
+		// select() is allowed; this avoids CPU spin.
+		for (;;)
+			(void)::select(0, 0, 0, 0, 0);
+	}
 
-    // ---- Parent ----
-    _pid = pid;
+	// ---- Parent ----
+	_pid = pid;
 
-    // Parent writes to child's stdin -> keep pin[1], close pin[0]
-    ::close(pin[0]);
-    _in = pin[1];
+	// Parent writes to child's stdin -> keep pin[1], close pin[0]
+	::close(pin[0]);
+	_in = pin[1];
 
-    // Parent reads child's stdout -> keep pout[0], close pout[1]
-    ::close(pout[1]);
-    _out = pout[0];
+	// Parent reads child's stdout -> keep pout[0], close pout[1]
+	::close(pout[1]);
+	_out = pout[0];
 
-    // Set parent ends to NONBLOCK + CLOEXEC
-    int fl;
-    fl = ::fcntl(_in, F_GETFL, 0);
-    if (fl >= 0) ::fcntl(_in, F_SETFL, fl | O_NONBLOCK);
-    fl = ::fcntl(_out, F_GETFL, 0);
-    if (fl >= 0) ::fcntl(_out, F_SETFL, fl | O_NONBLOCK);
-    fl = ::fcntl(_in, F_GETFD, 0);
-    if (fl >= 0) ::fcntl(_in, F_SETFD, fl | FD_CLOEXEC);
-    fl = ::fcntl(_out, F_GETFD, 0);
-    if (fl >= 0) ::fcntl(_out, F_SETFD, fl | FD_CLOEXEC);
+	// Set parent ends to NONBLOCK + CLOEXEC
+	int fl;
+	fl = ::fcntl(_in, F_GETFL, 0);
+	if (fl >= 0) ::fcntl(_in, F_SETFL, fl | O_NONBLOCK);
+	fl = ::fcntl(_out, F_GETFL, 0);
+	if (fl >= 0) ::fcntl(_out, F_SETFL, fl | O_NONBLOCK);
+	fl = ::fcntl(_in, F_GETFD, 0);
+	if (fl >= 0) ::fcntl(_in, F_SETFD, fl | FD_CLOEXEC);
+	fl = ::fcntl(_out, F_GETFD, 0);
+	if (fl >= 0) ::fcntl(_out, F_SETFD, fl | FD_CLOEXEC);
 
-    return true;
+	return true;
 }
 
 
@@ -267,118 +267,118 @@ Timeout tracking integrates with the event loop, ensuring runaway CGIs don’t h
 
 // Low-level spawn: do the actual fork/exec (stub for now; returns false)
 bool CgiProcess::spawn(const std::string &bin,
-                       const std::string &script,
-                       char *const *argv,
-                       char *const *envp,
-                       int timeout_ms)
+					const std::string &script,
+					char *const *argv,
+					char *const *envp,
+					int timeout_ms)
 {
-    // Clean up any previous child
-    terminate();
+	// Clean up any previous child
+	terminate();
 
-    // Establish deadline (uses your allowed nowMs())
-    _deadline = (timeout_ms > 0)
-                    ? (nowMs() + (unsigned long long)timeout_ms)
-                    : 0ULL;
+	// Establish deadline (uses your allowed nowMs())
+	_deadline = (timeout_ms > 0)
+					? (nowMs() + (unsigned long long)timeout_ms)
+					: 0ULL;
 
-    int inPipe[2]  = { -1, -1 }; // parent writes -> child reads (stdin)
-    int outPipe[2] = { -1, -1 }; // child writes -> parent reads (stdout/stderr)
+	int inPipe[2]  = { -1, -1 }; // parent writes -> child reads (stdin)
+	int outPipe[2] = { -1, -1 }; // child writes -> parent reads (stdout/stderr)
 
-    if (::pipe(inPipe) < 0)
-        return false;
-    if (::pipe(outPipe) < 0)
-    {
-        ::close(inPipe[0]);
-        ::close(inPipe[1]);
-        return false;
-    }
+	if (::pipe(inPipe) < 0)
+		return false;
+	if (::pipe(outPipe) < 0)
+	{
+		::close(inPipe[0]);
+		::close(inPipe[1]);
+		return false;
+	}
 
-    pid_t pid = ::fork();
-    if (pid < 0)
-    {
-        // fork failed
-        ::close(inPipe[0]);
-        ::close(inPipe[1]);
-        ::close(outPipe[0]);
-        ::close(outPipe[1]);
-        return false;
-    }
+	pid_t pid = ::fork();
+	if (pid < 0)
+	{
+		// fork failed
+		::close(inPipe[0]);
+		::close(inPipe[1]);
+		::close(outPipe[0]);
+		::close(outPipe[1]);
+		return false;
+	}
 
-    if (pid == 0)
-    {
-        // ---------------- child ----------------
-        // close parent ends
-        ::close(inPipe[1]);
-        ::close(outPipe[0]);
+	if (pid == 0)
+	{
+		// ---------------- child ----------------
+		// close parent ends
+		::close(inPipe[1]);
+		::close(outPipe[0]);
 
-        // stdin from inPipe[0]
-        if (::dup2(inPipe[0], STDIN_FILENO) < 0)
-        {
-            const char msg[] = "dup2(stdin) failed\n";
-            (void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
-            (void)::close(inPipe[0]);
-            (void)::close(outPipe[1]);
-            (void)::close(STDIN_FILENO);
-            (void)::close(STDOUT_FILENO);
-            (void)::close(STDERR_FILENO);
-            for (;;)
-                (void)::select(0, 0, 0, 0, 0);
-        }
+		// stdin from inPipe[0]
+		if (::dup2(inPipe[0], STDIN_FILENO) < 0)
+		{
+			const char msg[] = "dup2(stdin) failed\n";
+			(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+			(void)::close(inPipe[0]);
+			(void)::close(outPipe[1]);
+			(void)::close(STDIN_FILENO);
+			(void)::close(STDOUT_FILENO);
+			(void)::close(STDERR_FILENO);
+			for (;;)
+				(void)::select(0, 0, 0, 0, 0);
+		}
 
-        // stdout to outPipe[1]
-        if (::dup2(outPipe[1], STDOUT_FILENO) < 0)
-        {
-            const char msg[] = "dup2(stdout) failed\n";
-            (void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
-            (void)::close(inPipe[0]);
-            (void)::close(outPipe[1]);
-            (void)::close(STDIN_FILENO);
-            (void)::close(STDOUT_FILENO);
-            (void)::close(STDERR_FILENO);
-            for (;;)
-                (void)::select(0, 0, 0, 0, 0);
-        }
+		// stdout to outPipe[1]
+		if (::dup2(outPipe[1], STDOUT_FILENO) < 0)
+		{
+			const char msg[] = "dup2(stdout) failed\n";
+			(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+			(void)::close(inPipe[0]);
+			(void)::close(outPipe[1]);
+			(void)::close(STDIN_FILENO);
+			(void)::close(STDOUT_FILENO);
+			(void)::close(STDERR_FILENO);
+			for (;;)
+				(void)::select(0, 0, 0, 0, 0);
+		}
 
-        // stderr merged to stdout (ignore error; best effort)
-        (void)::dup2(outPipe[1], STDERR_FILENO);
+		// stderr merged to stdout (ignore error; best effort)
+		(void)::dup2(outPipe[1], STDERR_FILENO);
 
-        // close the originals after dup
-        (void)::close(inPipe[0]);
-        (void)::close(outPipe[1]);
+		// close the originals after dup
+		(void)::close(inPipe[0]);
+		(void)::close(outPipe[1]);
 
-        // Exec the interpreter/binary with provided argv/envp.
-        // argv should look like: [bin, script, NULL]
-        (void)script; // script should already be present in argv
-        ::execve(bin.c_str(),
-                 const_cast<char *const *>(argv),
-                 const_cast<char *const *>(envp));
+		// Exec the interpreter/binary with provided argv/envp.
+		// argv should look like: [bin, script, NULL]
+		(void)script; // script should already be present in argv
+		::execve(bin.c_str(),
+				const_cast<char *const *>(argv),
+				const_cast<char *const *>(envp));
 
-        // ---- execve failed: keep within allowed calls ----
-        const char msg[] = "execve failed\n";
-        (void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
-        (void)::close(STDIN_FILENO);
-        (void)::close(STDOUT_FILENO);
-        (void)::close(STDERR_FILENO);
-        for (;;)
-            (void)::select(0, 0, 0, 0, 0);
-    }
+		// ---- execve failed: keep within allowed calls ----
+		const char msg[] = "execve failed\n";
+		(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+		(void)::close(STDIN_FILENO);
+		(void)::close(STDOUT_FILENO);
+		(void)::close(STDERR_FILENO);
+		for (;;)
+			(void)::select(0, 0, 0, 0, 0);
+	}
 
-    // ---------------- parent ----------------
-    _pid = pid;
+	// ---------------- parent ----------------
+	_pid = pid;
 
-    // parent keeps write-end of stdin and read-end of stdout
-    ::close(inPipe[0]);
-    ::close(outPipe[1]);
+	// parent keeps write-end of stdin and read-end of stdout
+	::close(inPipe[0]);
+	::close(outPipe[1]);
 
-    _in  = inPipe[1];
-    _out = outPipe[0];
+	_in  = inPipe[1];
+	_out = outPipe[0];
 
-    // Make them non-blocking & close-on-exec (helpers already wrap fcntl)
-    (void)setNonBlocking(_in);
-    (void)setNonBlocking(_out);
-    (void)setCloseOnExec(_in);
-    (void)setCloseOnExec(_out);
+	// Make them non-blocking & close-on-exec (helpers already wrap fcntl)
+	(void)setNonBlocking(_in);
+	(void)setNonBlocking(_out);
+	(void)setCloseOnExec(_in);
+	(void)setCloseOnExec(_out);
 
-    return true;
+	return true;
 }
 
 

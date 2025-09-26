@@ -1125,61 +1125,40 @@ void CGIStreamer::onCgiWritable(int fd)
 			);
 			if (body_fd_ < 0)
 			{
-				#if defined(DEBUG)
-				std::fprintf(stderr, "[CGI][WR] open(%s) failed: errno=%d (%s) → closeStdin\n",
-					body_path_.c_str(), errno, std::strerror(errno));
-				#endif
 				closeStdin();
 				return;
 			}
-			#if defined(DEBUG)
-			std::fprintf(stderr, "[CGI][WR] opened body file %s fd=%d\n",
-				body_path_.c_str(), body_fd_);
-			#endif
 		}
 
 		const std::size_t remaining = total - cgi_body_off_;
 		const std::size_t to_read = (remaining < CHUNK) ? remaining : CHUNK;
 		if (to_read == 0)
 		{
-			#if defined(DEBUG)
-			std::fprintf(stderr, "[CGI][WR] to_read=0 (remaining=%zu) → closeStdin\n", remaining);
-			#endif
 			closeStdin();
 			return;
 		}
 
 		char small[16384];
-		// pread() from the *logical* offset (stateless; safe on partial writes)
+
+		// -------------------------
+		// Use read() instead of pread()
+		// -------------------------
 		ssize_t r;
 		do
 		{
-			r = ::pread(body_fd_, small, to_read,
-						static_cast<off_t>(cgi_body_off_));
+			r = ::read(body_fd_, small, to_read);
 		} while (r < 0 && errno == EINTR);
 
 		if (r < 0)
 		{
 			if (errno == EAGAIN)
-			{
-				#if defined(DEBUG)
-				std::fprintf(stderr, "[CGI][WR] pread EAGAIN → retry later\n");
-				#endif
-				return;
-			}
-			#if defined(DEBUG)
-			std::fprintf(stderr, "[CGI][WR] pread error errno=%d (%s) → closeStdin\n",
-				errno, std::strerror(errno));
-			#endif
+				return; // retry later
 			closeStdin();
 			return;
 		}
 		if (r == 0)
 		{
-			// Producer (request reader) hasn’t flushed these bytes to disk yet; retry later.
-			#if defined(DEBUG)
-			std::fprintf(stderr, "[CGI][WR] pread=0 (not flushed yet) → retry later\n");
-			#endif
+			// End of file reached prematurely; retry later
 			return;
 		}
 
@@ -1196,16 +1175,9 @@ void CGIStreamer::onCgiWritable(int fd)
 			{
 				sent += static_cast<std::size_t>(w);
 				cgi_body_off_ += static_cast<std::size_t>(w);
-				#if defined(DEBUG)
-				std::fprintf(stderr, "[CGI][WR] wrote=%zd new_off=%zu/%zu\n",
-					w, cgi_body_off_, total);
-				#endif
 				resetWriteDeadline();
 				if (cgi_body_off_ >= total)
 				{
-					#if defined(DEBUG)
-					std::fprintf(stderr, "[CGI][WR] done sending body → closeStdin\n");
-					#endif
 					closeStdin();
 					return;
 				}
@@ -1213,26 +1185,15 @@ void CGIStreamer::onCgiWritable(int fd)
 			else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
 			{
 				// Pipe full; we’ll retry from the same logical offset on next POLLOUT
-				#if defined(DEBUG)
-				std::fprintf(stderr, "[CGI][WR] write EAGAIN with %zu/%zu sent → retry later\n",
-					sent, want);
-				#endif
 				break;
 			}
 			else if (w < 0 && errno == EINTR)
 			{
-				#if defined(DEBUG)
-				std::fprintf(stderr, "[CGI][WR] write EINTR → continue\n");
-				#endif
 				continue; // retry same write
 			}
 			else
 			{
 				// Broken pipe / other error
-				#if defined(DEBUG)
-				std::fprintf(stderr, "[CGI][WR] write error errno=%d (%s) → closeStdin\n",
-					errno, std::strerror(errno));
-				#endif
 				closeStdin();
 				return;
 			}

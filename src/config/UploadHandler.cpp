@@ -80,7 +80,6 @@ bool UploadHandler::openTempInUpload(std::string& out_path, int& out_fd) {
 // UploadHandler.cpp
 bool UploadHandler::finishMoveAtomic() {
 	if (cur_fd_ < 0) return false;
-	::fsync(cur_fd_);
 	::close(cur_fd_);
 	cur_fd_ = -1;
 

@@ -63,7 +63,7 @@ TEST_CASE("EventLoop run/stop does not block forever with no fds", "[EventLoop]"
 {
 	EventLoop loop;
 	loop.stop();  // Should not hang
-	loop.run(10); // Should return quickly
+	loop.run(10, NULL); // Should return quickly
 }
 
 TEST_CASE("EventLoop addFD returns false for invalid fd", "[EventLoop][error]")

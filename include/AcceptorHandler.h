@@ -10,17 +10,14 @@
 #include "IpList.h"
 #include <ctime>
 
-class Server;
-
 class AcceptorHandler : public EventLoop::Handler {
 
 	private:
-	unsigned long long nowMs() const
-		{
-			struct timeval tv; gettimeofday(&tv, 0);
-			return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
-		}
-		
+	unsigned long long nowMs() const {
+    std::time_t t = std::time(0);
+    	return static_cast<unsigned long long>(t) * 1000ULL;
+}
+
 	public:
 		AcceptorHandler(EventLoop& loop, Server& srv, Listener* L)
 		: eventLoop(loop), _srv(srv), listener(L) {}

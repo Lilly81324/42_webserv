@@ -87,18 +87,6 @@ void Server::closeAll()
 	listeners.clear();
 }
 
-void Server::shutdownAllHandlers() {
-	std::set<ClientHandler*>::iterator it = server_handlers.begin();
-	while (it != server_handlers.end()) {
-	ClientHandler* h = *it;
-	if (h->conn())
-		delete (h->conn());
-	++it;
-	delete h;
-	}
-	server_handlers.clear();
-}
-
 void Server::setNonBlocking(int fd)
 {
 	int flags = ::fcntl(fd, F_GETFL, 0);
@@ -387,13 +375,3 @@ const ServerConfig& Server::getConfig()const
 {
 	return srvConfig;
 }
-
-// Moved theese here, because they didnt want to compile in the Header anymore
-size_t Server::listenerCount() const
-{ return listeners.size(); }
-
-int    Server::listenerFD(size_t i) const
-{ return (i < listeners.size() && listeners[i]) ? listeners[i]->getFD() : -1; }
-
-int    Server::listenerPortAt(size_t i) const
-{ return (i < listeners.size() && listeners[i]) ? listeners[i]->getPort() : -1; }

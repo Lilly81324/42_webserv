@@ -20,8 +20,6 @@ Date: 8/10/2025
 #include "ClientConnection.h"
 #include "ServerPipeline.h"
 #include "ClientHandler.h"
-#include "AcceptorHandler.h"
-#include "EventLoop.h"
 #include <vector>
 #include <string>
 #include <poll.h>
@@ -31,9 +29,7 @@ Date: 8/10/2025
 #include <netinet/in.h>
 #include <set>
 
-class AcceptorHandler;
-class Listener;
-class EventLoop;
+
 
 
 /**
@@ -182,6 +178,19 @@ class Server
 		void buildHostMaps();
 
 	public:
+
+		void shutdownAllHandlers() {
+			std::set<ClientHandler*>::iterator it = server_handlers.begin();
+			while (it != server_handlers.end()) {
+			ClientHandler* h = *it;
+			if (h->conn())
+				delete (h->conn()); 
+			++it;
+			delete h;
+			}
+			server_handlers.clear();
+		}
+
 		/**
 		 * @brief Constructs a Server instance with the given configuration.
 		 *
@@ -252,11 +261,6 @@ class Server
 		 */
 		void stop();
 
-		/**
-		 * @brief Shuts down all Handlers and deletes their ClientConnections
-		 */
-		void shutdownAllHandlers();
-
 		void run(int poll_timeout_ms);
 		/**
 		 * @brief Sets a file descriptor to non-blocking mode.
@@ -296,10 +300,6 @@ class Server
 		const ServerConfig&	getConfig()const;
 		ServerPipeline* getPipeline() const{ return serverpipeline;};
 
-		void setAcceptor(AcceptorHandler * acc);
-
-		AcceptorHandler *getAcceptor(void);
-
 		void trackHandler(ClientHandler* h)
 		{
 			if (h) server_handlers.insert(h);
@@ -334,10 +334,14 @@ class Server
 			loop_.removeFD(c->getFD());
 			delete c;
 		}
-			// Unit test functions moved to c file for Compilers sake
-			size_t listenerCount() const;
-			int    listenerFD(size_t i) const;
-			int    listenerPortAt(size_t i) const;
+
+
+		#ifdef UNIT_TEST
+		public:
+			size_t listenerCount() const { return listeners.size(); }
+			int    listenerFD(size_t i) const { return (i < listeners.size() && listeners[i]) ? listeners[i]->getFD() : -1; }
+			int    listenerPortAt(size_t i) const { return (i < listeners.size() && listeners[i]) ? listeners[i]->getPort() : -1; }
+		#endif
 };
 
 

@@ -7,10 +7,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "Server.h"
+#include "IpList.h"
+#include <ctime>
 
 class Server;
-
-// class Listener;
 
 class AcceptorHandler : public EventLoop::Handler {
 
@@ -51,9 +51,19 @@ class AcceptorHandler : public EventLoop::Handler {
 						::setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 					}
 					catch (...) { ::close(cfd); continue; }
+					// Check if IP is forbidden
+					std::string ip = IpList::getIpFromSocket(&ss);
+					if (!_srv.getConfig().ip_list.checkIp(ip))
+					{
+						std::string output = IpList::ipDeniedResponse();
+						::send(cfd, output.c_str(), output.size(), 0);
+						close(cfd);
+						return ;
+					}
 
 					// register client handler
 					ClientConnection* c = new ClientConnection(cfd,&_srv, nowMs());
+					c->setIp(ip);
 					ClientHandler *h = new ClientHandler(eventLoop,c);
 					_srv.trackHandler(h);
 					eventLoop.addFD(cfd, POLLIN, h);

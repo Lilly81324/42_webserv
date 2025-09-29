@@ -41,8 +41,6 @@ Server::~Server()
 	delete serverpipeline;
 }
 
-#include <iostream>
-
 void Server::registerListeners()
 {
 	for (std::vector<Listener *>::const_iterator it = listeners.begin();
@@ -53,7 +51,6 @@ void Server::registerListeners()
 		{
 			lst->setAcceptor(new AcceptorHandler(loop_, *this, *it));
 			loop_.addFD((*it)->getFD(), POLLIN, lst->getAcceptor());
-			std::cout << "Registering Listener" << lst->getAcceptor() << std::endl;
 		}
 	}
 }
@@ -88,6 +85,18 @@ void Server::closeAll()
 		delete *it;
 	}
 	listeners.clear();
+}
+
+void Server::shutdownAllHandlers() {
+	std::set<ClientHandler*>::iterator it = server_handlers.begin();
+	while (it != server_handlers.end()) {
+	ClientHandler* h = *it;
+	if (h->conn())
+		delete (h->conn());
+	++it;
+	delete h;
+	}
+	server_handlers.clear();
 }
 
 void Server::setNonBlocking(int fd)
@@ -378,3 +387,13 @@ const ServerConfig& Server::getConfig()const
 {
 	return srvConfig;
 }
+
+// Moved theese here, because they didnt want to compile in the Header anymore
+size_t Server::listenerCount() const
+{ return listeners.size(); }
+
+int    Server::listenerFD(size_t i) const
+{ return (i < listeners.size() && listeners[i]) ? listeners[i]->getFD() : -1; }
+
+int    Server::listenerPortAt(size_t i) const
+{ return (i < listeners.size() && listeners[i]) ? listeners[i]->getPort() : -1; }

@@ -179,16 +179,10 @@ class Server
 		 */
 		void buildHostMaps();
 
-
-		void shutdownAllHandlers() {
-			std::set<ClientHandler*>::iterator it = server_handlers.begin();
-			while (it != server_handlers.end()) {
-			ClientHandler* h = *it;
-			++it;
-			delete h;
-			}
-			server_handlers.clear();
-		}
+		/**
+		 * @brief Shuts down all Handlers and deletes their ClientConnections
+		 */
+		void shutdownAllHandlers();
 
 	public:
 		/**
@@ -338,14 +332,10 @@ class Server
 			loop_.removeFD(c->getFD());
 			delete c;
 		}
-
-
-		#ifdef UNIT_TEST
-		public:
-			size_t listenerCount() const { return listeners.size(); }
-			int    listenerFD(size_t i) const { return (i < listeners.size() && listeners[i]) ? listeners[i]->getFD() : -1; }
-			int    listenerPortAt(size_t i) const { return (i < listeners.size() && listeners[i]) ? listeners[i]->getPort() : -1; }
-		#endif
+			// Unit test functions moved to c file for Compilers sake
+			size_t Server::listenerCount() const;
+			int    Server::listenerFD(size_t i) const;
+			int    Server::listenerPortAt(size_t i) const;
 };
 
 

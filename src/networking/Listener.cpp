@@ -28,7 +28,11 @@ AcceptorHandler *Listener::getAcceptor(void)
 { return acceptor; }
 
 void Listener::setAcceptor(AcceptorHandler *acc)
-{ acceptor = acc; }
+{
+	if (acceptor)
+		delete acceptor;
+	acceptor = acc;
+}
 
 void Listener::addVirtualServerIndex(int idx)
 { vs_indices.push_back(idx); }

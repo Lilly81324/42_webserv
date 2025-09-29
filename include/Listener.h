@@ -125,8 +125,22 @@ class Listener
 		 */
 		bool IsIpv6();
 
+		/**
+		 * @brief Returns the AcceptorHandler Oject for this Listener
+		 * 
+		 * @returns AcceptorHandler object by pointer (heap)
+		 * 
+		 * @note This function can be used to manually free the Handler
+		 */
 		AcceptorHandler *getAcceptor(void);
 
+		/**
+		 * @brief Sets the AcceptorHandler Oject for this Listener
+		 * 
+		 * @param acc Heap allocated pointer to AcceptorHandler object
+		 * 
+		 * @note Listener frees the current field and also frees on destructor
+		 */
 		void setAcceptor(AcceptorHandler *acc);
 
 		/**

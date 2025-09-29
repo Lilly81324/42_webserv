@@ -333,9 +333,9 @@ class Server
 			delete c;
 		}
 			// Unit test functions moved to c file for Compilers sake
-			size_t Server::listenerCount() const;
-			int    Server::listenerFD(size_t i) const;
-			int    Server::listenerPortAt(size_t i) const;
+			size_t listenerCount() const;
+			int    listenerFD(size_t i) const;
+			int    listenerPortAt(size_t i) const;
 };
 
 

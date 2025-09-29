@@ -9,8 +9,11 @@ Date: 8/12/2025
 #define LISTENER_H
 
 #include "UniqueFD.h"
+#include "AcceptorHandler.h"
 #include <string>
 #include <vector>
+
+class AcceptorHandler;
 
 /**
  * @class Listener
@@ -44,6 +47,7 @@ class Listener
 		int port;
 		bool is_ipv6;
 		std::vector<int> vs_indices;
+		AcceptorHandler *acceptor;
 		Listener(const Listener &);
 		Listener &operator=(const Listener &);
 
@@ -58,7 +62,7 @@ class Listener
 		 * @note The listener is in an invalid state until properly initialized.
 		 * @note getFD() will return -1 for default-constructed listeners.
 		 */
-		Listener() : fd(), port(0), is_ipv6(false) {}
+		Listener();
 
 		/**
 		 * @brief Constructs a Listener with a listening socket and network details.
@@ -76,7 +80,9 @@ class Listener
 		 * @warning Caller must not use the fd parameter after construction (ownership transferred).
 		 * @note No validation is performed on the parameters - they are stored as-is.
 		 */
-		Listener(int fd, std::string host, int port, bool ipv6) : fd(fd), host(host), port(port), is_ipv6(ipv6) {};
+		Listener(int fd, std::string host, int port, bool ipv6);
+
+		~Listener(void);
 
 		/**
 		 * @brief Returns the listening socket file descriptor.
@@ -89,7 +95,7 @@ class Listener
 		 * @note The returned fd should only be used for read-only operations like event registration.
 		 * @note Do not close or modify the returned file descriptor directly.
 		 */
-		int getFD() { return this->fd.get(); };
+		int getFD();
 
 		/**
 		 * @brief Returns the port number this listener is bound to.
@@ -98,7 +104,7 @@ class Listener
 		 * 
 		 * @note The port reflects the value passed during construction, not queried from the socket.
 		 */
-		int getPort() { return this->port; };
+		int getPort();
 
 		/**
 		 * @brief Returns the hostname or IP address this listener is bound to.
@@ -108,7 +114,7 @@ class Listener
 		 * @note Returns a copy of the host string, safe to modify.
 		 * @note The host reflects the value passed during construction, not queried from the socket.
 		 */
-		std::string getHost() { return this->host; };
+		std::string getHost();
 
 		/**
 		 * @brief Checks if this listener uses IPv6.
@@ -117,7 +123,11 @@ class Listener
 		 * 
 		 * @note Useful for protocol-specific handling and logging.
 		 */
-		bool IsIpv6() { return is_ipv6; };
+		bool IsIpv6();
+
+		AcceptorHandler *getAcceptor(void);
+
+		void setAcceptor(AcceptorHandler *acc);
 
 		/**
 		 * @brief Adds a virtual server index to this listener.
@@ -133,7 +143,7 @@ class Listener
 		 * @note No validation is performed on the index value.
 		 * @note Consider using reserveVirtualServers() if you know the final count.
 		 */
-		void addVirtualServerIndex(int idx) { vs_indices.push_back(idx); }
+		void addVirtualServerIndex(int idx);
 
 		/**
 		 * @brief Replaces all virtual server indices with the provided vector.
@@ -148,10 +158,7 @@ class Listener
 		 * @note The input vector is copied, not moved (C++98 compatibility).
 		 * @note More efficient than multiple addVirtualServerIndex() calls.
 		 */
-		void setVirtualServerIndices(const std::vector<int> &indices)
-		{
-			vs_indices = indices;
-		}
+		void setVirtualServerIndices(const std::vector<int> &indices);
 
 		/**
 		 * @brief Replaces virtual server indices with values from a C-style array.
@@ -168,10 +175,7 @@ class Listener
 		 * @warning Undefined behavior if arr is null and n > 0.
 		 * @note More efficient than multiple addVirtualServerIndex() calls.
 		 */
-		void setVirtualServerIndices(const int *arr, size_t n)
-		{
-			vs_indices.assign(arr, arr + n);
-		}
+		void setVirtualServerIndices(const int *arr, size_t n);
 
 		/**
 		 * @brief Pre-allocates memory for the specified number of virtual servers.
@@ -187,7 +191,7 @@ class Listener
 		 * @note Does not change the vector size, only capacity.
 		 * @note Call before multiple addVirtualServerIndex() operations for best performance.
 		 */
-		void reserveVirtualServers(size_t n) { vs_indices.reserve(n); }
+		void reserveVirtualServers(size_t n);
 
 		/**
 		 * @brief Returns read-only access to the virtual server indices.
@@ -201,7 +205,7 @@ class Listener
 		 * @note The returned reference is valid until the next non-const operation on this listener.
 		 * @note Prefer this over individual index access for iteration.
 		 */
-		const std::vector<int> &virtualServerIndices() const { return vs_indices; }
+		const std::vector<int> &virtualServerIndices() const;
 
 		/**
 		 * @brief Returns the number of virtual servers associated with this listener.
@@ -211,7 +215,7 @@ class Listener
 		 * @note Returns 0 for listeners with no associated virtual servers.
 		 * @note Equivalent to virtualServerIndices().size() but more expressive.
 		 */
-		size_t virtualServerCount() const { return vs_indices.size(); }
+		size_t virtualServerCount() const;
 		
 		/**
 		 * @brief Returns the virtual server index at the specified position.
@@ -227,7 +231,7 @@ class Listener
 		 * @warning Always check virtualServerCount() before calling to avoid exceptions.
 		 * @note For iteration, prefer using virtualServerIndices() with iterators.
 		 */
-		int virtualServerIndexAt(size_t i) const { return vs_indices[i]; }
+		int virtualServerIndexAt(size_t i) const;
 
 		/**
 		 * @brief Efficiently swaps virtual server indices with another vector.
@@ -242,7 +246,7 @@ class Listener
 		 * @note Both vectors are modified: this gets other's contents, other gets this's contents.
 		 * @note Useful for transferring indices without copying.
 		 */
-		void swapVirtualServerIndices(std::vector<int> &other) { vs_indices.swap(other); }
+		void swapVirtualServerIndices(std::vector<int> &other);
 };
 
 #endif // LISTENER_H

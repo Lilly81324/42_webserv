@@ -20,6 +20,7 @@ Date: 8/10/2025
 #include "ClientConnection.h"
 #include "ServerPipeline.h"
 #include "ClientHandler.h"
+#include "AcceptorHandler.h"
 #include <vector>
 #include <string>
 #include <poll.h>
@@ -29,7 +30,8 @@ Date: 8/10/2025
 #include <netinet/in.h>
 #include <set>
 
-
+class AcceptorHandler;
+class Listener;
 
 
 /**
@@ -297,6 +299,10 @@ class Server
 
 		const ServerConfig&	getConfig()const;
 		ServerPipeline* getPipeline() const{ return serverpipeline;};
+
+		void setAcceptor(AcceptorHandler * acc);
+
+		AcceptorHandler *getAcceptor(void);
 
 		void trackHandler(ClientHandler* h)
 		{

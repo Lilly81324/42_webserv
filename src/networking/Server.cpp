@@ -41,14 +41,19 @@ Server::~Server()
 	delete serverpipeline;
 }
 
+#include <iostream>
+
 void Server::registerListeners()
 {
 	for (std::vector<Listener *>::const_iterator it = listeners.begin();
 		 it != listeners.end(); ++it)
 	{
-		if (*it && (*it)->getFD() >= 0)
+		Listener *lst = *it;
+		if (lst && (lst)->getFD() >= 0)
 		{
-			loop_.addFD((*it)->getFD(), POLLIN, new AcceptorHandler(loop_, *this, *it));
+			lst->setAcceptor(new AcceptorHandler(loop_, *this, *it));
+			loop_.addFD((*it)->getFD(), POLLIN, lst->getAcceptor());
+			std::cout << "Registering Listener" << lst->getAcceptor() << std::endl;
 		}
 	}
 }
@@ -68,7 +73,6 @@ void Server::unregisterListeners()
             // Also deletes the per-fd handler inside EventLoop, if any.
             loop_.removeFD(fd);
         }
-		
 		delete lst;  // Listener dtor should close its fd (RAII)
 		*it = 0;
 	}

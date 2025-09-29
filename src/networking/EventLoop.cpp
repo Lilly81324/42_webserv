@@ -1,5 +1,6 @@
 // src/networking/EventLoop.cpp
 #include "EventLoop.h"
+#include "Server.h"
 #include <cerrno>
 #include <cstring>
 #include <poll.h>
@@ -236,7 +237,7 @@ It centralizes multiplexing, ensures fairness, and gives handlers control to enf
 
 */
 
-void EventLoop::run(int timeout_ms)
+void EventLoop::run(int timeout_ms, Server *srv)
 {
 	_stop = false;
 	while (!_stop)
@@ -296,6 +297,8 @@ void EventLoop::run(int timeout_ms)
 				h->onEvent(fd, rev);
 		}
 	}
+	// clear ClientHandlers here
+	srv->shutdownAllHandlers();
 }
 
 

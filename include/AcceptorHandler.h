@@ -2,7 +2,6 @@
 #define  ACCEPTORHANDLER_H
 
 #include "ClientHandler.h"
-#include "Listener.h"
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>

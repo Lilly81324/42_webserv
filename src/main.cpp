@@ -35,6 +35,8 @@ int main(int argc, char** argv)
 		g_srv = &server;
 		std::signal(SIGINT, on_sig);
 		std::signal(SIGTERM, on_sig);
+		std::signal(SIGALRM, on_sig);
+		alarm(5);
 		server.start();
 		server.run(50);
 	}

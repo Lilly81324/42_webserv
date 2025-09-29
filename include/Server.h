@@ -21,6 +21,7 @@ Date: 8/10/2025
 #include "ServerPipeline.h"
 #include "ClientHandler.h"
 #include "AcceptorHandler.h"
+#include "EventLoop.h"
 #include <vector>
 #include <string>
 #include <poll.h>
@@ -32,6 +33,7 @@ Date: 8/10/2025
 
 class AcceptorHandler;
 class Listener;
+class EventLoop;
 
 
 /**
@@ -179,11 +181,6 @@ class Server
 		 */
 		void buildHostMaps();
 
-		/**
-		 * @brief Shuts down all Handlers and deletes their ClientConnections
-		 */
-		void shutdownAllHandlers();
-
 	public:
 		/**
 		 * @brief Constructs a Server instance with the given configuration.
@@ -254,6 +251,11 @@ class Server
 		 * @note Existing client connections are not affected by server stop.
 		 */
 		void stop();
+
+		/**
+		 * @brief Shuts down all Handlers and deletes their ClientConnections
+		 */
+		void shutdownAllHandlers();
 
 		void run(int poll_timeout_ms);
 		/**

@@ -346,7 +346,7 @@ void Server::start()
 void Server::run(int poll_timeout_ms) {
 	if (listeners.empty())
 		start();
-	loop_.run(poll_timeout_ms);
+	loop_.run(poll_timeout_ms, this);
 }
 
 static std::string normalize_host(const std::string &h)

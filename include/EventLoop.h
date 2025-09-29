@@ -8,6 +8,7 @@
 #include "Debug.h"
 
 class ClientConnection; // forward
+class Server;
 
 class EventLoop
 {
@@ -37,7 +38,7 @@ public:
 	// *** Keep only this declaration ***
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
-	void run(int timeout_ms);
+	void run(int timeout_ms, Server *srv);
 	void stop();
 
 	// Owner helpers (optional)

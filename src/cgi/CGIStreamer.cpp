@@ -601,30 +601,14 @@ it’s called after successful writes in onCgiWritable.
 // ---- monotonic milliseconds () ----
 static unsigned long long monotonic_ms()
 {
-#if defined(CLOCK_MONOTONIC)
-	struct timespec ts;
-	if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-		return (unsigned long long)ts.tv_sec * 1000ULL +
-		       (unsigned long long)ts.tv_nsec / 1000000ULL;
-	}
-#endif
-	// Fallback if CLOCK_MONOTONIC unavailable; still avoids 
-	std::time_t t = std::time(0);
-	return (unsigned long long)t * 1000ULL;
+	return static_cast<unsigned long long>(std::time(0)) * 1000ULL;
 }
 
 
 
 // single, unique definition somewhere near the top of CGIStreamer.cpp
 static unsigned long long now_ms_mono() {
-#if defined(CLOCK_MONOTONIC)
-    struct timespec ts;
-    if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return (unsigned long long)ts.tv_sec * 1000ULL
-             + (unsigned long long)ts.tv_nsec / 1000000ULL;
-    }
-#endif
-    return (unsigned long long)std::time(0) * 1000ULL; // coarse fallback
+	return static_cast<unsigned long long>(std::time(0)) * 1000ULL;
 }
 
 

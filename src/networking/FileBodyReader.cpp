@@ -4,11 +4,14 @@
 #include <cerrno>
 #include <cstring>
 #include <vector>
+#include <sstream>  
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <stdlib.h> // mkstemp
+#include <cstdlib>   // rand
+#include <sstream>   
+
 
 // ---- tiny helpers (std98) ----
 std::string FileBodyReader::join_path(const std::string &a, const std::string &b)
@@ -24,7 +27,6 @@ const std::string& FileBodyReader::get_path() const {
     return path;
 }
 
-// Build a mkstemp template like "<dir>/<prefix>.XXXXXX"
 std::string FileBodyReader::make_template(const std::string &dir, const std::string &prefix)
 {
 	std::string pfx = prefix.empty() ? std::string("webserv_body") : prefix;
@@ -55,37 +57,38 @@ bool FileBodyReader::ensure_open()
     if (fd.get() != -1)
         return true;
 
-    // try configured dir first
-    std::string tmpl = make_template(dir, prefix);
-    std::vector<char> cbuf; cbuf.reserve(tmpl.size() + 1);
-    for (std::size_t i = 0; i < tmpl.size(); ++i)
-		cbuf.push_back(tmpl[i]);
-    cbuf.push_back('\0');
+    const int MAX_ATTEMPTS = 256;
+    unsigned int salt = (unsigned int)rand();
 
-    int raw = ::mkstemp(&cbuf[0]); // 0600
-    if (raw >= 0) {
-        path.assign(&cbuf[0]);
-        fd.reset(raw);
-        return true;
+    const char* dirs[2] = { dir.empty() ? 0 : dir.c_str(), "/tmp" };
+    for (int d = 0; d < 2; ++d) {
+        const char* baseDir = dirs[d];
+        if (d == 0 && !baseDir) continue; // skip empty primary dir
+
+        for (int i = 0; i < MAX_ATTEMPTS; ++i) {
+            std::ostringstream name;
+            name << (baseDir ? baseDir : "") 
+                 << ((baseDir && baseDir[std::strlen(baseDir) - 1] == '/') ? "" : "/")
+                 << (prefix.empty() ? "webserv_body" : prefix)
+                 << ".tmp-" << salt << "-" << i;
+
+            const std::string candidate = name.str();
+
+            int raw = ::open(candidate.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+            if (raw >= 0) {
+                (void)fcntl(raw, F_SETFD, fcntl(raw, F_GETFD, 0) | FD_CLOEXEC);
+                path = candidate;
+                fd.reset(raw);
+                if (d == 1) dir = "/tmp";
+                return true;
+            }
+        }
+        // if primary dir failed all attempts, try fallback (/tmp)
     }
 
-    // fallback to /tmp
-    std::string fallbackDir = "/tmp";
-    tmpl = make_template(fallbackDir, prefix);
-    cbuf.clear();
-    for (std::size_t i = 0; i < tmpl.size(); ++i)
-		cbuf.push_back(tmpl[i]);
-    cbuf.push_back('\0');
-
-    raw = ::mkstemp(&cbuf[0]);
-    if (raw < 0)
-        return false;
-
-    path.assign(&cbuf[0]);
-    fd.reset(raw);
-    dir = fallbackDir;
-    return true;
+    return false;
 }
+
 
 
 std::size_t FileBodyReader::consume(const char *data, std::size_t len)
@@ -106,7 +109,7 @@ std::size_t FileBodyReader::consume(const char *data, std::size_t len)
 		{
 			const std::size_t tail = pending.size() - pending_off;
 			if (tail)
-				::memmove(&pending[0], &pending[0] + pending_off, tail);
+				std::memmove(&pending[0], &pending[0] + pending_off, tail);
 			pending.resize(tail);
 			pending_off = 0;
 		}

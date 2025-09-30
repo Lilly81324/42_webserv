@@ -89,7 +89,8 @@ private:
 	void enqueueFinalChunk();               // "0\r\n\r\n"
 
 	// Reset stdin write deadline after progress
-	void resetWriteDeadline();
+	void resetWriteDeadline();                           // zero-arg
+    void resetWriteDeadline(unsigned long long now_ms);  
 
 	// Close child's stdout fd (used on HUP/timeout/error)
 	void closeStdout();

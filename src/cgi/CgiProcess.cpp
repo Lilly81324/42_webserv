@@ -14,8 +14,9 @@ date: 8/10/2025
 #include <stdexcept>
 #include <sys/wait.h> // waitpid
 #include <signal.h>	  // kill
-#include <sys/time.h> // gettimeofday
+
 #include <vector>
+#include <ctime> 
 
 // ---- tiny helpers ---------------------------------------------------------
 
@@ -48,18 +49,23 @@ static inline int xclose(int &fd)
 
 unsigned long long CgiProcess::nowMs()
 
-Returns current wall-clock time in milliseconds using gettimeofday. 
+Returns current wall-clock time in milliseconds using
 Used for deadline tracking in CGI processes, especially timeouts configured via spawn. 
 Millisecond precision is sufficient for CGI lifetime management without heavy dependencies. 
 By wrapping this call, other parts of the server can enforce time-based rules (like aborting stuck scripts) consistently.
 
 */
 
-unsigned long long CgiProcess::nowMs()
-{
-	struct timeval tv;
-	::gettimeofday(&tv, 0);
-	return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)(tv.tv_usec / 1000ULL);
+unsigned long long CgiProcess::nowMs() {
+#if defined(CLOCK_MONOTONIC)
+	struct timespec ts;
+	if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+		return (unsigned long long)ts.tv_sec * 1000ULL
+			+ (unsigned long long)ts.tv_nsec / 1000000ULL;
+	}
+#endif
+	// Fallback (coarse) if CLOCK_MONOTONIC isn't available
+	return (unsigned long long)std::time(0) * 1000ULL;
 }
 
 
@@ -144,16 +150,16 @@ enabling handlers to run CGIs without worrying about low-level pipe setup.
 
 // High-level convenience overload: build argv/envp and delegate
 bool CgiProcess::spawn(const CgiSpec &spec,
-					   const std::string &script_path,
-					   const std::vector<std::string> &envv)
+					const std::string &script_path,
+					const std::vector<std::string> &envv)
 {
 	closeBoth(); // if previously used
 	_pid = -1;
-	_in = -1;  // parent will WRITE to child's stdin
-	_out = -1; // parent will READ  from child's stdout
+	_in  = -1;  // parent will WRITE to child's stdin
+	_out = -1;  // parent will READ  from child's stdout
 
-	int pin[2] = {-1, -1};	// pipe for child's stdin  (parent writes -> child reads)
-	int pout[2] = {-1, -1}; // pipe for child's stdout (child writes -> parent reads)
+	int pin[2]  = { -1, -1 }; // pipe for child's stdin  (parent writes -> child reads)
+	int pout[2] = { -1, -1 }; // pipe for child's stdout (child writes -> parent reads)
 
 	if (::pipe(pin) < 0)
 		return false;
@@ -189,19 +195,33 @@ bool CgiProcess::spawn(const CgiSpec &spec,
 		::close(pout[1]);
 
 		// Build argv and envp (you already have helpers; keep minimal here)
-		std::vector<char *> argv;
-		argv.push_back(const_cast<char *>(spec.bin.c_str()));	 // /usr/bin/python3
-		argv.push_back(const_cast<char *>(script_path.c_str())); // /path/to/script.py
+		std::vector<char*> argv;
+		argv.push_back(const_cast<char*>(spec.bin.c_str()));     // /usr/bin/python3 (or interpreter)
+		argv.push_back(const_cast<char*>(script_path.c_str()));  // /path/to/script.py
 		argv.push_back(0);
 
-		std::vector<char *> envp;
+		std::vector<char*> envp;
 		envp.reserve(envv.size() + 1);
 		for (size_t i = 0; i < envv.size(); ++i)
-			envp.push_back(const_cast<char *>(envv[i].c_str()));
+			envp.push_back(const_cast<char*>(envv[i].c_str()));
 		envp.push_back(0);
 
 		::execve(spec.bin.c_str(), &argv[0], &envp[0]);
-		_exit(127); // exec failed
+
+		// ---- execve failed: stay within allowed calls ----
+		// Best effort message (ignore errors)
+		const char msg[] = "execve failed\n";
+		(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+
+		// Close stdio so we don't hold any pipe ends
+		(void)::close(STDIN_FILENO);
+		(void)::close(STDOUT_FILENO);
+		(void)::close(STDERR_FILENO);
+
+		// Block forever; parent will enforce timeouts and reap us.
+		// select() is allowed; this avoids CPU spin.
+		for (;;)
+			(void)::select(0, 0, 0, 0, 0);
 	}
 
 	// ---- Parent ----
@@ -218,17 +238,13 @@ bool CgiProcess::spawn(const CgiSpec &spec,
 	// Set parent ends to NONBLOCK + CLOEXEC
 	int fl;
 	fl = ::fcntl(_in, F_GETFL, 0);
-	if (fl >= 0)
-		::fcntl(_in, F_SETFL, fl | O_NONBLOCK);
+	if (fl >= 0) ::fcntl(_in, F_SETFL, fl | O_NONBLOCK);
 	fl = ::fcntl(_out, F_GETFL, 0);
-	if (fl >= 0)
-		::fcntl(_out, F_SETFL, fl | O_NONBLOCK);
+	if (fl >= 0) ::fcntl(_out, F_SETFL, fl | O_NONBLOCK);
 	fl = ::fcntl(_in, F_GETFD, 0);
-	if (fl >= 0)
-		::fcntl(_in, F_SETFD, fl | FD_CLOEXEC);
+	if (fl >= 0) ::fcntl(_in, F_SETFD, fl | FD_CLOEXEC);
 	fl = ::fcntl(_out, F_GETFD, 0);
-	if (fl >= 0)
-		::fcntl(_out, F_SETFD, fl | FD_CLOEXEC);
+	if (fl >= 0) ::fcntl(_out, F_SETFD, fl | FD_CLOEXEC);
 
 	return true;
 }
@@ -251,30 +267,24 @@ Timeout tracking integrates with the event loop, ensuring runaway CGIs don’t h
 
 // Low-level spawn: do the actual fork/exec (stub for now; returns false)
 bool CgiProcess::spawn(const std::string &bin,
-					   const std::string &script,
-					   char *const *argv,
-					   char *const *envp,
-					   int timeout_ms)
+					const std::string &script,
+					char *const *argv,
+					char *const *envp,
+					int timeout_ms)
 {
 	// Clean up any previous child
 	terminate();
 
-	// Establish deadline
+	// Establish deadline (uses your allowed nowMs())
 	_deadline = (timeout_ms > 0)
 					? (nowMs() + (unsigned long long)timeout_ms)
 					: 0ULL;
 
-	int inPipe[2] = {
-		-1, -1
-	};  // parent writes -> child reads (stdin)
-	int outPipe[2] = {
-		-1, -1
-	}; // child writes -> parent reads (stdout/stderr)
+	int inPipe[2]  = { -1, -1 }; // parent writes -> child reads (stdin)
+	int outPipe[2] = { -1, -1 }; // child writes -> parent reads (stdout/stderr)
 
 	if (::pipe(inPipe) < 0)
-	{
 		return false;
-	}
 	if (::pipe(outPipe) < 0)
 	{
 		::close(inPipe[0]);
@@ -302,24 +312,54 @@ bool CgiProcess::spawn(const std::string &bin,
 
 		// stdin from inPipe[0]
 		if (::dup2(inPipe[0], STDIN_FILENO) < 0)
-			_exit(126);
+		{
+			const char msg[] = "dup2(stdin) failed\n";
+			(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+			(void)::close(inPipe[0]);
+			(void)::close(outPipe[1]);
+			(void)::close(STDIN_FILENO);
+			(void)::close(STDOUT_FILENO);
+			(void)::close(STDERR_FILENO);
+			for (;;)
+				(void)::select(0, 0, 0, 0, 0);
+		}
+
 		// stdout to outPipe[1]
 		if (::dup2(outPipe[1], STDOUT_FILENO) < 0)
-			_exit(126);
-		// stderr merged to stdout
+		{
+			const char msg[] = "dup2(stdout) failed\n";
+			(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+			(void)::close(inPipe[0]);
+			(void)::close(outPipe[1]);
+			(void)::close(STDIN_FILENO);
+			(void)::close(STDOUT_FILENO);
+			(void)::close(STDERR_FILENO);
+			for (;;)
+				(void)::select(0, 0, 0, 0, 0);
+		}
+
+		// stderr merged to stdout (ignore error; best effort)
 		(void)::dup2(outPipe[1], STDERR_FILENO);
 
 		// close the originals after dup
-		::close(inPipe[0]);
-		::close(outPipe[1]);
+		(void)::close(inPipe[0]);
+		(void)::close(outPipe[1]);
 
 		// Exec the interpreter/binary with provided argv/envp.
 		// argv should look like: [bin, script, NULL]
-		(void)script; // only to silence unused warning; script is already in argv
+		(void)script; // script should already be present in argv
 		::execve(bin.c_str(),
-				 const_cast<char *const *>(argv),
-				 const_cast<char *const *>(envp));
-		_exit(127); // exec failed
+				const_cast<char *const *>(argv),
+				const_cast<char *const *>(envp));
+
+		// ---- execve failed: keep within allowed calls ----
+		const char msg[] = "execve failed\n";
+		(void)::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+		(void)::close(STDIN_FILENO);
+		(void)::close(STDOUT_FILENO);
+		(void)::close(STDERR_FILENO);
+		for (;;)
+			(void)::select(0, 0, 0, 0, 0);
 	}
 
 	// ---------------- parent ----------------
@@ -329,10 +369,10 @@ bool CgiProcess::spawn(const std::string &bin,
 	::close(inPipe[0]);
 	::close(outPipe[1]);
 
-	_in = inPipe[1];
+	_in  = inPipe[1];
 	_out = outPipe[0];
 
-	// Make them non-blocking & close-on-exec
+	// Make them non-blocking & close-on-exec (helpers already wrap fcntl)
 	(void)setNonBlocking(_in);
 	(void)setNonBlocking(_out);
 	(void)setCloseOnExec(_in);
@@ -340,6 +380,7 @@ bool CgiProcess::spawn(const std::string &bin,
 
 	return true;
 }
+
 
 
 /* 

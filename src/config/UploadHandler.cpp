@@ -4,6 +4,8 @@
 #include "VirtualServer.h"
 #include "ResponseFactory.h"
 #include "HEADER_ENTRIES.h"
+#include "Util.h"
+#include "PathUtil.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -15,16 +17,16 @@
 #include <vector>
 #include <stdlib.h>   // realpath
 #include <limits.h>   // PATH_MAX
-#include <unistd.h>   // mkstemp, close
 #include <iostream>
 
 
 static bool realpathString(const std::string& in, std::string& out) {
 	char tmp[4096];
-	if (::realpath(in.c_str(), tmp) == 0) return false;
+	if (Util::realpath(in.c_str(), tmp) == 0) return false;
 	out.assign(tmp);
 	return true;
 }
+
 
 UploadHandler::UploadHandler() : cur_fd_(-1), cur_written_(0), last_error_code_(0) {}
 
@@ -63,24 +65,38 @@ bool UploadHandler::ensureUploadDirIsSafe(const std::string& base) const {
 }
 
 bool UploadHandler::openTempInUpload(std::string& out_path, int& out_fd) {
-	// create temp file in upload_dir for atomic rename within same fs
-	std::string templ = upload_dir_;
-	if (!templ.empty() && templ[templ.size()-1] != '/') templ += '/';
-	templ += ".upload-XXXXXX";
-	std::vector<char> buf(templ.begin(), templ.end());
-	buf.push_back('\0');
-	int fd = ::mkstemp(&buf[0]);
-	if (fd < 0) return false;
-	::fcntl(fd, F_SETFD, FD_CLOEXEC);
-	out_path.assign(&buf[0]);
-	out_fd = fd;
-	return true;
+    const std::string dir = upload_dir_;
+    const std::string prefix = "upload";
+    const int MAX_ATTEMPTS = 256;
+    unsigned int salt = (unsigned int)rand();
+
+    for (int i = 0; i < MAX_ATTEMPTS; ++i) {
+        std::ostringstream name;
+        name << (dir.empty() ? "." : dir);
+        if (!dir.empty() && dir[dir.size() - 1] != '/')
+            name << '/';
+        name << (prefix.empty() ? "upload" : prefix)
+             << "-tmp-"
+             << salt << "-" << i;
+
+        const std::string path = name.str();
+
+        int fd = ::open(path.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd >= 0) {
+            (void)fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) | FD_CLOEXEC);
+            out_path = path;
+            out_fd = fd;
+            return true;
+        }
+    }
+    return false;
 }
+
+
 
 // UploadHandler.cpp
 bool UploadHandler::finishMoveAtomic() {
 	if (cur_fd_ < 0) return false;
-	::fsync(cur_fd_);
 	::close(cur_fd_);
 	cur_fd_ = -1;
 
@@ -96,7 +112,7 @@ bool UploadHandler::finishMoveAtomic() {
 			return false; // will cause parser to stop with sink error
 		}
 	}
-	if (::rename(cur_tmp_path_.c_str(), dst.c_str()) != 0) {
+	if (std::rename(cur_tmp_path_.c_str(), dst.c_str()) != 0) {
 		last_error_code_ = 500;
 		last_error_msg_  = "Rename failed";
 		return false;
@@ -109,16 +125,22 @@ bool UploadHandler::finishMoveAtomic() {
 
 // ---- IMultipartSink ----
 bool UploadHandler::onPartBegin(const Part& p) {
-	cur_name_          = p.name;
-	cur_filename_raw_  = p.filename;
-	cur_filename_sanit_= sanitizeFilename(cur_filename_raw_);
-	cur_written_       = 0;
-	cur_fd_            = -1;
-	cur_tmp_path_.clear();
+    cur_name_          = p.name;
+    cur_filename_raw_  = p.filename;
+    cur_filename_sanit_= sanitizeFilename(cur_filename_raw_);
+    cur_written_       = 0;
+    cur_fd_            = -1;
+    cur_tmp_path_.clear();
 
-	if (!openTempInUpload(cur_tmp_path_, cur_fd_)) return false;
-	return true;
+    if (!openTempInUpload(cur_tmp_path_, cur_fd_)) {
+        last_error_code_ = 500;
+        last_error_msg_  = "temporary file open failed";
+        return false;
+    }
+    return true;
 }
+
+
 
 bool UploadHandler::onPartData(const char* data, std::size_t n) {
 	if (cur_fd_ < 0) return false;

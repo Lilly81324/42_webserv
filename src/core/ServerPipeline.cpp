@@ -29,28 +29,6 @@ date: 8/10/2025
 #include <arpa/inet.h>
 
 
-
-
-
-// Grab client IP from the ClientConnection*, fallback to getsockname/getpeername
-static std::string getPeerIPFromFD(int fd) {
-    sockaddr_storage ss;
-    std::memset(&ss, 0, sizeof ss);
-    socklen_t sl = (socklen_t)sizeof ss;
-    if (getpeername(fd, (sockaddr*)&ss, &sl) == 0) {
-        char buf[INET6_ADDRSTRLEN]; std::memset(buf, 0, sizeof buf);
-        if (ss.ss_family == AF_INET) {
-            inet_ntop(AF_INET, &((sockaddr_in*)&ss)->sin_addr, buf, sizeof buf);
-        } else if (ss.ss_family == AF_INET6) {
-            inet_ntop(AF_INET6, &((sockaddr_in6*)&ss)->sin6_addr, buf, sizeof buf);
-        } else {
-            std::snprintf(buf, sizeof buf, "unknown");
-        }
-        return std::string(buf);
-    }
-    return std::string("unknown");
-}
-
 static RateLimiter& globalLimiter() {
     static RateLimiter rl;
     return rl;
@@ -128,14 +106,11 @@ if (ctx.loc && ctx.loc->rate_limit.enabled) {
     RateLimiter &rl = globalLimiter();
     rl.setConfig(cfg);
 
-    const int cfd = (ctx.client) ? ctx.client->getFD() : -1;
-    const std::string ip = getPeerIPFromFD(cfd);
-
     unsigned long long now_ms =
     static_cast<unsigned long long>(std::time(NULL)) * 1000ULL;
 
 
-    RateDecision d = rl.allow(ip, now_ms);
+    RateDecision d = rl.allow(client->getIp(), now_ms);
     rl.maybeCleanup(now_ms);
 
     if (!d.allowed) {

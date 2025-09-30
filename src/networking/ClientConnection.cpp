@@ -10,7 +10,6 @@
 #include "Server.h"
 #include <sstream>
 #include <netinet/in.h>
-#include <unistd.h> // mkstemp, write
 #include <stdlib.h>
 #include <limits> // for std::numeric_limits
 #include <cstdio>
@@ -69,7 +68,8 @@ ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	  flush_no_progress_ticks(0),
 	  now_cached_ms(nowMs),
 	  ready_to_close(false),
-	  fixed_body_target_((std::size_t)-1) // <— add this
+	  fixed_body_target_((std::size_t)-1), // <— add this
+	  ip()
 
 {
 	// Wire the loop once
@@ -222,12 +222,14 @@ keeps connection completion logic straightforward inside the proxy tunneling pum
 
 static int get_so_error(int fd)
 {
-	int err = 0;
-	socklen_t len = sizeof(err);
-	if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0)
-		return errno;
-	return err;
+    // Try a zero-length send to probe the socket state
+    int r = ::send(fd, 0, 0, 0);
+    if (r == 0 || (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))) {
+        return 0; // No error, socket is connected
+    }
+    return errno; // Error code from last failure
 }
+
 
 /*
 

@@ -19,6 +19,7 @@ date: 8/27/2025
 #include <ctime>
 #include <sstream>
 #include <map>
+#include <iomanip>
 
 // --- tiny helpers ---
 
@@ -62,20 +63,30 @@ static const std::string& reasonFor(int code)
 	return (it != k.end()) ? it->second : unk;
 }
 
-// RFC 7231 / RFC 9110 
-static std::string rfc1123_now_gmt()
+static std::string httpDate(std::time_t t)
 {
-	char buf[64];
-	std::time_t t = std::time(0);
-	std::tm g;
-#if defined(_WIN32)
-	gmtime_s(&g, &t);
-#else
-	g = *std::gmtime(&t);
-#endif
-	std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &g);
-	return std::string(buf);
+    std::tm gmt;
+    gmt = *std::gmtime(&t);
+
+    static const char* WDAY[7] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
+    static const char* MON[12] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
+
+    std::ostringstream oss;
+    oss << WDAY[gmt.tm_wday] << ", "
+        << std::setw(2) << std::setfill('0') << gmt.tm_mday << ' '
+        << MON[gmt.tm_mon] << ' '
+        << (gmt.tm_year + 1900) << ' '
+        << std::setw(2) << std::setfill('0') << gmt.tm_hour << ':'
+        << std::setw(2) << std::setfill('0') << gmt.tm_min  << ':'
+        << std::setw(2) << std::setfill('0') << gmt.tm_sec  << " GMT";
+    return oss.str();
 }
+
+// RFC 7231 / RFC 9110 
+static std::string rfc1123_now_gmt() {
+    return httpDate(std::time(0));
+}
+
 
 static void addCommonHeaders(HttpResponse &r, bool close)
 {
@@ -123,12 +134,8 @@ HttpResponse ResponseFactory::makeText(int code,const std::string& text,const st
 
 /* ---------- NEW: unified error page mapper (safe) ---------- */
 
-static std::string httpDate(time_t t) {
-	char buf[64];
-	std::tm g = *std::gmtime(&t);
-	std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &g);
-	return std::string(buf);
-}
+
+
 
 static std::string extLower(const std::string &p) {
 	std::string::size_type dot = p.rfind('.');

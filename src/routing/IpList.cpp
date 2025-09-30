@@ -165,12 +165,12 @@ std::string IpList::ipDeniedResponse(void)
 	std::ostringstream out;
 
 	// Get error file path
-	char *c_path = getcwd(NULL, 0);
+	char *c_path = Util::getcwd(NULL, 0);
 	std::string path = "/";
 	if (c_path)
 	{
 		path = std::string(c_path) + std::string("/www/errors/403.html");
-		free(c_path);
+		std::free(c_path);
 	}
 
 	// Check the error file

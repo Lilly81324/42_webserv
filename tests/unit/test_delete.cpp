@@ -147,7 +147,11 @@ TEST_CASE("Delete Static Handler", "[handler][static][delete]")
 			req.parse(parse.c_str(), parse.length());
 			REQUIRE(handle.handle(req, res, ctx) == true);
 			REQUIRE(res.getStatusCode() == HTTP_NOT_FOUND);
+			std::string given(res.body.data());
+			std::string expected(std::string(cwd) + std::string("/www/errors/404.html"));
 			REQUIRE(compareBody(res.body, std::string(cwd) + std::string("/www/errors/404.html")));
+			(void)given;
+			(void)expected;
 		}
 		{	// Deleting in bad folder
 			// TODO: Add way of testing for DELETEing files in directories that dont allow it

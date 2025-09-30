@@ -82,7 +82,7 @@ bool PathUtil::canonicalize(const std::string &in, std::string &out)
 	}
 	char buf[PATH_MAX];
 #if defined(__linux__) || defined(__APPLE__)
-	if (realpath(in.c_str(), buf) != 0)
+	if (Util::realpath(in.c_str(), buf) != 0)
 	{
 		out = buf;
 		return true;
@@ -92,7 +92,7 @@ bool PathUtil::canonicalize(const std::string &in, std::string &out)
 	if (s[0] != '/')
 	{
 		char cwd[PATH_MAX];
-		if (getcwd(cwd, sizeof(cwd)) == 0)
+		if (Util::getcwd(cwd, sizeof(cwd)) == 0)
 			return false;
 		s = std::string(cwd) + "/" + s;
 	}

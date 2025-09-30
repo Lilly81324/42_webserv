@@ -496,7 +496,7 @@ void HttpRequest::cleanupBodyFile(void)
 	if (this->body_on_disk)
 	{
 		if (!this->body_tmp_path.empty())
-			::remove(this->body_tmp_path.c_str());
+			std::remove(this->body_tmp_path.c_str());
 		this->body_on_disk = false;
 		this->body_tmp_path.clear();
 		this->body_on_disk_bytes = 0;

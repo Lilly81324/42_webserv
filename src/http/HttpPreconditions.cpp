@@ -1,4 +1,6 @@
 #include "HttpPreconditions.h"
+#include <iomanip>
+#include <ctime>
 
 /**
  * @brief Returns given string stripped at front and end of spaces and tabs
@@ -93,59 +95,41 @@ static void split_commas(const std::string& s, std::vector<std::string>& out) {
 }
 
 
-/* 
-
-static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out)
-
-Parses an RFC-1123 HTTP date like Wed, 03 Sep 2025 15:56:30 GMT into a UTC time_t. 
-On POSIX systems, it uses strptime with the exact format, then timegm (or mktime fallback) to get a timestamp. 
-Returning false on parse failure protects callers from trusting malformed dates. 
-Correct parsing is crucial for If-Modified-Since handling; an invalid date must not incorrectly pass/deny preconditions. 
-By zero-initializing tm fields and requiring full string consumption, 
-the function avoids lenient parsing pitfalls and locale surprises, yielding deterministic behavior across platforms.
-
-*/
-
 // RFC 1123 date → time_t (UTC). Example: "Wed, 03 Sep 2025 15:56:30 GMT"
 static bool parse_http_date_rfc1123(const std::string& s, std::time_t& out) {
-    // Prepare a zeroed tm without memset (memset is forbidden).
+    if (s.size() < 29) return false;
+
+    // Example: "Wed, 03 Sep 2025 15:56:30 GMT"
+    std::istringstream iss(s);
+    std::string wday, month, gmt;
+    int day, year, hour, min, sec;
+    char comma, colon1, colon2;
+
+    if (!(iss >> wday >> comma >> day >> month >> year >> hour >> colon1 >> min >> colon2 >> sec >> gmt))
+        return false;
+
+    static const char* MON[12] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
+    int mon = -1;
+    for (int i = 0; i < 12; ++i) {
+        if (month == MON[i]) { mon = i; break; }
+    }
+    if (mon < 0 || gmt != "GMT") return false;
+
     struct tm tmv;
-    tmv.tm_sec   = 0;
-    tmv.tm_min   = 0;
-    tmv.tm_hour  = 0;
-    tmv.tm_mday  = 0;
-    tmv.tm_mon   = 0;
-    tmv.tm_year  = 0;
-    tmv.tm_wday  = 0;
-    tmv.tm_yday  = 0;
+    tmv.tm_sec   = sec;
+    tmv.tm_min   = min;
+    tmv.tm_hour  = hour;
+    tmv.tm_mday  = day;
+    tmv.tm_mon   = mon;
+    tmv.tm_year  = year - 1900;
     tmv.tm_isdst = 0;
 
-#if defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) || defined(__linux__)
-    // POSIX strptime is widely available on Linux.
-    const char* p = ::strptime(s.c_str(), "%a, %d %b %Y %H:%M:%S GMT", &tmv);
-    if (!p || *p != '\0')
-		return false;
-
-    // Use timegm (UTC) when available.
-    #if defined(_GNU_SOURCE) || defined(__USE_MISC) || defined(__linux__)
-        time_t t = ::timegm(&tmv);
-        if (t == (time_t)-1)
-			return false;
-        out = t;
-        return true;
-    #else
-        // Fallback: mktime (local time). Correct if server TZ is UTC.
-        tmv.tm_isdst = -1;
-        time_t t = ::mktime(&tmv);
-        if (t == (time_t)-1) return false;
-        out = t;
-        return true;
-    #endif
-#else
-    (void)tmv; (void)out;
-    return false;
-#endif
+    // Use mktime (interprets as local time)
+    out = std::mktime(&tmv);
+    return out != (time_t)-1;
 }
+
+
 
 // ---- public API -----------------------------------------------------
 

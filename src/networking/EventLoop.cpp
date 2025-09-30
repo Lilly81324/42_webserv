@@ -271,6 +271,9 @@ void EventLoop::run(int timeout_ms, Server *srv)
 		dispatch.reserve(_pfds.size());
 		for (size_t i = 0; i < _pfds.size(); ++i)
 		{
+			// No more new Connections, even if they are in queue
+			if (_stop)
+				break ;
 			short rev = _pfds[i].revents;
 			if (rev && !(rev & POLLNVAL))
 				dispatch.push_back(std::make_pair(_pfds[i].fd, rev));

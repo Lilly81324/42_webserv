@@ -8,6 +8,7 @@ Date: 8/10/2025
 #ifndef CGIPROCESS_H
 #define CGIPROCESS_H
 #include "VirtualServer.h"
+#include "TimeUtil.h"
 #include <string>
 #include <vector>
 #include <sys/types.h> // pid_t
@@ -53,7 +54,6 @@ public:
 	static bool setCloseOnExec(int fd);
 
 	// Deadline helpers (you can compare nowMs() with deadlineMs())
-	static unsigned long long nowMs();
 	unsigned long long        deadlineMs() const { return _deadline; }
 
 

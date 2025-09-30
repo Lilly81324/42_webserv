@@ -47,25 +47,6 @@ static inline int xclose(int &fd)
 
 /* 
 
-unsigned long long CgiProcess::nowMs()
-
-Returns current wall-clock time in milliseconds using
-Used for deadline tracking in CGI processes, especially timeouts configured via spawn. 
-Millisecond precision is sufficient for CGI lifetime management without heavy dependencies. 
-By wrapping this call, other parts of the server can enforce time-based rules (like aborting stuck scripts) consistently.
-
-*/
-
-#include <ctime>
-
-unsigned long long CgiProcess::nowMs() {
-    return static_cast<unsigned long long>(std::time(0)) * 1000ULL;
-}
-
-
-
-/* 
-
 bool CgiProcess::setNonBlocking(int fd)
 
 Sets O_NONBLOCK on a file descriptor. This is required so that CGI stdin/out 
@@ -272,7 +253,7 @@ bool CgiProcess::spawn(const std::string &bin,
 
 	// Establish deadline (uses your allowed nowMs())
 	_deadline = (timeout_ms > 0)
-					? (nowMs() + (unsigned long long)timeout_ms)
+					? (TimeUtil::nowMs() + (unsigned long long)timeout_ms)
 					: 0ULL;
 
 	int inPipe[2]  = { -1, -1 }; // parent writes -> child reads (stdin)

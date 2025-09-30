@@ -6,6 +6,7 @@
 #include <map>
 #include <poll.h>
 #include "Debug.h"
+#include "TimeUtil.h"
 
 class ClientConnection; // forward
 class Server;
@@ -39,7 +40,7 @@ public:
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
 	void run(int timeout_ms, Server *srv);
-	void drain(int timeout_ms, Server *srv);
+	void drain();
 	void terminate(Server *srv);
 	void stop();
 

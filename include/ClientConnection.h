@@ -67,6 +67,7 @@ public:
     
     bool pumpCgiToSocket(std::size_t max_bytes = 128u * 1024u);
     void drainRingIntoBody();
+    void forceTerminate();
     
 private:
     struct ProxyState {

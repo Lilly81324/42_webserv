@@ -65,6 +65,9 @@ Date: 11/08/2025
 
 # define HTTP_NOT_IMPLEMENTED 501
 
+// Server was shut down mid-Request
+# define HTTP_SERVICE_UNAVAILABLE 503
+
 # define HTTP_VERSION_NOT_SUPP 505
 
 // When server overloads, network fails or other server-side error

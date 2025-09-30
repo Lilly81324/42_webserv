@@ -301,6 +301,16 @@ void EventLoop::run(int timeout_ms, Server *srv)
 	// If no Server was started, we can return early
 	if (!srv)
 		return ;
+	// Try to gently close ClientConnections, and give back 503
+	std::vector<EventLoop::Handler*>::iterator it = _hs.begin();
+	std::vector<EventLoop::Handler*>::iterator end = _hs.end();
+	while (it != end)
+	{
+		ClientHandler *ch = (ClientHandler *)*it;
+		ch->conn()->forceTerminate();
+		it++;
+	}
+	// If any Handlers are left, forcefully close theese Connections
 	srv->shutdownAllHandlers();
 }
 

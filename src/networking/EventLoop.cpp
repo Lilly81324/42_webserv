@@ -298,6 +298,9 @@ void EventLoop::run(int timeout_ms, Server *srv)
 		}
 	}
 	// clear ClientHandlers here
+	// If no Server was started, we can return early
+	if (!srv)
+		return ;
 	srv->shutdownAllHandlers();
 }
 

@@ -70,7 +70,9 @@ void Server::unregisterListeners()
             // Also deletes the per-fd handler inside EventLoop, if any.
             loop_.removeFD(fd);
         }
-
+		// Each Listener has one Acceptor, clear those
+		if (lst->getAcceptor())
+			delete (lst->getAcceptor());
 		delete lst;  // Listener dtor should close its fd (RAII)
 		*it = 0;
 	}
@@ -115,7 +117,7 @@ void Server::stop()
 	unregisterListeners();
 	closeAll();
 	loop_.stop();
-	shutdownAllHandlers();
+	// shutdownAllHandlers();
 }
 
 void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique_pairs,

@@ -20,7 +20,7 @@ bool Util::realpath(const char *path, char *resolved)
 	{
 		// Convert relative path to absolute
 		char cwd[PATH_MAX];
-		if (::getcwd(cwd, sizeof(cwd)) == NULL)
+		if (Util::getcwd(cwd, sizeof(cwd)) == NULL)
 			return false;
 		abs = std::string(cwd) + "/" + path;
 	}

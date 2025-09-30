@@ -39,6 +39,8 @@ public:
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
 	void run(int timeout_ms, Server *srv);
+	void drain(int timeout_ms, Server *srv);
+	void terminate(Server *srv);
 	void stop();
 
 	// Owner helpers (optional)

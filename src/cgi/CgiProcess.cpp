@@ -477,6 +477,8 @@ void CgiProcess::terminate()
 {
 	if (_pid > 0)
 	{
+		// Try to kill child gently
+		kill(_pid, SIGTERM);
 		// try to reap without killing first
 		int dummy = 0;
 		int rc = waitNonBlocking(&dummy);

@@ -56,17 +56,12 @@ By wrapping this call, other parts of the server can enforce time-based rules (l
 
 */
 
+#include <ctime>
+
 unsigned long long CgiProcess::nowMs() {
-#if defined(CLOCK_MONOTONIC)
-	struct timespec ts;
-	if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-		return (unsigned long long)ts.tv_sec * 1000ULL
-			+ (unsigned long long)ts.tv_nsec / 1000000ULL;
-	}
-#endif
-	// Fallback (coarse) if CLOCK_MONOTONIC isn't available
-	return (unsigned long long)std::time(0) * 1000ULL;
+    return static_cast<unsigned long long>(std::time(0)) * 1000ULL;
 }
+
 
 
 /* 

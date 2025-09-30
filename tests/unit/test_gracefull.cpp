@@ -3,9 +3,9 @@
 #include <fcntl.h>
 #include <iostream>
 
-TEST_CASE("Gracefull Shutdown", "[gracefull]")
+TEST_CASE("Gracefull Shutdown", "[gracefull][shellscript]")
 {
-	SECTION("Shell script for checking Clients received Response")
+	SECTION("Simple")
 	{
 		// This will run the shell script for theese test cases
 		// The shell script will compile our main, if it doesnt exist

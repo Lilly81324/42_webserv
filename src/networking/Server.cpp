@@ -110,14 +110,12 @@ void Server::setCloseOnExec(int fd)
 
 void Server::stop()
 {
-	// Finish current running requests
-	// Unregister connections
-	// Unregister current Handlers
-	// Stop Loop
+	// Dont allow new Connections -> Delete Listeners/AcceptorHandlers
 	unregisterListeners();
+	// Close all FDs associated with those FDs
 	closeAll();
+	// Tell the EventLoop to stop running -> will do more cleanup
 	loop_.stop();
-	// shutdownAllHandlers();
 }
 
 void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique_pairs,

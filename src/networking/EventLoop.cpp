@@ -202,24 +202,25 @@ larger system that already has its own control loop.
 
 */
 
-std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
-{
-	std::vector<std::pair<int, short> > ev;
-	if (_pfds.empty())
-		return ev;
+// Removed, because Unused, and we are only allowd to use 1 poll()
+// std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
+// {
+// 	std::vector<std::pair<int, short> > ev;
+// 	if (_pfds.empty())
+// 		return ev;
 
-	int rc = ::poll(&_pfds[0], _pfds.size(), timeout_ms);
-	if (rc <= 0)
-		return ev;
+// 	int rc = ::poll(&_pfds[0], _pfds.size(), timeout_ms);
+// 	if (rc <= 0)
+// 		return ev;
 
-	ev.reserve(_pfds.size());
-	for (size_t i = 0; i < _pfds.size(); ++i)
-	{
-		if (_pfds[i].revents && !(_pfds[i].revents & POLLNVAL))
-			ev.push_back(std::make_pair(_pfds[i].fd, _pfds[i].revents));
-	}
-	return ev;
-}
+// 	ev.reserve(_pfds.size());
+// 	for (size_t i = 0; i < _pfds.size(); ++i)
+// 	{
+// 		if (_pfds[i].revents && !(_pfds[i].revents & POLLNVAL))
+// 			ev.push_back(std::make_pair(_pfds[i].fd, _pfds[i].revents));
+// 	}
+// 	return ev;
+// }
 
 
 /* 

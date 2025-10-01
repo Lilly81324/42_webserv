@@ -41,7 +41,7 @@ public:
 
 	void run(int timeout_ms, Server *srv);
 	/**
-	 * Runs for one more second, not accepting new connections
+	 * Run for one more second, not accepting new connections
 	 */
 	void drain();
 	/**

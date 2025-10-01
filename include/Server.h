@@ -75,7 +75,6 @@ class Server
 		std::map<int, std::map<std::string, int> > host_map_by_port; // port -> (host -> vs_index)
 		std::map<int, int> default_vs_by_port;						 // port -> default vs_index
 		ServerPipeline	*serverpipeline;
-		std::set<ClientHandler*> server_handlers;
 		/**
 		 * @brief Creates a raw listening socket for the specified host and port.
 		 *
@@ -178,6 +177,8 @@ class Server
 		void buildHostMaps();
 
 	public:
+
+		std::set<ClientHandler*> server_handlers;
 
 		void shutdownAllHandlers() {
 			std::set<ClientHandler*>::iterator it = server_handlers.begin();

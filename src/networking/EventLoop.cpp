@@ -203,24 +203,24 @@ larger system that already has its own control loop.
 */
 
 // Removed, because Unused, and we are only allowd to use 1 poll()
-// std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
-// {
-// 	std::vector<std::pair<int, short> > ev;
-// 	if (_pfds.empty())
-// 		return ev;
+std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
+{
+	std::vector<std::pair<int, short> > ev;
+	if (_pfds.empty())
+		return ev;
 
-// 	int rc = ::poll(&_pfds[0], _pfds.size(), timeout_ms);
-// 	if (rc <= 0)
-// 		return ev;
+	int rc = ::poll(&_pfds[0], _pfds.size(), timeout_ms);
+	if (rc <= 0)
+		return ev;
 
-// 	ev.reserve(_pfds.size());
-// 	for (size_t i = 0; i < _pfds.size(); ++i)
-// 	{
-// 		if (_pfds[i].revents && !(_pfds[i].revents & POLLNVAL))
-// 			ev.push_back(std::make_pair(_pfds[i].fd, _pfds[i].revents));
-// 	}
-// 	return ev;
-// }
+	ev.reserve(_pfds.size());
+	for (size_t i = 0; i < _pfds.size(); ++i)
+	{
+		if (_pfds[i].revents && !(_pfds[i].revents & POLLNVAL))
+			ev.push_back(std::make_pair(_pfds[i].fd, _pfds[i].revents));
+	}
+	return ev;
+}
 
 
 /* 
@@ -308,7 +308,7 @@ void EventLoop::run(int timeout_ms, Server *srv)
 void EventLoop::drain()
 {
 	unsigned long long end = TimeUtil::nowMs() + DRAIN_TIMEOUT_MS;
-	while (TimeUtil::nowMs() < end && _pfds.size() > 0)
+	while (TimeUtil::nowMs() < end && _hs.size() > 0 && _pfds.size() > 0)
 	{
 		// timer tick: let handlers enforce deadlines
 		for (size_t i = 0; i < _pfds.size(); ++i)
@@ -349,12 +349,13 @@ void EventLoop::terminate(Server *srv)
 	if (!srv)
 		return ;
 	// Try to gently close ClientConnections, and give back 503
-	std::vector<EventLoop::Handler*>::iterator it = _hs.begin();
-	std::vector<EventLoop::Handler*>::iterator end = _hs.end();
+	std::set<ClientHandler *>::iterator it = srv->server_handlers.begin();
+	std::set<ClientHandler *>::iterator end = srv->server_handlers.end();
 	while (it != end)
 	{
 		ClientHandler *ch = (ClientHandler *)*it;
-		ch->conn()->forceTerminate();
+		if (ch->conn() && !ch->conn()->isClosed())
+			ch->conn()->forceTerminate();
 		it++;
 	}
 	// If any Handlers are left, forcefully close theese Connections

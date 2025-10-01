@@ -187,8 +187,11 @@ preventing gradual resource loss across many concurrent clients.
 
 */
 
+#include <iostream>
+
 ClientConnection::~ClientConnection()
 {
+    std::cout << "CliDest called" << std::endl;
 	if (server)
 		server = 0;
 	if (ctx)
@@ -1669,15 +1672,55 @@ void ClientConnection::decideBodyReader(std::size_t content_length)
 	req.enableBodyOnDisk(fr->get_path());
 	body = fr;
 }
+#include <iostream>
 
 void ClientConnection::forceTerminate()
 {
-	fail(HTTP_SERVICE_UNAVAILABLE, "Service Unavailable");
+    res = ResponseFactory::makeText(HTTP_SERVICE_UNAVAILABLE, "Service Unavailable");
+
+	std::ostringstream os;
+    os << res;
+    const std::string s = os.str();
+
+    // Inspect ChainBuf before pushing
+    std::cout << "[Diagnostics] Before push_copy:" << std::endl;
+    std::cout << "  ChainBuf byteSize: " << io.getChainBuf().getByteSize() << std::endl;
+    std::cout << "  Number of blocks: " << io.getChainBuf().blocks_.size() << std::endl;
+    for (size_t i = 0; i < io.getChainBuf().blocks_.size(); ++i) {
+        ChainBuf::Block b = io.getChainBuf().blocks_[i];
+        std::cout << "    Block " << i 
+                  << " data=" << static_cast<const void*>(b.data)
+                  << " len=" << b.len
+                  << " owned=" << b.owned << std::endl;
+    }
+
+    bool pushed = io.getChainBuf().push_copy(s.data(), s.size());
+    std::cout << "[Diagnostics] push_copy returned " << pushed << std::endl;
+
+    std::cout << "[Diagnostics] After push_copy:" << std::endl;
+    std::cout << "  ChainBuf byteSize: " << io.getChainBuf().getByteSize() << std::endl;
+    std::cout << "  Number of blocks: " << io.getChainBuf().blocks_.size() << std::endl;
+    for (size_t i = 0; i < io.getChainBuf().blocks_.size(); ++i) {
+        ChainBuf::Block b = io.getChainBuf().blocks_[i];
+        std::cout << "    Block " << i 
+                  << " data=" << static_cast<const void*>(b.data)
+                  << " len=" << b.len
+                  << " owned=" << b.owned << std::endl;
+    }
+
+    // Only call nb_write if there is actually something to send
+    if (io.getChainBuf().getByteSize() != 0) {
+        
+        ssize_t n = io.nb_write();
+        std::cout << "[Diagnostics] nb_write sent " << n << " bytes" << std::endl;
+    }
+
+
+	fixed_body_target_ = (std::size_t)-1; // <— optional reset
 	const int cgiOut = getCGIStreamer().cgiStdoutFD();
 	const int cgiIn  = getCGIStreamer().cgiStdinFD();
 	if (cgiOut >= 0)
 		this->server->getLoop().removeFD(cgiOut);
 	if (cgiIn  >= 0)
 		this->server->getLoop().removeFD(cgiIn);
-	this->close();
 }

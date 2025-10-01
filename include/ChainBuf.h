@@ -4,7 +4,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstring>   // std::memcpy
-
+#include <iostream>
 class ChainBuf {
 public:
 ChainBuf()
@@ -12,7 +12,10 @@ ChainBuf()
 		max_bytes_(2u * 1024u * 1024u),
 		max_blocks_(1024u) {}
 
-~ChainBuf() {}
+~ChainBuf() {
+
+	std::cout << "ChainBuf Dest" << std::endl;
+}
 
 // copy-in (owned)
 bool push_copy(const void* p, std::size_t n) {
@@ -40,8 +43,14 @@ bool push_ref(const void* p, std::size_t n) {
 std::size_t getByteSize() const { return byteSize_; }
 bool        empty()       const { return blocks_.empty(); }
 
+#include <iostream>
+
 // Copy up to max_bytes from the front into 'scratch'
-std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_req) const {
+std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_req) {
+	std::cout << "  storage_.data()=" << static_cast<void*>(storage_.data()) 
+          << " size=" << storage_.size() << std::endl;
+
+	
 	scratch.clear();
 	if (blocks_.empty() || max_bytes_req == 0) return 0;
 
@@ -63,6 +72,9 @@ std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_re
 
 // Drop n bytes from the front
 	void dropFront(std::size_t n) {
+		std::cout << "  storage_.data()=" << static_cast<void*>(storage_.data()) 
+          << " size=" << storage_.size() << std::endl;
+
 		while (n && !blocks_.empty()) {
 			if (n >= blocks_.front().len) {
 				n        -= blocks_.front().len;
@@ -87,7 +99,6 @@ std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_re
 		max_blocks_ = new_max_blocks;
 	}
 
-	private:
 	struct Block {
 		const char*  data;
 		std::size_t  len;

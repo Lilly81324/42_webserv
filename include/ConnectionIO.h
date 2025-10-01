@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <sys/types.h>
 
+#include <iostream>
+
 class ConnectionIO
 	{
 	private:
@@ -32,7 +34,11 @@ class ConnectionIO
 			tx_scratch.reserve(128 * 1024); // one-time reserve
 		}
 
-		~ConnectionIO() {}
+		~ConnectionIO() {
+
+
+			std::cout << "Cio Destructor" << std::endl;
+		}
 
 		void close() { socket.reset(); }
 
@@ -58,7 +64,6 @@ class ConnectionIO
 		std::vector<char> &getTmp() { return tmp; }
 		const std::vector<char> &getTmp() const { return tmp; }
 
-	private:
 		UniqueFD          socket;
 		IoRing            in;         // inbound ring buffer
 		ChainBuf          out;        // outbound chain buffer (to socket)

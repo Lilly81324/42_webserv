@@ -40,7 +40,13 @@ public:
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
 	void run(int timeout_ms, Server *srv);
+	/**
+	 * Runs for one more second, not accepting new connections
+	 */
 	void drain();
+	/**
+	 * End all Connections, initiate cleanup
+	 */
 	void terminate(Server *srv);
 	void stop();
 

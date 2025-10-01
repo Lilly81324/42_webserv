@@ -21,7 +21,8 @@ chunked_upload_test.py
 probe_connect.py
 return_directive.sh
 cgi_rate_limits.py
-proxy_e2e.py"
+proxy_e2e.py
+test_shutdown.sh"
 
 # Matching expected outputs (separate multiple expected strings with | )
 EXPECTED="Summary: 3 passed, 0 failed
@@ -33,7 +34,8 @@ Status: 409
 HTTP/1.1 200 OK
 [Summary: 8 passed, 0 failed]
 limiter enforced on CGI
-All proxy tests passed"
+All proxy tests passed
+[Summary: 1 passed, 0 failed]"
 
 SUCCESS=0
 FAIL=0

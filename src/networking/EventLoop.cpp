@@ -1,5 +1,6 @@
 // src/networking/EventLoop.cpp
 #include "EventLoop.h"
+#include "Server.h"
 #include <cerrno>
 #include <cstring>
 #include <poll.h>
@@ -236,7 +237,7 @@ It centralizes multiplexing, ensures fairness, and gives handlers control to enf
 
 */
 
-void EventLoop::run(int timeout_ms)
+void EventLoop::run(int timeout_ms, Server *srv)
 {
 	_stop = false;
 	while (!_stop)
@@ -270,6 +271,9 @@ void EventLoop::run(int timeout_ms)
 		dispatch.reserve(_pfds.size());
 		for (size_t i = 0; i < _pfds.size(); ++i)
 		{
+			// No more new Connections, even if they are in queue
+			if (_stop)
+				break ;
 			short rev = _pfds[i].revents;
 			if (rev && !(rev & POLLNVAL))
 				dispatch.push_back(std::make_pair(_pfds[i].fd, rev));
@@ -296,8 +300,65 @@ void EventLoop::run(int timeout_ms)
 				h->onEvent(fd, rev);
 		}
 	}
+	drain();
+	terminate(srv);
 }
 
+void EventLoop::drain()
+{
+	unsigned long long end = TimeUtil::nowMs() + DRAIN_TIMEOUT_MS;
+	while (TimeUtil::nowMs() < end && _pfds.size() > 0)
+	{
+		// timer tick: let handlers enforce deadlines
+		for (size_t i = 0; i < _pfds.size(); ++i)
+		{
+			int idx = static_cast<int>(i);
+			Handler *h = _hs[idx];
+			if (h)
+				h->onEvent(_pfds[i].fd, 0);
+		}
+		// normal dispatch
+		std::vector<std::pair<int, short> > dispatch;
+		dispatch.reserve(_pfds.size());
+		for (size_t i = 0; i < _pfds.size(); ++i)
+		{
+			// No more new Connections, even if they are in queue
+			short rev = _pfds[i].revents;
+			if (rev && !(rev & POLLNVAL))
+				dispatch.push_back(std::make_pair(_pfds[i].fd, rev));
+		}
+		for (size_t i = 0; i < dispatch.size(); ++i)
+		{
+			const int fd = dispatch[i].first;
+			const short rev = dispatch[i].second;
+			int idx = indexOfFD(fd);
+			if (idx < 0)
+				continue;
+			Handler *h = _hs[idx];
+			if (h)
+				h->onEvent(fd, rev);
+		}
+	}
+}
+
+void EventLoop::terminate(Server *srv)
+{
+	// clear ClientHandlers here
+	// If no Server was started, we can return early
+	if (!srv)
+		return ;
+	// Try to gently close ClientConnections, and give back 503
+	std::vector<EventLoop::Handler*>::iterator it = _hs.begin();
+	std::vector<EventLoop::Handler*>::iterator end = _hs.end();
+	while (it != end)
+	{
+		ClientHandler *ch = (ClientHandler *)*it;
+		ch->conn()->forceTerminate();
+		it++;
+	}
+	// If any Handlers are left, forcefully close theese Connections
+	srv->shutdownAllHandlers();
+}
 
 /* 
 

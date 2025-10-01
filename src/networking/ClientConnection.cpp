@@ -1669,3 +1669,15 @@ void ClientConnection::decideBodyReader(std::size_t content_length)
 	req.enableBodyOnDisk(fr->get_path());
 	body = fr;
 }
+
+void ClientConnection::forceTerminate()
+{
+	fail(HTTP_SERVICE_UNAVAILABLE, "Service Unavailable");
+	const int cgiOut = getCGIStreamer().cgiStdoutFD();
+	const int cgiIn  = getCGIStreamer().cgiStdinFD();
+	if (cgiOut >= 0)
+		this->server->getLoop().removeFD(cgiOut);
+	if (cgiIn  >= 0)
+		this->server->getLoop().removeFD(cgiIn);
+	this->close();
+}

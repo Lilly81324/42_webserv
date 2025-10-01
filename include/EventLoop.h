@@ -6,8 +6,10 @@
 #include <map>
 #include <poll.h>
 #include "Debug.h"
+#include "TimeUtil.h"
 
 class ClientConnection; // forward
+class Server;
 
 class EventLoop
 {
@@ -37,7 +39,15 @@ public:
 	// *** Keep only this declaration ***
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
-	void run(int timeout_ms);
+	void run(int timeout_ms, Server *srv);
+	/**
+	 * Run for one more second, not accepting new connections
+	 */
+	void drain();
+	/**
+	 * End all Connections, initiate cleanup
+	 */
+	void terminate(Server *srv);
 	void stop();
 
 	// Owner helpers (optional)

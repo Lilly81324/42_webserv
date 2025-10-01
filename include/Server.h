@@ -177,18 +177,20 @@ class Server
 		 */
 		void buildHostMaps();
 
+	public:
 
 		void shutdownAllHandlers() {
 			std::set<ClientHandler*>::iterator it = server_handlers.begin();
 			while (it != server_handlers.end()) {
 			ClientHandler* h = *it;
+			if (h->conn())
+				delete (h->conn()); 
 			++it;
 			delete h;
 			}
 			server_handlers.clear();
 		}
 
-	public:
 		/**
 		 * @brief Constructs a Server instance with the given configuration.
 		 *

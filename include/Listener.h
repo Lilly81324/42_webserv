@@ -12,6 +12,8 @@ Date: 8/12/2025
 #include <string>
 #include <vector>
 
+class AcceptorHandler;
+
 /**
  * @class Listener
  * @brief Manages a network listening socket and its associated virtual servers.
@@ -44,6 +46,7 @@ class Listener
 		int port;
 		bool is_ipv6;
 		std::vector<int> vs_indices;
+		AcceptorHandler *acceptor;
 		Listener(const Listener &);
 		Listener &operator=(const Listener &);
 
@@ -118,6 +121,24 @@ class Listener
 		 * @note Useful for protocol-specific handling and logging.
 		 */
 		bool IsIpv6() { return is_ipv6; };
+
+		/**
+		 * @brief Returns the AcceptorHandler Oject for this Listener
+		 * 
+		 * @returns AcceptorHandler object by pointer (heap)
+		 * 
+		 * @note This function can be used to manually free the Handler
+		 */
+		AcceptorHandler *getAcceptor(void) { return acceptor; };
+
+		/**
+		 * @brief Sets the AcceptorHandler Oject for this Listener
+		 * 
+		 * @param acc Heap allocated pointer to AcceptorHandler object
+		 * 
+		 * @note Listener frees the current field and also frees on destructor
+		 */
+		void setAcceptor(AcceptorHandler *acc) { acceptor = acc; };
 
 		/**
 		 * @brief Adds a virtual server index to this listener.

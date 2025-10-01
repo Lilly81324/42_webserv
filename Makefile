@@ -219,6 +219,9 @@ clean-tests:
 
 re-tests: clean-tests test
 
+val: $(NAME)
+	valgrind --leak-check=full ./$(NAME)
+
 help:
 	@echo ""
 	@echo "==================== Make Help ===================="

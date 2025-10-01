@@ -47,30 +47,6 @@ static inline int xclose(int &fd)
 
 /* 
 
-unsigned long long CgiProcess::nowMs()
-
-Returns current wall-clock time in milliseconds using
-Used for deadline tracking in CGI processes, especially timeouts configured via spawn. 
-Millisecond precision is sufficient for CGI lifetime management without heavy dependencies. 
-By wrapping this call, other parts of the server can enforce time-based rules (like aborting stuck scripts) consistently.
-
-*/
-
-unsigned long long CgiProcess::nowMs() {
-#if defined(CLOCK_MONOTONIC)
-	struct timespec ts;
-	if (::clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-		return (unsigned long long)ts.tv_sec * 1000ULL
-			+ (unsigned long long)ts.tv_nsec / 1000000ULL;
-	}
-#endif
-	// Fallback (coarse) if CLOCK_MONOTONIC isn't available
-	return (unsigned long long)std::time(0) * 1000ULL;
-}
-
-
-/* 
-
 bool CgiProcess::setNonBlocking(int fd)
 
 Sets O_NONBLOCK on a file descriptor. This is required so that CGI stdin/out 
@@ -277,7 +253,7 @@ bool CgiProcess::spawn(const std::string &bin,
 
 	// Establish deadline (uses your allowed nowMs())
 	_deadline = (timeout_ms > 0)
-					? (nowMs() + (unsigned long long)timeout_ms)
+					? (TimeUtil::nowMs() + (unsigned long long)timeout_ms)
 					: 0ULL;
 
 	int inPipe[2]  = { -1, -1 }; // parent writes -> child reads (stdin)
@@ -477,6 +453,8 @@ void CgiProcess::terminate()
 {
 	if (_pid > 0)
 	{
+		// Try to kill child gently
+		kill(_pid, SIGTERM);
 		// try to reap without killing first
 		int dummy = 0;
 		int rc = waitNonBlocking(&dummy);

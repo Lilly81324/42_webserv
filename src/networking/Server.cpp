@@ -46,9 +46,11 @@ void Server::registerListeners()
 	for (std::vector<Listener *>::const_iterator it = listeners.begin();
 		 it != listeners.end(); ++it)
 	{
-		if (*it && (*it)->getFD() >= 0)
+		Listener *lst = *it;
+		if (lst && (lst)->getFD() >= 0)
 		{
-			loop_.addFD((*it)->getFD(), POLLIN, new AcceptorHandler(loop_, *this, *it));
+			lst->setAcceptor(new AcceptorHandler(loop_, *this, *it));
+			loop_.addFD((*it)->getFD(), POLLIN, lst->getAcceptor());
 		}
 	}
 }
@@ -68,7 +70,9 @@ void Server::unregisterListeners()
             // Also deletes the per-fd handler inside EventLoop, if any.
             loop_.removeFD(fd);
         }
-		
+		// Each Listener has one Acceptor, clear those
+		if (lst->getAcceptor())
+			delete (lst->getAcceptor());
 		delete lst;  // Listener dtor should close its fd (RAII)
 		*it = 0;
 	}
@@ -106,14 +110,12 @@ void Server::setCloseOnExec(int fd)
 
 void Server::stop()
 {
-	// Finish current running requests
-	// Unregister connections
-	// Unregister current Handlers
-	// Stop Loop
+	// Dont allow new Connections -> Delete Listeners/AcceptorHandlers
 	unregisterListeners();
+	// Close all FDs associated with those FDs
 	closeAll();
+	// Tell the EventLoop to stop running -> will do more cleanup
 	loop_.stop();
-	shutdownAllHandlers();
 }
 
 void Server::buildListenerPlan(std::vector<std::pair<std::string, int> > &unique_pairs,
@@ -333,7 +335,7 @@ void Server::start()
 void Server::run(int poll_timeout_ms) {
 	if (listeners.empty())
 		start();
-	loop_.run(poll_timeout_ms);
+	loop_.run(poll_timeout_ms, this);
 }
 
 static std::string normalize_host(const std::string &h)

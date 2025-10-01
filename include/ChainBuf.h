@@ -19,14 +19,19 @@ ChainBuf()
 
 // copy-in (owned)
 bool push_copy(const void* p, std::size_t n) {
-	if (n == 0) return true;
+	std::cout << "Calling push_copy with " << p << " and " << n << std::endl;
+	if (n == 0)
+		return true;
 	if (byteSize_ + n > max_bytes_ || blocks_.size() >= max_blocks_)
 		return false;
+	std::cout << "Half" << std::endl;
 	const std::size_t off = storage_.size();
 	storage_.resize(off + n);
+	std::cout << "Half2" << std::endl;
 	std::memcpy(&storage_[0] + off, p, n);
 	blocks_.push_back(Block(&storage_[0] + off, n, true));
 	byteSize_ += n;
+	std::cout << "End" << std::endl;
 	return true;
 }
 
@@ -72,9 +77,6 @@ std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_re
 
 // Drop n bytes from the front
 	void dropFront(std::size_t n) {
-		std::cout << "  storage_.data()=" << static_cast<void*>(storage_.data()) 
-          << " size=" << storage_.size() << std::endl;
-
 		while (n && !blocks_.empty()) {
 			if (n >= blocks_.front().len) {
 				n        -= blocks_.front().len;
@@ -97,6 +99,13 @@ std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_re
 	void setCaps(std::size_t new_max_bytes, std::size_t new_max_blocks) {
 		max_bytes_  = new_max_bytes;
 		max_blocks_ = new_max_blocks;
+	}
+
+	void clear(void)
+	{
+		blocks_.clear();
+		storage_.clear();
+		byteSize_ = 0;
 	}
 
 	struct Block {

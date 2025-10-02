@@ -1672,62 +1672,27 @@ void ClientConnection::decideBodyReader(std::size_t content_length)
 	req.enableBodyOnDisk(fr->get_path());
 	body = fr;
 }
-#include <iostream>
 
 void ClientConnection::forceTerminate()
 {
+    // Prepare the 503 Response
     res = ResponseFactory::makeText(HTTP_SERVICE_UNAVAILABLE, "Service Unavailable");
-
 	std::ostringstream os;
     os << res;
     const std::string s = os.str();
 
-    // Inspect ChainBuf before pushing
-    std::cout << "[Diagnostics] Before clear:" << std::endl;
-    std::cout << "  ChainBuf byteSize: " << io.getChainBuf().getByteSize() << std::endl;
-    std::cout << "  Number of blocks: " << io.getChainBuf().blocks_.size() << std::endl;
-    for (size_t i = 0; i < io.getChainBuf().blocks_.size(); ++i) {
-        ChainBuf::Block b = io.getChainBuf().blocks_[i];
-        std::cout << "    Block " << i 
-                  << " data=" << static_cast<const void*>(b.data)
-                  << " len=" << b.len
-                  << " owned=" << b.owned << std::endl;
-    }
-
+    // Might have dangling pointers, and since we dont want to send the rest,
+    // and only care about sending the 503, we clear it
     io.getChainBuf().clear();
 
-    // Inspect ChainBuf after pushing
-    std::cout << "[Diagnostics] After clear:" << std::endl;
-    std::cout << "  ChainBuf byteSize: " << io.getChainBuf().getByteSize() << std::endl;
-    std::cout << "  Number of blocks: " << io.getChainBuf().blocks_.size() << std::endl;
-    for (size_t i = 0; i < io.getChainBuf().blocks_.size(); ++i) {
-        ChainBuf::Block b = io.getChainBuf().blocks_[i];
-        std::cout << "    Block " << i 
-                  << " data=" << static_cast<const void*>(b.data)
-                  << " len=" << b.len
-                  << " owned=" << b.owned << std::endl;
-    }
-
-
+    // Write the 503 into the buffer
     io.getChainBuf().push_copy(s.data(), s.size());
 
-    // Inspect ChainBuf after pushing
-    std::cout << "[Diagnostics] After push_copy:" << std::endl;
-    std::cout << "  ChainBuf byteSize: " << io.getChainBuf().getByteSize() << std::endl;
-    std::cout << "  Number of blocks: " << io.getChainBuf().blocks_.size() << std::endl;
-    for (size_t i = 0; i < io.getChainBuf().blocks_.size(); ++i) {
-        ChainBuf::Block b = io.getChainBuf().blocks_[i];
-        std::cout << "    Block " << i 
-                  << " data=" << static_cast<const void*>(b.data)
-                  << " len=" << b.len
-                  << " owned=" << b.owned << std::endl;
-    }
-
-
+    // Send the buffer to the socket
     io.nb_write();
 
-
-	fixed_body_target_ = (std::size_t)-1; // <— optional reset
+    // Stuff that we usually do when a Connection is timed out
+	fixed_body_target_ = (std::size_t)-1;
 	const int cgiOut = getCGIStreamer().cgiStdoutFD();
 	const int cgiIn  = getCGIStreamer().cgiStdinFD();
 	if (cgiOut >= 0)

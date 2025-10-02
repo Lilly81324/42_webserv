@@ -1,8 +1,0 @@
-server {
-  listen 127.0.0.1:37869;
-  server_name localhost;
-  root  ./www;
-  index index.html index.htm;
-  client_body_temp_path /tmp;
-  client_max_body_size 65536;
-}

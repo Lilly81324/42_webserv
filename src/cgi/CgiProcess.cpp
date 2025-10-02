@@ -109,7 +109,6 @@ CgiProcess::CgiProcess()
 
 CgiProcess::~CgiProcess()
 {
-	std::cout << "Destructor Terminate" << std::endl;
 	terminate(); // safe if already reaped/closed
 }
 

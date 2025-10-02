@@ -34,11 +34,7 @@ class ConnectionIO
 			tx_scratch.reserve(128 * 1024); // one-time reserve
 		}
 
-		~ConnectionIO() {
-
-
-			std::cout << "Cio Destructor" << std::endl;
-		}
+		~ConnectionIO() {}
 
 		void close() { socket.reset(); }
 

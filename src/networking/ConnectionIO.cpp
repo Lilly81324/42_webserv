@@ -36,10 +36,7 @@ ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 ssize_t ConnectionIO::nb_write()
 {
     if (!socket.valid())
-	{
-		std::cout << "Socket was invalid!!!" << std::endl;
-        return -1;
-		}
+		{return -1;}
     if (out.empty())
         return 0;
 

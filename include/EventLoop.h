@@ -36,7 +36,7 @@ public:
 	bool modFD(int fd, short events);
 	void removeFD(int fd);
 
-	// *** Keep only this declaration ***
+	// !!!Delete this function in the final build, its only for catch2 tests!!!
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
 	void run(int timeout_ms, Server *srv);

@@ -202,7 +202,7 @@ larger system that already has its own control loop.
 
 */
 
-// Removed, because Unused, and we are only allowd to use 1 poll()
+// !!!Delete this function in the final build, its only for catch2 tests!!!
 std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
 {
 	std::vector<std::pair<int, short> > ev;

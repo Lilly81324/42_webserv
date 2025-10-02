@@ -349,8 +349,8 @@ void EventLoop::terminate(Server *srv)
 	if (!srv)
 		return ;
 	// Try to gently close ClientConnections, and give back 503
-	std::set<ClientHandler *>::iterator it = srv->server_handlers.begin();
-	std::set<ClientHandler *>::iterator end = srv->server_handlers.end();
+	std::vector<EventLoop::Handler*>::iterator it = _hs.begin();
+	std::vector<EventLoop::Handler*>::iterator end = _hs.end();
 	while (it != end)
 	{
 		ClientHandler *ch = (ClientHandler *)*it;

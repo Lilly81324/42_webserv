@@ -4,7 +4,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstring>   // std::memcpy
-#include <iostream>
+
 class ChainBuf {
 public:
 ChainBuf()
@@ -12,13 +12,11 @@ ChainBuf()
 		max_bytes_(2u * 1024u * 1024u),
 		max_blocks_(1024u) {}
 
-~ChainBuf() {
-}
+~ChainBuf() {}
 
 // copy-in (owned)
 bool push_copy(const void* p, std::size_t n) {
-	if (n == 0)
-		return true;
+	if (n == 0) return true;
 	if (byteSize_ + n > max_bytes_ || blocks_.size() >= max_blocks_)
 		return false;
 	const std::size_t off = storage_.size();
@@ -42,10 +40,8 @@ bool push_ref(const void* p, std::size_t n) {
 std::size_t getByteSize() const { return byteSize_; }
 bool        empty()       const { return blocks_.empty(); }
 
-#include <iostream>
-
 // Copy up to max_bytes from the front into 'scratch'
-std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_req) {
+std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_req) const {
 	scratch.clear();
 	if (blocks_.empty() || max_bytes_req == 0) return 0;
 

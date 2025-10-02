@@ -19,7 +19,6 @@
 #include <netinet/tcp.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <iostream>
 #include <sstream>
 #include "ChunkedReader.h"   // for dynamic_cast to ChunkedReader
 #include <iostream>          // for std::cerr (debug)
@@ -187,11 +186,8 @@ preventing gradual resource loss across many concurrent clients.
 
 */
 
-#include <iostream>
-
 ClientConnection::~ClientConnection()
 {
-    std::cout << "CliDest called" << std::endl;
 	if (server)
 		server = 0;
 	if (ctx)
@@ -1699,4 +1695,5 @@ void ClientConnection::forceTerminate()
 		this->server->getLoop().removeFD(cgiOut);
 	if (cgiIn  >= 0)
 		this->server->getLoop().removeFD(cgiIn);
+	this->close();
 }

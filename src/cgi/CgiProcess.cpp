@@ -100,10 +100,6 @@ design is essential for safe stack or container-based storage of CgiProcess obje
 
 */
 
-
-#include <iostream>
-
-
 CgiProcess::CgiProcess()
 	: _pid(-1), _in(-1), _out(-1), _deadline(0ULL) {}
 
@@ -127,14 +123,12 @@ enabling handlers to run CGIs without worrying about low-level pipe setup.
 
 */
 
-#include <iostream>
 
 // High-level convenience overload: build argv/envp and delegate
 bool CgiProcess::spawn(const CgiSpec &spec,
 					const std::string &script_path,
 					const std::vector<std::string> &envv)
 {
-	std::cout << "Spawned a Request (1)" << std::endl;
 	closeBoth(); // if previously used
 	_pid = -1;
 	_in  = -1;  // parent will WRITE to child's stdin
@@ -252,9 +246,7 @@ bool CgiProcess::spawn(const std::string &bin,
 					char *const *envp,
 					int timeout_ms)
 {
-	std::cout << "Spawned a Request (2)" << std::endl;
 	// Clean up any previous child
-	std::cout << "Clean up old - Terminate" << std::endl;
 	terminate();
 
 	// Establish deadline (uses your allowed nowMs())
@@ -459,7 +451,6 @@ void CgiProcess::terminate()
 {
 	if (_pid > 0)
 	{
-		std::cout << "Terminating a Process" << std::endl;
 		// Try to kill child gently
 		kill(_pid, SIGTERM);
 		// try to reap without killing first

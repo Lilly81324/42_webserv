@@ -202,6 +202,7 @@ larger system that already has its own control loop.
 
 */
 
+// !!!Delete this function in the final build, its only for catch2 tests!!!
 std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
 {
 	std::vector<std::pair<int, short> > ev;
@@ -307,7 +308,7 @@ void EventLoop::run(int timeout_ms, Server *srv)
 void EventLoop::drain()
 {
 	unsigned long long end = TimeUtil::nowMs() + DRAIN_TIMEOUT_MS;
-	while (TimeUtil::nowMs() < end && _pfds.size() > 0)
+	while (TimeUtil::nowMs() < end && _hs.size() > 0)
 	{
 		// timer tick: let handlers enforce deadlines
 		for (size_t i = 0; i < _pfds.size(); ++i)
@@ -353,7 +354,8 @@ void EventLoop::terminate(Server *srv)
 	while (it != end)
 	{
 		ClientHandler *ch = (ClientHandler *)*it;
-		ch->conn()->forceTerminate();
+		if (ch->conn() && !ch->conn()->isClosed())
+			ch->conn()->forceTerminate();
 		it++;
 	}
 	// If any Handlers are left, forcefully close theese Connections

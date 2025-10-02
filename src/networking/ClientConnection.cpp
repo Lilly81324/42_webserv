@@ -19,7 +19,6 @@
 #include <netinet/tcp.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <iostream>
 #include <sstream>
 #include "ChunkedReader.h"   // for dynamic_cast to ChunkedReader
 #include <iostream>          // for std::cerr (debug)
@@ -1672,7 +1671,24 @@ void ClientConnection::decideBodyReader(std::size_t content_length)
 
 void ClientConnection::forceTerminate()
 {
-	fail(HTTP_SERVICE_UNAVAILABLE, "Service Unavailable");
+    // Prepare the 503 Response
+    res = ResponseFactory::makeText(HTTP_SERVICE_UNAVAILABLE, "Service Unavailable");
+	std::ostringstream os;
+    os << res;
+    const std::string s = os.str();
+
+    // Might have dangling pointers, and since we dont want to send the rest,
+    // and only care about sending the 503, we clear it
+    io.getChainBuf().clear();
+
+    // Write the 503 into the buffer
+    io.getChainBuf().push_copy(s.data(), s.size());
+
+    // Send the buffer to the socket
+    io.nb_write();
+
+    // Stuff that we usually do when a Connection is timed out
+	fixed_body_target_ = (std::size_t)-1;
 	const int cgiOut = getCGIStreamer().cgiStdoutFD();
 	const int cgiIn  = getCGIStreamer().cgiStdinFD();
 	if (cgiOut >= 0)

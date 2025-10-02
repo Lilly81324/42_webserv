@@ -35,7 +35,7 @@ HTTP/1.1 200 OK
 [Summary: 8 passed, 0 failed]
 limiter enforced on CGI
 All proxy tests passed
-[Summary: 1 passed, 0 failed]"
+[Summary: 3 passed, 0 failed]"
 
 SUCCESS=0
 FAIL=0

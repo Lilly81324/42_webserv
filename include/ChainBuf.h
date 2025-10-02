@@ -87,6 +87,13 @@ std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_re
 		max_blocks_ = new_max_blocks;
 	}
 
+	void clear(void)
+	{
+		blocks_.clear();
+		storage_.clear();
+		byteSize_ = 0;
+	}
+
 	private:
 	struct Block {
 		const char*  data;

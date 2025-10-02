@@ -94,6 +94,7 @@ std::size_t copy_front_into(std::vector<char>& scratch, std::size_t max_bytes_re
 		byteSize_ = 0;
 	}
 
+	private:
 	struct Block {
 		const char*  data;
 		std::size_t  len;

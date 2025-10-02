@@ -31,12 +31,10 @@ ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 	return n;
 }
 
-#include <iostream>
-
 ssize_t ConnectionIO::nb_write()
 {
     if (!socket.valid())
-		return -1;
+        return -1;
     if (out.empty())
         return 0;
 

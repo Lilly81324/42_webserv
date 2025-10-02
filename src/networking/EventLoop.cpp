@@ -308,7 +308,7 @@ void EventLoop::run(int timeout_ms, Server *srv)
 void EventLoop::drain()
 {
 	unsigned long long end = TimeUtil::nowMs() + DRAIN_TIMEOUT_MS;
-	while (TimeUtil::nowMs() < end && _hs.size() > 0 && _pfds.size() > 0)
+	while (TimeUtil::nowMs() < end && _hs.size() > 0)
 	{
 		// timer tick: let handlers enforce deadlines
 		for (size_t i = 0; i < _pfds.size(); ++i)

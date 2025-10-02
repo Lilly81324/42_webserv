@@ -220,7 +220,7 @@ clean-tests:
 re-tests: clean-tests test
 
 val: $(NAME)
-	valgrind --leak-check=full --track-fds=yes ./$(NAME)
+	valgrind --leak-check=full --track-fds=yes --trace-children=yes ./$(NAME)
 
 help:
 	@echo ""

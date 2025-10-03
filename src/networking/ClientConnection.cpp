@@ -196,6 +196,11 @@ preventing gradual resource loss across many concurrent clients.
 
 ClientConnection::~ClientConnection()
 {
+	// The file containing the body for a Proxy request
+	if (proxy_.body_fd > 0)
+	{
+		::close(proxy_.body_fd);
+	}
 	if (server)
 		server = 0;
 	if (ctx)

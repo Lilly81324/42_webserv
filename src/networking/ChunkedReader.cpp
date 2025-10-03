@@ -85,7 +85,7 @@ bool ChunkedReader::ensure_spill_file() {
         dir.erase(dir.size() - 1);
 
     const int MAX_ATTEMPTS = 256;
-    unsigned int salt = (unsigned int)rand();
+    unsigned int salt = (unsigned int)std::rand();
 
     for (int i = 0; i < MAX_ATTEMPTS; ++i) {
         std::ostringstream oss;

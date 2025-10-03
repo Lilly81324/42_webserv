@@ -284,14 +284,14 @@ void EventLoop::run(int timeout_ms, Server *srv)
 		{
 			const int fd = dispatch[i].first;
 			const short rev = dispatch[i].second;
-			if (DEBUG_CGI) // Defined in Debug.h, changed so now final version doesnt output
-			fprintf(stderr, "[EV] fd=%d revents=0x%x%s%s%s%s%s\n",
-							fd, rev,
-							(rev & POLLIN) ? " POLLIN" : "",
-							(rev & POLLOUT)? " POLLOUT":"",
-							(rev & POLLERR)? " POLLERR":"",
-							(rev & POLLHUP)? " POLLHUP":"",
-							(rev & POLLNVAL)?" POLLNVAL":"");
+			// if (DEBUG_CGI) // Defined in Debug.h, changed so now final version doesnt output
+			// fprintf(stderr, "[EV] fd=%d revents=0x%x%s%s%s%s%s\n",
+			// 				fd, rev,
+			// 				(rev & POLLIN) ? " POLLIN" : "",
+			// 				(rev & POLLOUT)? " POLLOUT":"",
+			// 				(rev & POLLERR)? " POLLERR":"",
+			// 				(rev & POLLHUP)? " POLLHUP":"",
+			// 				(rev & POLLNVAL)?" POLLNVAL":"");
 
 			int idx = indexOfFD(fd);
 			if (idx < 0)
@@ -469,4 +469,9 @@ void EventLoop::removeOwner(ClientConnection *owner)
 	}
 	for (size_t i = 0; i < fds.size(); ++i)
 		removeFD(fds[i]);
+}
+
+std::vector<struct pollfd> EventLoop::getPfds(void)
+{
+	return (_pfds);
 }

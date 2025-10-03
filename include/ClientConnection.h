@@ -60,6 +60,7 @@ public:
     void resetDeadline(int ms){ dl.reset(now_cached_ms, ms); };
 
     bool isReadyToClose() { return ready_to_close; }
+    Server *getServer(void) { return server; }
 
     void close();
 
@@ -145,12 +146,7 @@ private:
     bool should_close;
     bool route_selected;
     RoutePlan plan;
-    int local_port;
-    int vs_idx;
-
-    RouteDecision *ctx;
     Preflight pr;
-
     std::size_t body_bytes_prev; // last observed body->bytes_received()
     int body_no_progress_ticks;
     int flush_no_progress_ticks;
@@ -159,6 +155,7 @@ private:
     std::size_t fixed_body_target_;  
     std::string   ip; // Ip of the client (socket)
 
+    RouteDecision *ctx;
     size_t        body_expected_;     // from Content-Length
     size_t        body_received_;     // progresses to body_expected_
     int           body_fd_;           // -1 if using RAM
@@ -167,6 +164,9 @@ private:
     bool cgi_error_latched;
 
     static const size_t MEM_BODY_LIMIT = 32u * 1024u; // spill threshold
+
+        int local_port;
+int vs_idx;
 
     enum
     {

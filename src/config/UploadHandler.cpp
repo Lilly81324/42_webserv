@@ -68,7 +68,7 @@ bool UploadHandler::openTempInUpload(std::string& out_path, int& out_fd) {
     const std::string dir = upload_dir_;
     const std::string prefix = "upload";
     const int MAX_ATTEMPTS = 256;
-    unsigned int salt = (unsigned int)rand();
+    unsigned int salt = (unsigned int)std::rand(); 
 
     for (int i = 0; i < MAX_ATTEMPTS; ++i) {
         std::ostringstream name;

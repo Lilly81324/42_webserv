@@ -30,7 +30,8 @@ public:
 	// Convenience overload
 	bool spawn(const CgiSpec& spec,
 			const std::string& scriptPath,
-			const std::vector<std::string>& envv);
+			const std::vector<std::string>& envv,
+			std::vector<int> tracked);
 
 	// FDs for parent side: write body to inFD(), read response from outFD()
 	int  inFD()  const { return _in;  }  // parent writes → child's stdin

@@ -68,7 +68,15 @@ ClientConnection::ClientConnection(int fd, Server *s, unsigned long long nowMs)
 	  now_cached_ms(nowMs),
 	  ready_to_close(false),
 	  fixed_body_target_((std::size_t)-1), // <— add this
-	  ip()
+	  ip(),
+      ctx(NULL),
+      body_expected_(0),
+      body_received_(0),
+      body_fd_(0),
+      body_path_(""),
+      cgi_error_latched(false),
+      local_port(0),
+      vs_idx(0)
 
 {
 	// Wire the loop once
@@ -188,6 +196,11 @@ preventing gradual resource loss across many concurrent clients.
 
 ClientConnection::~ClientConnection()
 {
+	// The file containing the body for a Proxy request
+	if (proxy_.body_fd > 0)
+	{
+		::close(proxy_.body_fd);
+	}
 	if (server)
 		server = 0;
 	if (ctx)

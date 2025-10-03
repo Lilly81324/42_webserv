@@ -35,7 +35,8 @@ public:
 	// Start CGI (non-blocking). Returns false if spawn/pipe setup fails.
 	bool beginCgi(const CgiSpec &spec,
 				const std::string &script_path,
-				const std::vector<std::string> &envv);
+				const std::vector<std::string> &envv,
+						std::vector<int> tracked);
 
 	// EventLoop dispatchers should call these when the corresponding fd is ready.
 	void onCgiReadable(int fd);  // drain child's stdout → internal buffers (header/body)

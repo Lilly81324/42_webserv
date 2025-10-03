@@ -44,6 +44,26 @@ static inline int xclose(int &fd)
 	return 0;
 }
 
+/**
+ * @brief Closes the vector of specified fds
+ * 
+ * This is used, so the child can close the file descriptors
+ * of the sockets from Connections that are tracked in the 
+ * parents Eventloop.
+ * Without this, the child will be leaking fds, one for each ClientConnection
+ */
+
+void closeTrackedFds(std::vector<int> tracked)
+{
+	std::vector<int>::const_iterator end = tracked.end();
+	for (std::vector<int>::const_iterator it = tracked.begin();
+		it != end; it++)
+	{
+		close(*it);
+	}
+}
+
+
 
 /* 
 
@@ -123,11 +143,11 @@ enabling handlers to run CGIs without worrying about low-level pipe setup.
 
 */
 
-
 // High-level convenience overload: build argv/envp and delegate
 bool CgiProcess::spawn(const CgiSpec &spec,
 					const std::string &script_path,
-					const std::vector<std::string> &envv)
+					const std::vector<std::string> &envv,
+					std::vector<int> tracked)
 {
 	closeBoth(); // if previously used
 	_pid = -1;
@@ -169,6 +189,8 @@ bool CgiProcess::spawn(const CgiSpec &spec,
 		::close(pin[1]);
 		::close(pout[0]);
 		::close(pout[1]);
+		
+		closeTrackedFds(tracked);
 
 		// Build argv and envp (you already have helpers; keep minimal here)
 		std::vector<char*> argv;
@@ -385,7 +407,6 @@ void CgiProcess::closeBoth()
 }
 
 
-
 /* 
 
 
@@ -436,6 +457,22 @@ int CgiProcess::waitNonBlocking(int *raw_status)
 	return code > 0 ? code : 1; // >0 means finished; return a positive number
 }
 
+
+// helper lambda-ish for waiting with timeout
+void wait(unsigned long long ms)
+{
+	unsigned long long start = TimeUtil::nowMs();
+	while (TimeUtil::nowMs() < start + ms)
+	{
+		// Timeout for 10 ms by doing nothing
+		struct timeval tv = {0, 0};
+		tv.tv_sec = 0;
+		tv.tv_usec = 10 * 1000;
+		select(0, NULL, NULL, NULL, &tv);
+	}
+}
+
+
 /* 
 
 
@@ -458,6 +495,12 @@ void CgiProcess::terminate()
 		// try to reap without killing first
 		int dummy = 0;
 		int rc = waitNonBlocking(&dummy);
+		// If process is still running after SIGTERM was sent, chill first, kill later
+		if (rc == 0)
+			wait(1000);
+		
+		// If still running, despite Signal and enough time, force kill it
+		rc = waitNonBlocking(&dummy);
 		if (rc == 0)
 		{
 			// still running → kill

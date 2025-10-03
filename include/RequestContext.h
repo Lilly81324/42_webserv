@@ -40,6 +40,7 @@ struct RequestContext
 	CGIStreamer      *cgi_streamer;   // non-owning pointer to ClientConnection’s CGIStreamer
 	ClientConnection *client;         // back-pointer to current ClientConnection (set by caller if available)
 
+	std::vector<int> pollFds;
 	RequestContext()
 		: cfg(0),
 		  vs(0),
@@ -56,7 +57,8 @@ struct RequestContext
 		  proxy_connect_timeout_ms(5000),
 		  proxy_io_idle_timeout_ms(15000),
 		  cgi_streamer(0),
-		  client(0)
+		  client(0),
+		  pollFds()
 	{}
 };
 

@@ -57,7 +57,7 @@ std::string UploadHandler::sanitizeFilename(const std::string& in) const {
 }
 
 bool UploadHandler::ensureUploadDirIsSafe(const std::string& base) const {
-	// ensure realpath(upload_dir) exists and is a directory
+	// ensure realpath(upload_dir) exists and is a directoryy
 	std::string canon;
 	if (!realpathString(base, canon)) return false;
 	struct stat st; if (::stat(canon.c_str(), &st)!=0 || !S_ISDIR(st.st_mode)) return false;

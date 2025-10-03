@@ -56,6 +56,7 @@ public:
 	ClientConnection *ownerOf(int fd) const;
 	int indexOfFD(int fd) const;
 	void removeOwner(ClientConnection *owner);
+	std::vector<pollfd> getPfds(void);
 
 
 private:

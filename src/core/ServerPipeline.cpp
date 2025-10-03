@@ -27,11 +27,25 @@ date: 8/10/2025
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
+#include "Server.h"
 
 static RateLimiter& globalLimiter() {
     static RateLimiter rl;
     return rl;
+}
+
+#include <poll.h>
+
+void ctxTrackPollFds(ClientConnection *client, std::vector<int> &tracked)
+{
+	std::vector<pollfd> pfd = client->getServer()->getLoop().getPfds();
+	std::vector<pollfd>::const_iterator end = pfd.end();
+	for (std::vector<pollfd>::const_iterator it = pfd.begin();
+	it != end; it++)
+	{
+		if (it->fd > 0)
+			tracked.push_back(it->fd);
+	}
 }
 
 bool ServerPipeline::processRequest(const ServerConfig &cfg,
@@ -47,6 +61,7 @@ bool ServerPipeline::processRequest(const ServerConfig &cfg,
     ctx.cfg = &cfg;
     ctx.vs_index = vs_indx;
     ctx.vs = 0;
+    ctxTrackPollFds(client, ctx.pollFds);
 
     if (ctx.vs_index >= 0 && ctx.vs_index < (int)cfg.servers().size())
         ctx.vs = &cfg.servers()[ctx.vs_index];

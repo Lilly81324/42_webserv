@@ -646,7 +646,8 @@ Returns true when the streamer is active and ready for polling; otherwise failed
 
 bool CGIStreamer::beginCgi(const CgiSpec &spec,
 						const std::string &script_path,
-						const std::vector<std::string> &envv)
+						const std::vector<std::string> &envv,
+						std::vector<int> tracked)
 {
 	// ---- reset runtime state ----
 	failed_     = false;
@@ -677,7 +678,7 @@ bool CGIStreamer::beginCgi(const CgiSpec &spec,
 	stdout_paused_    = false;
 
 	// ---- spawn child ----
-	if (!proc_.spawn(spec, script_path, envv)) {
+	if (!proc_.spawn(spec, script_path, envv, tracked)) {
 		failed_ = true;
 		return false;
 	}

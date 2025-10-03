@@ -60,6 +60,7 @@ public:
     void resetDeadline(int ms){ dl.reset(now_cached_ms, ms); };
 
     bool isReadyToClose() { return ready_to_close; }
+    Server *getServer(void) { return server; }
 
     void close();
 

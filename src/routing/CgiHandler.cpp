@@ -328,7 +328,7 @@ bool CgiHandler::handle(HttpRequest &req, HttpResponse &res, RequestContext &ctx
 	// ------------------------------
 
 	// 3) Start CGI asynchronously
-	if (!ctx.cgi_streamer->beginCgi(*spec, scriptPath, envv)) {
+	if (!ctx.cgi_streamer->beginCgi(*spec, scriptPath, envv, ctx.pollFds)) {
 		res = ResponseFactory::makeText(500, "CGI spawn failed\n", "Internal Server Error", true);
 		return true;
 	}

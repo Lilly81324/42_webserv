@@ -470,3 +470,8 @@ void EventLoop::removeOwner(ClientConnection *owner)
 	for (size_t i = 0; i < fds.size(); ++i)
 		removeFD(fds[i]);
 }
+
+std::vector<struct pollfd> EventLoop::getPfds(void)
+{
+	return (_pfds);
+}

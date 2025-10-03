@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 class FileBodyReader : public IBodyReader
 {

@@ -58,7 +58,7 @@ bool FileBodyReader::ensure_open()
         return true;
 
     const int MAX_ATTEMPTS = 256;
-    unsigned int salt = (unsigned int)rand();
+    unsigned int salt = (unsigned int)std::rand();
 
     const char* dirs[2] = { dir.empty() ? 0 : dir.c_str(), "/tmp" };
     for (int d = 0; d < 2; ++d) {

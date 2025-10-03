@@ -414,13 +414,10 @@ static bool serveErrorPage(int code,
 	else
 	{
     	// Fallback, make current path as root (/home/whatever/www)
-		char *c_path = getcwd(NULL, 0);
+		char c_path[PATH_MAX];
+		getcwd(c_path, sizeof(c_path));
 		base = "/";
-		if (c_path)
-		{
-			base = std::string(c_path) + std::string("/www");
-			std::free(c_path);
-		}
+		base = std::string(c_path) + std::string("/www");
 	}
 
     // 3) Canonicalize and safety check

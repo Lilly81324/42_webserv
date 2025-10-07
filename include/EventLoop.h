@@ -6,8 +6,10 @@
 #include <map>
 #include <poll.h>
 #include "Debug.h"
+#include "TimeUtil.h"
 
 class ClientConnection; // forward
+class Server;
 
 class EventLoop
 {
@@ -34,10 +36,18 @@ public:
 	bool modFD(int fd, short events);
 	void removeFD(int fd);
 
-	// *** Keep only this declaration ***
+	// !!!Delete this function in the final build, its only for catch2 tests!!!
 	std::vector<std::pair<int, short> > handleEvents(int timeout_ms);
 
-	void run(int timeout_ms);
+	void run(int timeout_ms, Server *srv);
+	/**
+	 * Run for one more second, not accepting new connections
+	 */
+	void drain();
+	/**
+	 * End all Connections, initiate cleanup
+	 */
+	void terminate(Server *srv);
 	void stop();
 
 	// Owner helpers (optional)
@@ -46,6 +56,7 @@ public:
 	ClientConnection *ownerOf(int fd) const;
 	int indexOfFD(int fd) const;
 	void removeOwner(ClientConnection *owner);
+	std::vector<pollfd> getPfds(void);
 
 
 private:

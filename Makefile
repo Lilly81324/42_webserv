@@ -144,28 +144,72 @@ endif
 
 # ------------------------------ Tests (prod objs) ---------------------------- #
 
+# ------------------------------ Tests (prod objs) ---------------------------- #
+
+# Detect project root and auto-locate config (portable across machines)
+PROJECT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+WEBSERV_BIN_ABS := $(PROJECT_DIR)/$(NAME)
+
+WEBSERV_CONF_CANDIDATES := \
+  $(PROJECT_DIR)/extended.conf \
+  $(PROJECT_DIR)/config/extended.conf \
+  $(PROJECT_DIR)/configs/extended.conf
+WEBSERV_CONF_ABS := $(firstword $(foreach p,$(WEBSERV_CONF_CANDIDATES),$(if $(wildcard $(p)),$(p),)))
+
+# Build the test binary from production objs (without main), unit tests, and Catch2
 test: $(TEST_BIN)
 
-test-fast: $(TEST_BIN)
-	@echo "Running tests..."
-	@./$(TEST_BIN) $(TESTFLAGS)
-
-run-tests:
-	@if [ -f $(TEST_BIN) ]; then \
-		echo "Running tests..."; \
-		./$(TEST_BIN) $(TESTFLAGS); \
-	else \
-		echo "Test binary not found. Run 'make test' first."; \
-		exit 1; \
-	fi
-
+# Make the rule explicit so make always knows how to build it
 $(TEST_BIN): $(OBJS_98_NOMAIN) $(TEST_OBJS_14) $(CATCH2_LIB_PATH)
+	@mkdir -p $(dir $@)
 	@echo "Linking test executable..."
 	$(CXX) $(OBJS_98_NOMAIN) $(TEST_OBJS_14) $(CATCH2_LIB_PATH) -pthread -o $@
 
+# Compile unit tests (C++14) with -DUNIT_TEST
 $(OBJ14_DIR)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_14) -DUNIT_TEST $(TEST_INCS) -c $< -o $@
+
+# Convenience target: build runtime + tests, then run tests with the right env
+test-fast: $(NAME) $(TEST_BIN)
+	@echo "Running tests..."
+	@if [ ! -f "$(WEBSERV_BIN_ABS)" ]; then \
+	  echo "[TEST] Runtime binary not found at: $(WEBSERV_BIN_ABS)"; \
+	  echo "       Build '$(NAME)' at project root (or adjust WEBSERV_BIN_ABS)."; \
+	  exit 1; \
+	fi
+	@if [ -z "$(WEBSERV_CONF_ABS)" ]; then \
+	  echo "[TEST] Could not locate config file. Tried:"; \
+	  printf "         - %s\n" $(WEBSERV_CONF_CANDIDATES); \
+	  echo "       Put extended.conf in one of the paths above."; \
+	  exit 1; \
+	fi
+	@if [ -z "$(TEST_SRCS_CPP)" ]; then \
+	  echo "[TEST] No unit test sources found in '$(TEST_DIR)'. Did you clone tests?"; \
+	  exit 1; \
+	fi
+	@WEBSERV_BIN="$(WEBSERV_BIN_ABS)" \
+	 WEBSERV_CONF="$(WEBSERV_CONF_ABS)" \
+	 ./$(TEST_BIN) $(TESTFLAGS)
+
+# Run tests without rebuilding (auto-fail if binary/config missing)
+run-tests:
+	@if [ ! -f "$(TEST_BIN)" ]; then \
+	  echo "Test binary not found. Run 'make test' or 'make test-fast' first."; \
+	  exit 1; \
+	fi
+	@if [ ! -f "$(WEBSERV_BIN_ABS)" ]; then \
+	  echo "[TEST] Runtime binary not found at: $(WEBSERV_BIN_ABS)"; \
+	  exit 1; \
+	fi
+	@if [ -z "$(WEBSERV_CONF_ABS)" ]; then \
+	  echo "[TEST] Could not locate config file. Tried:"; \
+	  printf "         - %s\n" $(WEBSERV_CONF_CANDIDATES); \
+	  exit 1; \
+	fi
+	@echo "Running tests..."
+	@WEBSERV_BIN="$(WEBSERV_BIN_ABS)" WEBSERV_CONF="$(WEBSERV_CONF_ABS)" ./$(TEST_BIN) $(TESTFLAGS)
+
 
 
 # ------------------------------ Utilities ----------------------------------- #
@@ -174,6 +218,9 @@ clean-tests:
 	@$(RM) $(OBJ14_DIR) $(TEST_BIN) $(LIB_DIR)/$(CATCH2_LIB)
 
 re-tests: clean-tests test
+
+val: $(NAME)
+	valgrind --leak-check=full --track-fds=yes --trace-children=yes ./$(NAME)
 
 help:
 	@echo ""

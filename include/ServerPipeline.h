@@ -1,34 +1,36 @@
-/* --- ServerPipeline.h --- */
+#ifndef SERVER_PIPELINE_H
+#define SERVER_PIPELINE_H
 
-/* ------------------------------------------
-Author: undefined
-Date: 8/10/2025
------------------------------------------- */
-
-// include/ServerPipeline.h
-#ifndef SERVERPIPELINE_H
-#define SERVERPIPELINE_H
-
-#include "HttpRequest.h"
-#include "HttpResponse.h"
-#include "RoutePlan.h"
-#include "RouteResolver.h"
-#include "Router.h"
-#include "ServerConfig.h"
-
-// Forward declare to avoid heavy include / circular deps
+// Forward declarations (avoid heavy includes / cycles)
+class ServerConfig;
+class HttpRequest;
+class HttpResponse;
 class CGIStreamer;
+class ClientConnection;
+class RouteDecision;
 
 class ServerPipeline
 {
 public:
+    // New API: pass the owning ClientConnection so ProxyHandler can start the tunnel
     static bool processRequest(const ServerConfig &cfg,
                                int vs_indx,
                                HttpRequest &req,
                                HttpResponse &res,
                                RouteDecision &decision,
-                               CGIStreamer* cgi_streamer); // <-- 6th param
+                               CGIStreamer *cgi_streamer,
+                               ClientConnection *client);
+
+    // Backward-compatible overload (old call sites)
+    static bool processRequest(const ServerConfig &cfg,
+                               int vs_indx,
+                               HttpRequest &req,
+                               HttpResponse &res,
+                               RouteDecision &decision,
+                               CGIStreamer *cgi_streamer)
+    {
+        return processRequest(cfg, vs_indx, req, res, decision, cgi_streamer, 0);
+    }
 };
 
-#endif // SERVERPIPELINE_H
-
+#endif // SERVER_PIPELINE_H

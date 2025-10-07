@@ -6,5 +6,6 @@
 # define BODY_TIMEOUT_MS 45000
 # define WR_TIMEOUT_MS 15000
 # define IDLE_TIMEOUT_MS 30000
+# define DRAIN_TIMEOUT_MS 4000
 
 #endif // TIMEOUT_H

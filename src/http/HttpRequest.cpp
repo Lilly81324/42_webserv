@@ -6,6 +6,7 @@ date: 8/10/2025
 ------------------------------------------ */
 
 #include "HttpRequest.h"
+#include "HEADER_ENTRIES.h"
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -17,19 +18,15 @@ static unsigned long long BUFFERLIMIT = 128 * 1024 ;
  * Wether given Method is a valid one
  * @returns true if it is
  */
-bool isMethodValid(const std::string &in)
-{
-    if (in == "GET" || in == "HEAD" || in == "PUT" || in == "PATCH" ||
-        in == "DELETE" || in == "POST")
-        return (true);
-    return (false);
+bool isMethodValid(const std::string &m) {
+    return (m=="GET" || m=="HEAD" || m=="POST" || m=="PUT" || m=="PATCH" || m=="DELETE");
 }
-
 
 /**
  * Wether given Path is a valid one
  * @returns true if it is
  */
+
 bool isPathValid(const std::string &in)
 {
 	if (in[0] != '/')
@@ -53,9 +50,7 @@ bool isQueryValid(const std::string &in)
  */
 bool isHttpVerValid(const std::string &in)
 {
-	if (in.size() < 1)
-		return (false);
-	return (true);
+    return (in == "HTTP/1.0" || in == "HTTP/1.1");
 }
 
 /**
@@ -77,6 +72,28 @@ bool isValueValid(const std::string &in)
 {
 	(void)in;
 	return (true);
+}
+
+/**
+ * @brief Stores the key-value pair in Header or CookieJar
+ * @param head Header for storage and limits
+ * @param cok CookieJar for storing cookies inside
+ * @param key Key of the pair to store
+ * @param value Value of the pair to store
+ * @returns 400 HTTP_BAD_REQUEST if Syntax Error in string
+ * @returns 431 HTTP_HEADER_TOO_BIG if setting would exceed Header Limits
+ * @returns 200 HTTP_OK if nominal
+ */
+int applyHeader(Headers &head, CookieJar &cok, const std::string &key, const std::string &value)
+{
+	if (key != HDR_COOKIE)
+	{
+		if (head.set(key, value))
+			return (HTTP_OK);
+		else
+			return (HTTP_HEADER_TOO_BIG);
+	}
+	return (cok.set(head, value));
 }
 
 HttpRequest::HttpRequest()
@@ -122,54 +139,52 @@ string HttpRequest::extension(void) const
 
 int HttpRequest::handleLineStart(const std::string &in)
 {
-	size_t i = 0;
-	size_t pos = 0;
+    size_t i = 0;
+    size_t pos = 0;
 
-	pos = in.find(' ', i);
-	if (pos == (size_t)-1)
-		return (HTTP_BAD_REQUEST);
-	this->method = in.substr(i, pos);
-	if (!isMethodValid(this->method))
-		return (HTTP_BAD_REQUEST);
+    // --- METHOD ---
+    pos = in.find(' ', i);
+    if (pos == (size_t)-1) return HTTP_BAD_REQUEST;
+    this->method = in.substr(i, pos - i);
+    if (!isMethodValid(this->method)) return HTTP_NOT_IMPLEMENTED; // 501
 
-	i = ++pos;
-	pos = in.find('?', i);
-	if (pos != (size_t)-1)
-	{
-		this->path = in.substr(i, pos - i);
-		if (!isPathValid(this->path))
-			return (HTTP_BAD_REQUEST);
-		i = ++pos;
-		pos = in.find(' ', i);
-		if (pos == (size_t)-1)
-			return (HTTP_BAD_REQUEST);
-		this->query = in.substr(i, pos - i);
-		if (!isQueryValid(this->query))
-			return (HTTP_BAD_REQUEST);
-	}
-	else
-	{
-		pos = in.find(' ', i);
-		if (pos == (size_t)-1)
-			return (HTTP_BAD_REQUEST);
-		this->path = in.substr(i, pos - i);
-		if (!isPathValid(this->path))
-			return (HTTP_BAD_REQUEST);
-	}
+    // --- REQUEST-TARGET (raw) ---
+    i = pos + 1;
+    pos = in.find(' ', i);
+    if (pos == (size_t)-1) return HTTP_BAD_REQUEST;
+    const std::string request_target = in.substr(i, pos - i);
+    if (request_target.empty() || request_target[0] != '/') return HTTP_BAD_REQUEST;
 
-	i = ++pos;
-	pos = in.find("\r\n", i);
-	if (pos == (size_t)-1)
-		return (HTTP_BAD_REQUEST);
-	this->http_version = in.substr(i, pos - i);
-	if (!isHttpVerValid(this->http_version))
-		return (HTTP_BAD_REQUEST);
+    // Preserve the raw request-target for CGI fallbacks (path[?query])
+    this->uri = request_target;
 
-	i = pos + 2;
-	if (in[i])
-		return (HTTP_BAD_REQUEST);
-	this->state = HEADER;
-	return (0);
+    // Split into path + optional query
+    std::string::size_type qpos = request_target.find('?');
+    if (qpos == std::string::npos) {
+        this->path  = request_target;
+        this->query.clear();
+    } else {
+        this->path  = request_target.substr(0, qpos);
+        this->query = (qpos + 1 < request_target.size())
+                      ? request_target.substr(qpos + 1)
+                      : std::string();
+    }
+    if (!isPathValid(this->path)) return HTTP_BAD_REQUEST;
+    if (!this->query.empty() && !isQueryValid(this->query)) return HTTP_BAD_REQUEST;
+
+    // --- HTTP-VERSION ---
+    i = pos + 1;
+    pos = in.find("\r\n", i);
+    if (pos == (size_t)-1) return HTTP_BAD_REQUEST;
+    this->http_version = in.substr(i, pos - i);
+    if (!isHttpVerValid(this->http_version)) return HTTP_VERSION_NOT_SUPP; // 505
+
+    // Reject trailing junk after CRLF (defensive)
+    i = pos + 2;
+    if (i < in.size() && in[i]) return HTTP_BAD_REQUEST;
+
+    this->state = HEADER;
+    return 0;
 }
 
 int HttpRequest::handleLineHeader(const std::string &in)
@@ -181,6 +196,7 @@ int HttpRequest::handleLineHeader(const std::string &in)
 	std::string key;
 	std::string value;
 
+	// Check if empty line -> End of Headers
 	if (in == "\r\n")
 	{
 		if (this->method == "POST" || this->method == "PUT" || this->method == "PATCH")
@@ -189,6 +205,8 @@ int HttpRequest::handleLineHeader(const std::string &in)
 			this->state = OVER;
 		return (0);
 	}
+
+	// Find key
 	pos = in.find(':', i);
 	if (pos == (size_t)-1)
 		return (HTTP_BAD_REQUEST);
@@ -198,6 +216,8 @@ int HttpRequest::handleLineHeader(const std::string &in)
 	i = pos + 1;
 	while (in[i] == ' ')
 		i++;
+
+	// Find value
 	pos = in.find("\r\n", i);
 	if (pos == (size_t)-1)
 		return (HTTP_BAD_REQUEST);
@@ -205,11 +225,18 @@ int HttpRequest::handleLineHeader(const std::string &in)
 	if (!isValueValid(value))
 		return (HTTP_BAD_REQUEST);
 	i = pos + 2;
+
+	// Redundant end of string check
 	if (in[i])
 		return (HTTP_BAD_REQUEST);
-	if (!this->headers.set(key, value))
-		return (HTTP_HEADER_TOO_BIG);
-	if (key == "Content-Length")
+
+	// Put Header either into Header or in CookieJar (fails if too big)
+	int status = applyHeader(this->headers, this->cookies, key, value);
+	if (status != HTTP_OK)
+		return (status);
+	
+	// Special behaviour for Content-Length -> store it as field for easier access
+	if (key == HDR_CONTENT_LENGTH && method != "GET")
 	{
 		contLength = Atoi::atoiHttpReq(value.c_str(), atoiError);
 		if (atoiError)
@@ -221,16 +248,27 @@ int HttpRequest::handleLineHeader(const std::string &in)
 
 int HttpRequest::handleLineBody(const std::string &in)
 {
+	// not POST, PUT and PATCH requests may not have a body
 	if (this->method != "POST" && this->method != "PUT" && this->method != "PATCH")
 		return (HTTP_BAD_REQUEST);
-	if (!this->headers.keyExists("Content-Length"))
-		return (HTTP_BAD_REQUEST);
+
+	// Body may only exist, if Content-Length header present
+	if (!this->headers.keyExists(HDR_CONTENT_LENGTH))
+		return HTTP_LENGTH_REQUIRED;
+	
+	// Bdoy may not exceed Content-Length
 	if (in.size() + this->body.size() > this->bodyLength)
 		return (HTTP_BAD_REQUEST);
+	
+	// Store Body in Requests body field
 	for (int i = 0; in[i]; i++)
 		this->body.push_back(in[i]);
+	
+	// Redundant check for new body being too big
 	if (this->body.size() > this->bodyLength)
 		return (HTTP_BAD_REQUEST);
+	
+	// Should Body be matching specified Length, Request is finished
 	if (this->body.size() == this->bodyLength)
 		this->state = OVER;
 	return (0);
@@ -238,13 +276,22 @@ int HttpRequest::handleLineBody(const std::string &in)
 
 int HttpRequest::handleLine(const std::string &in)
 {
+	// Update how much data was removed from internal buffer
 	this->bytesHandledLast += in.size();
+
+	// Cant continue finished Requests
 	if (this->state == OVER || this->state == ERROR)
 		return (HTTP_BAD_REQUEST);
+	
+	// Request is parsing Stating line state
 	if (this->state == START)
 		return (handleLineStart(in));
+
+	// Request is parsing Headers
 	if (this->state == HEADER)
 		return (handleLineHeader(in));
+	
+	// Request is parsing body
 	if (this->state == BODY)
 		return (handleLineBody(in));
 	return (HTTP_BAD_REQUEST);
@@ -258,6 +305,7 @@ int HttpRequest::handleInput(bool &activity)
 
 	if (this->buffer.size() == 0)
 		return (0);
+	// Try to parse class internal buffer
 	if (this->state != BODY)
 	{
 		for (; this->buffer[i]; i++)
@@ -273,18 +321,10 @@ int HttpRequest::handleInput(bool &activity)
 	}
 	else
 	{
-		activity = true;
-		line = this->buffer;
-		buffer.clear();
-		/**
-		 * When we later want to have special body handling, this behaviour should be changed
-		 * to somethign like this:
-		 * activity = false;
-		 * return 0;
-		 * This will mean a normal ending for the parse() and keep the currently given
-		 * input in the Requests buffer
-		 * From there, we can use that buffer and whatever body we get later
-		 */
+		// We reached BODY: do NOT consume any more bytes here.
+    // Leave them in the buffer for the body reader stage.
+		activity = false;
+		return 0;
 	}
 	return (this->handleLine(line));
 }
@@ -307,6 +347,8 @@ bool HttpRequest::parse(const char *data, size_t n)
 	newInput = string(data, n);
 	this->buffer += newInput;
 	this->totalBytesRead += newInput.size();
+
+	// While nothing could be parsed and no error, try to parse internal buffer
 	while (!status && activity)
 	{
 		status = this->handleInput(activity);
@@ -359,9 +401,22 @@ size_t HttpRequest::getBodyLength(void) const
 	return (this->bodyLength);
 }
 
-void HttpRequest::appendBody(const char* data, size_t len)
+bool HttpRequest::appendBody(const char* data, size_t len)
 {
-    if (len) body.insert(body.end(), data, data + len);
+	if (state == ERROR)
+	{
+		return (false);
+	}
+	if (len <= 0)
+	{
+		return (false);
+	}
+	if (body.size() + len > bodyLength)
+	{
+		return (false);
+	}
+	body.insert(body.end(), data, data + len);
+	return (true);
 }
 
 
@@ -441,7 +496,7 @@ void HttpRequest::cleanupBodyFile(void)
 	if (this->body_on_disk)
 	{
 		if (!this->body_tmp_path.empty())
-			::remove(this->body_tmp_path.c_str());
+			std::remove(this->body_tmp_path.c_str());
 		this->body_on_disk = false;
 		this->body_tmp_path.clear();
 		this->body_on_disk_bytes = 0;

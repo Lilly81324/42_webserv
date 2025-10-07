@@ -3,16 +3,12 @@
 
 #include "EventLoop.h"
 #include "ClientConnection.h"
+#include "TimeUtil.h"
 #include <sys/time.h>
+#include <ctime>   // instead of <sys/time.h>
+#include <climits> 
 
 class ClientHandler : public EventLoop::Handler {
-
-	private:
-		unsigned long long nowMs() const
-		{
-			struct timeval tv; gettimeofday(&tv, 0);
-			return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
-		}
 		void updateInterests();
 
 	public:

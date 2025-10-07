@@ -3,20 +3,15 @@
 
 #include "ClientHandler.h"
 #include "Listener.h"
+#include "TimeUtil.h"
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "Server.h"
+#include "IpList.h"
+#include <ctime>
 
 class AcceptorHandler : public EventLoop::Handler {
-
-	private:
-	unsigned long long nowMs() const
-		{
-			struct timeval tv; gettimeofday(&tv, 0);
-			return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
-		}
-		
 	public:
 		AcceptorHandler(EventLoop& loop, Server& srv, Listener* L)
 		: eventLoop(loop), _srv(srv), listener(L) {}
@@ -47,9 +42,19 @@ class AcceptorHandler : public EventLoop::Handler {
 						::setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 					}
 					catch (...) { ::close(cfd); continue; }
+					// Check if IP is forbidden
+					std::string ip = IpList::getIpFromSocket(&ss);
+					if (!_srv.getConfig().ip_list.checkIp(ip))
+					{
+						std::string output = IpList::ipDeniedResponse();
+						::send(cfd, output.c_str(), output.size(), 0);
+						close(cfd);
+						return ;
+					}
 
 					// register client handler
-					ClientConnection* c = new ClientConnection(cfd,&_srv, nowMs());
+					ClientConnection* c = new ClientConnection(cfd,&_srv, TimeUtil::nowMs());
+					c->setIp(ip);
 					ClientHandler *h = new ClientHandler(eventLoop,c);
 					_srv.trackHandler(h);
 					eventLoop.addFD(cfd, POLLIN, h);

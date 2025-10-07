@@ -9,11 +9,11 @@ Date: 8/10/2025
 #define SERVER_H
 
 #ifdef USE_STUBS
-  #include "stubs/EventLoop.h"
-  #include "stubs/ServerConfig.h"
+#include "stubs/EventLoop.h"
+#include "stubs/ServerConfig.h"
 #else
-  #include "EventLoop.h"
-  #include "ServerConfig.h"
+#include "EventLoop.h"
+#include "ServerConfig.h"
 #endif
 
 #include "Listener.h"
@@ -69,7 +69,7 @@ Date: 8/10/2025
 class Server
 {
 	private:
-		EventLoop loop;
+		EventLoop loop_;
 		ServerConfig &srvConfig;
 		std::vector<Listener*> listeners;
 		std::map<int, std::map<std::string, int> > host_map_by_port; // port -> (host -> vs_index)
@@ -177,18 +177,20 @@ class Server
 		 */
 		void buildHostMaps();
 
+	public:
 
 		void shutdownAllHandlers() {
 			std::set<ClientHandler*>::iterator it = server_handlers.begin();
 			while (it != server_handlers.end()) {
-			  ClientHandler* h = *it;
-			  ++it;
-			  delete h;
+			ClientHandler* h = *it;
+			if (h->conn())
+				delete (h->conn()); 
+			++it;
+			delete h;
 			}
 			server_handlers.clear();
-		  }
+		}
 
-	public:
 		/**
 		 * @brief Constructs a Server instance with the given configuration.
 		 *
@@ -315,7 +317,7 @@ class Server
 		{
 			if (!c) return;
 
-			loop.removeOwner(c);
+			loop_.removeOwner(c);
 
 			for (std::set<ClientHandler*>::iterator it = server_handlers.begin();
 				it != server_handlers.end(); ++it)
@@ -329,7 +331,7 @@ class Server
 					break;
 				}
 			}
-			loop.removeFD(c->getFD());
+			loop_.removeFD(c->getFD());
 			delete c;
 		}
 

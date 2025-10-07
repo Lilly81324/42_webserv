@@ -16,6 +16,21 @@ Date: 11/08/2025
 // File was created
 # define HTTP_FILE_CREATED 201
 
+// Body has no content
+# define HTTP_EMPTY_BODY 204
+
+// Resource has been moved permanently (specified in Location header)
+# define HTTP_MOVED_PERM 301
+
+// Resource has been found elsewhere (specified in Location header)
+# define HTTP_FOUND 302
+
+// Resource has been moved temporarily (specified in Location header)
+# define HTTP_TEMP_REDIR 307
+
+// Resource has been moved permanently (specified in Location header)
+# define HTTP_PERM_REDIR 308
+
 // Server cannot or will not process request
 # define HTTP_BAD_REQUEST 400
 
@@ -34,6 +49,8 @@ Date: 11/08/2025
 // Request conflicts with current state of server
 # define HTTP_CONFLICT 409
 
+# define HTTP_LENGTH_REQUIRED 411
+
 // Requests ETag does not match the current ETag (file out of date)
 # define HTTP_PRECON_FAIL 412
 
@@ -45,6 +62,13 @@ Date: 11/08/2025
 
 // Server encountered unexpected condition stopping it from fulfilling request
 # define HTTP_INV_SERVER_ERR 500
+
+# define HTTP_NOT_IMPLEMENTED 501
+
+// Server was shut down mid-Request
+# define HTTP_SERVICE_UNAVAILABLE 503
+
+# define HTTP_VERSION_NOT_SUPP 505
 
 // When server overloads, network fails or other server-side error
 # define HTTP_SERVER_ERROR 599

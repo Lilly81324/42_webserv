@@ -8,25 +8,27 @@
 ssize_t ConnectionIO::nb_read(std::size_t maxBytes)
 {
     if (!socket.valid())
-        return -1;
+	{
+		return -1;
+	}
 
-    in.compactIfNeeded();
+	in.compactIfNeeded();
 
-    std::size_t space = in.writeAvail();
-    if (space == 0)
-        return -1;
-    if (maxBytes < space)
-        space = maxBytes;
+	std::size_t space = in.writeAvail();
+	if (space == 0)
+		return -1;
+	if (maxBytes < space)
+		space = maxBytes;
 
     char *dst = in.writePtr();
     ssize_t n = ::recv(socket.get(), dst, (int)space, MSG_DONTWAIT);
 
-    if (n > 0) {
-        in.wrote((std::size_t)n);
-        return n;
-    }
-    // n == 0 (peer closed) or n < 0 (EAGAIN/other) — just return it; caller decides.
-    return n;
+	if (n > 0) {
+		in.wrote((std::size_t)n);
+		return n;
+	}
+	// n == 0 (peer closed) or n < 0 (EAGAIN/other) — just return it; caller decides.
+	return n;
 }
 
 ssize_t ConnectionIO::nb_write()
@@ -44,10 +46,10 @@ ssize_t ConnectionIO::nb_write()
 
     ssize_t n = ::send(socket.get(), &tx_scratch[0], (int)n_to_send, MSG_DONTWAIT);
 
-    if (n > 0) {
-        out.dropFront((std::size_t)n);
-        return n;
-    }
-    // n == 0 or n < 0 — do NOT branch on errno here; let caller/loop logic decide.
-    return n;
+	if (n > 0) {
+		out.dropFront((std::size_t)n);
+		return n;
+	}
+	// n == 0 or n < 0 — do NOT branch on errno here; let caller/loop logic decide.
+	return n;
 }

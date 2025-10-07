@@ -14,3 +14,8 @@ TimeUtil::TimeUtil() {
 TimeUtil::~TimeUtil() {
     // Destructor
 }
+
+unsigned long long TimeUtil::nowMs()
+{
+	return static_cast<unsigned long long>(std::time(0)) * 1000ULL;
+}

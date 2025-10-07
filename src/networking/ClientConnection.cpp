@@ -120,64 +120,58 @@ honors Content-Length precisely without blocking.
 
 void ClientConnection::drainRingIntoBody()
 {
-	IoRing &ring = io.getInputRing();
+    IoRing &ring = io.getInputRing();
 
-	while (true)
-	{
-		std::size_t avail = ring.readAvail();
-		if (avail == 0)
-			break;
+    while (true)
+    {
+        std::size_t avail = ring.readAvail();
+        if (avail == 0)
+            break;
 
-		const char *p = ring.readPtr();
-		if (!p)
-			break; // nothing contiguous to read right now
+        const char *p = ring.readPtr();
+        if (!p)
+            break; // nothing contiguous to read right now
 
-		std::size_t take = avail;
+        std::size_t take = avail;
 
-		if (body_fd_ >= 0)
-		{
-			std::size_t off = 0;
-			while (off < take)
-			{
-				ssize_t w = ::write(body_fd_, p + off, take - off);
-				if (w > 0)
-				{
-					off += static_cast<std::size_t>(w);
-				}
-				else if (w < 0 && errno == EINTR)
-				{
-					continue;
-				}
-				else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-				{
-					// Unlikely for regular files; stop this tick.
-					break;
-				}
-				else
-				{
-					// Hard error writing body to disk.
-					fail(500, "Failed to buffer request body");
-					return;
-				}
-			}
-			take = off; // actually consumed from ring
-		}
-		else
-		{
-			// RAM path (optional): e.g. body_vec_.insert(body_vec_.end(), p, p + take);
-		}
+        if (body_fd_ >= 0)
+        {
+            std::size_t off = 0;
+            while (off < take)
+            {
+                ssize_t w = ::write(body_fd_, p + off, take - off);
+                if (w > 0)
+                {
+                    off += static_cast<std::size_t>(w);
+                }
+                else
+                {
+                    // No errno checks here: any non-progress is treated as failure
+                    // because this is a regular file and should not block.
+                    fail(500, "Failed to buffer request body");
+                    return;
+                }
+            }
+            take = off; // actually consumed from ring
+        }
+        else
+        {
+            // RAM path (optional): e.g., append into an in-memory vector
+            // body_vec_.insert(body_vec_.end(), p, p + take);
+        }
 
-		body_received_ += take;
-		ring.consumed(take); // NOTE: 'consumed', not 'consume'
+        body_received_ += take;
+        ring.consumed(take); // NOTE: 'consumed', not 'consume'
 
-		// If we know the expected length, stop when done
-		if (body_expected_ != static_cast<std::size_t>(-1) &&
-			body_received_ >= body_expected_)
-		{
-			break;
-		}
-	}
+        // If we know the expected length, stop when done
+        if (body_expected_ != static_cast<std::size_t>(-1) &&
+            body_received_ >= body_expected_)
+        {
+            break;
+        }
+    }
 }
+
 
 /*
 
@@ -234,12 +228,13 @@ keeps connection completion logic straightforward inside the proxy tunneling pum
 
 static int get_so_error(int fd)
 {
-    // Try a zero-length send to probe the socket state
-    int r = ::send(fd, 0, 0, 0);
-    if (r == 0 || (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))) {
-        return 0; // No error, socket is connected
+    int err = 0;
+    socklen_t len = sizeof(err);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
+        // getsockopt itself failed; report that errno
+        return errno;
     }
-    return errno; // Error code from last failure
+    return err;  // 0 == OK (connected), otherwise specific error (e.g., ECONNREFUSED)
 }
 
 
@@ -444,144 +439,123 @@ fails with 504. Importantly, this path must be integrated under the single poll 
 // Call from your per-connection tick (where you already pump IO)
 void ClientConnection::serviceProxyTunnel()
 {
-	if (!proxy_.active)
-		return;
+    if (!proxy_.active)
+        return;
 
-	bool progressed = false;
+    bool progressed = false;
 
-	// 1) finish non-blocking connect
-	if (!proxy_.connect_done)
-	{
-		int err = get_so_error(proxy_.ufd);
-		if (err == 0)
-		{
-			proxy_.connect_done = true;
-		}
-		else if (now_cached_ms >= proxy_.connect_deadline_ms)
-		{
-			fail(504, "Gateway Timeout");
-			::close(proxy_.ufd);
-			proxy_.ufd = -1;
-			proxy_.active = false;
-			return;
-		} // else: still connecting
-	}
+    // 1) finish non-blocking connect (safe: not a read/write; OK to check SO_ERROR)
+    if (!proxy_.connect_done)
+    {
+        int err = get_so_error(proxy_.ufd);
+        if (err == 0) {
+            proxy_.connect_done = true;
+        } else if (now_cached_ms >= proxy_.connect_deadline_ms) {
+            fail(504, "Gateway Timeout");
+            ::close(proxy_.ufd);
+            proxy_.ufd = -1;
+            proxy_.active = false;
+            return;
+        } else {
+            // still connecting; wait for POLLOUT/POLLERR
+            return;
+        }
+    }
 
-	// 2) write pending request head/body to upstream
-	if (proxy_.connect_done && proxy_.ufd >= 0)
-	{
-		// write head
-		while (proxy_.to_up_off < proxy_.to_upstream.size())
-		{
-			const char *p = proxy_.to_upstream.data() + proxy_.to_up_off;
-			size_t nleft = proxy_.to_upstream.size() - proxy_.to_up_off;
-			ssize_t n = ::write(proxy_.ufd, p, (int)nleft);
-			if (n > 0)
-			{
-				proxy_.to_up_off += (size_t)n;
-				progressed = true;
-			}
-			else
-			{
-				if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
-					break;
-				if (n < 0 && errno == EINTR)
-					continue;
-				fail(502, "Bad Gateway");
-				::close(proxy_.ufd);
-				proxy_.ufd = -1;
-				proxy_.active = false;
-				return;
-			}
-		}
-		// write body (if any)
-		while (proxy_.to_up_off >= proxy_.to_upstream.size() &&
-			   proxy_.body_off < proxy_.body_mem.size())
-		{
-			const char *p = &proxy_.body_mem[0] + proxy_.body_off;
-			size_t nleft = proxy_.body_mem.size() - proxy_.body_off;
-			ssize_t n = ::write(proxy_.ufd, p, (int)nleft);
-			if (n > 0)
-			{
-				proxy_.body_off += (size_t)n;
-				progressed = true;
-			}
-			else
-			{
-				if (n < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
-					break;
-				if (n < 0 && errno == EINTR)
-					continue;
-				fail(502, "Bad Gateway");
-				::close(proxy_.ufd);
-				proxy_.ufd = -1;
-				proxy_.active = false;
-				return;
-			}
-		}
-	}
+    // 2) write pending request head/body to upstream (non-blocking; no errno checks)
+    if (proxy_.connect_done && proxy_.ufd >= 0)
+    {
+        // write head
+        while (proxy_.to_up_off < proxy_.to_upstream.size())
+        {
+            const char *p = proxy_.to_upstream.data() + proxy_.to_up_off;
+            size_t nleft  = proxy_.to_upstream.size() - proxy_.to_up_off;
+            ssize_t n     = ::write(proxy_.ufd, p, (int)nleft);
 
-	// 3) read from upstream → queue to client outbound buffer
-	if (proxy_.ufd >= 0)
-	{
-		std::vector<char> &tmp = io.getTmp();
-		if (tmp.size() < 64 * 1024)
-			tmp.resize(64 * 1024);
+            if (n > 0) {
+                proxy_.to_up_off += (size_t)n;
+                progressed = true;
+                continue;
+            }
+            if (n == 0) {
+                // no progress; back off until next POLLOUT
+                break;
+            }
+            // n < 0: do NOT inspect errno; just stop writing this tick
+            break;
+        }
 
-		for (;;)
-		{
-			ssize_t r = ::read(proxy_.ufd, &tmp[0], (int)tmp.size());
-			if (r > 0)
-			{
-				io.getChainBuf().push_copy(&tmp[0], (size_t)r);
-				progressed = true;
-			}
-			else if (r == 0)
-			{
-				::close(proxy_.ufd);
-				proxy_.ufd = -1;
-				proxy_.active = false;
-				should_close = true; // simplest: close after upstream closes
-				break;
-			}
-			else
-			{
-				if (errno == EWOULDBLOCK || errno == EAGAIN)
-					break;
-				if (errno == EINTR)
-					continue;
-				fail(502, "Bad Gateway");
-				::close(proxy_.ufd);
-				proxy_.ufd = -1;
-				proxy_.active = false;
-				return;
-			}
-		}
-	}
+        // write body (if any)
+        while (proxy_.to_up_off >= proxy_.to_upstream.size() &&
+               proxy_.body_off < proxy_.body_mem.size())
+        {
+            const char *p = &proxy_.body_mem[0] + proxy_.body_off;
+            size_t nleft  = proxy_.body_mem.size() - proxy_.body_off;
+            ssize_t n     = ::write(proxy_.ufd, p, (int)nleft);
 
-	// 4) back-pressure on client reads based on queued outbound size
-	const size_t HI = 512 * 1024, LO = 128 * 1024;
-	const size_t out_sz = io.getChainBuf().getByteSize();
-	if (out_sz > HI)
-	{
-		io.getFlow().setReadPaused(true);
-	}
-	else if (out_sz < LO)
-	{
-		io.getFlow().setReadPaused(false);
-	}
+            if (n > 0) {
+                proxy_.body_off += (size_t)n;
+                progressed = true;
+                continue;
+            }
+            if (n == 0) {
+                // no progress; back off until next POLLOUT
+                break;
+            }
+            // n < 0: do NOT inspect errno; just stop writing this tick
+            break;
+        }
+    }
 
-	// 5) idle timeout
-		if (progressed) {
-			proxy_.io_idle_deadline_ms = now_cached_ms + (unsigned long long)proxy_.io_idle_window_ms;
-		} else if (now_cached_ms >= proxy_.io_idle_deadline_ms) {
-			fail(504, "Gateway Timeout");
-			if (proxy_.ufd >= 0) { ::close(proxy_.ufd); proxy_.ufd = -1; }
-			proxy_.active = false;
-			return;
-		}
+    // 3) read from upstream → queue to client outbound buffer (no errno checks)
+    if (proxy_.ufd >= 0)
+    {
+        std::vector<char> &tmp = io.getTmp();
+        if (tmp.size() < 64 * 1024)
+            tmp.resize(64 * 1024);
 
+        for (;;)
+        {
+            ssize_t r = ::read(proxy_.ufd, &tmp[0], (int)tmp.size());
+
+            if (r > 0) {
+                io.getChainBuf().push_copy(&tmp[0], (size_t)r);
+                progressed = true;
+                continue;
+            }
+            if (r == 0) {
+                // Upstream closed
+                ::close(proxy_.ufd);
+                proxy_.ufd = -1;
+                proxy_.active = false;
+                should_close = true; // simplest: close after upstream closes
+                break;
+            }
+            // r < 0: no progress; do NOT check errno. Back off until next POLLIN or HUP/ERR.
+            break;
+        }
+    }
+
+    // 4) back-pressure on client reads based on queued outbound size
+    const size_t HI = 512 * 1024, LO = 128 * 1024;
+    const size_t out_sz = io.getChainBuf().getByteSize();
+    if (out_sz > HI) {
+        io.getFlow().setReadPaused(true);
+    } else if (out_sz < LO) {
+        io.getFlow().setReadPaused(false);
+    }
+
+    // 5) idle timeout window
+    if (progressed) {
+        proxy_.io_idle_deadline_ms = now_cached_ms + (unsigned long long)proxy_.io_idle_window_ms;
+    } else if (now_cached_ms >= proxy_.io_idle_deadline_ms) {
+        fail(504, "Gateway Timeout");
+        if (proxy_.ufd >= 0) { ::close(proxy_.ufd); proxy_.ufd = -1; }
+        proxy_.active = false;
+        return;
+    }
 }
+
 
 /*
 

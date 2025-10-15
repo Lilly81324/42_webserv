@@ -127,13 +127,10 @@ void ClientConnection::drainRingIntoBody()
         std::size_t avail = ring.readAvail();
         if (avail == 0)
             break;
-
         const char *p = ring.readPtr();
         if (!p)
             break; // nothing contiguous to read right now
-
         std::size_t take = avail;
-
         if (body_fd_ >= 0)
         {
             std::size_t off = 0;
@@ -146,13 +143,11 @@ void ClientConnection::drainRingIntoBody()
                 }
                 else
                 {
-                    // No errno checks here: any non-progress is treated as failure
-                    // because this is a regular file and should not block.
                     fail(500, "Failed to buffer request body");
                     return;
                 }
             }
-            take = off; // actually consumed from ring
+            take = off;
         }
         else
         {
@@ -161,7 +156,7 @@ void ClientConnection::drainRingIntoBody()
         }
 
         body_received_ += take;
-        ring.consumed(take); // NOTE: 'consumed', not 'consume'
+        ring.consumed(take);
 
         // If we know the expected length, stop when done
         if (body_expected_ != static_cast<std::size_t>(-1) &&
@@ -286,14 +281,12 @@ bool ClientConnection::beginProxyTunnel(int upstream_fd,
                                         const std::string &target_path)
 {
     if (proxy_.active)
-        return false; // already proxying this connection
-
+        return false;
     proxy_.active = true;
     proxy_.connect_done = false;
     proxy_.ufd = upstream_fd;
     proxy_.uh = host;
     proxy_.up = port;
-
     proxy_.connect_deadline_ms = now_cached_ms + (unsigned long long)connect_timeout_ms;
     proxy_.io_idle_deadline_ms = now_cached_ms + (unsigned long long)io_idle_timeout_ms;
 	proxy_.io_idle_window_ms   = io_idle_timeout_ms; 
@@ -323,11 +316,9 @@ bool ClientConnection::beginProxyTunnel(int upstream_fd,
         }
     }
     head += target;
-
     head += " ";
     head += req.getHttpVer(); // e.g., "HTTP/1.1"
     head += "\r\n";
-
     const Headers &H = req.getHeaders();
 
     // Host
@@ -441,9 +432,7 @@ void ClientConnection::serviceProxyTunnel()
 {
     if (!proxy_.active)
         return;
-
     bool progressed = false;
-
     // 1) finish non-blocking connect (safe: not a read/write; OK to check SO_ERROR)
     if (!proxy_.connect_done)
     {
@@ -457,15 +446,12 @@ void ClientConnection::serviceProxyTunnel()
             proxy_.active = false;
             return;
         } else {
-            // still connecting; wait for POLLOUT/POLLERR
             return;
         }
     }
-
     // 2) write pending request head/body to upstream (non-blocking; no errno checks)
     if (proxy_.connect_done && proxy_.ufd >= 0)
     {
-        // write head
         while (proxy_.to_up_off < proxy_.to_upstream.size())
         {
             const char *p = proxy_.to_upstream.data() + proxy_.to_up_off;
@@ -769,17 +755,14 @@ void ClientConnection::onTick(unsigned long long now_ms)
     if (io.getFlow().shouldPauseRead(outbytes))
     {
         io.getFlow().setReadPaused(true);
-        // std::cerr << "[tick] pause read (queued=" << outbytes << ")\n";
     }
     if (io.getFlow().shouldResumeRead(outbytes))
     {
         io.getFlow().setReadPaused(false);
-        // std::cerr << "[tick] resume read (queued=" << outbytes << ")\n";
     }
 
     // 2) Try to flush whatever is queued (static or CGI)
     (void)io.nb_write();
-
     // After flushing, we may have dropped below LOW_WATER; re-check to resume quickly.
     if (cgi.isActive())
     {
@@ -787,7 +770,6 @@ void ClientConnection::onTick(unsigned long long now_ms)
         if (out_after <= LOW_WATER)
             cgi.resumeStdoutReads();
     }
-
     // 2.5) Reverse-proxy tunnel pump
     if (proxy_.active)
         serviceProxyTunnel();

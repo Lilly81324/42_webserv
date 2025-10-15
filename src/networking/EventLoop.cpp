@@ -75,7 +75,6 @@ It’s part of the loop’s usability layer.
 
 bool EventLoop::addFD(int fd, short events)
 {
-	// disambiguate to the Handler* overload
 	return addFD(fd, events, static_cast<Handler *>(0));
 }
 
@@ -202,17 +201,15 @@ larger system that already has its own control loop.
 
 */
 
-// !!!Delete this function in the final build, its only for catch2 tests!!!
+
 std::vector<std::pair<int, short> > EventLoop::handleEvents(int timeout_ms)
 {
 	std::vector<std::pair<int, short> > ev;
 	if (_pfds.empty())
 		return ev;
-
 	int rc = ::poll(&_pfds[0], _pfds.size(), timeout_ms);
 	if (rc <= 0)
 		return ev;
-
 	ev.reserve(_pfds.size());
 	for (size_t i = 0; i < _pfds.size(); ++i)
 	{
@@ -245,7 +242,6 @@ void EventLoop::run(int timeout_ms, Server *srv)
 	{
 		if (_pfds.empty())
 			break;
-
 		int rc = ::poll(&_pfds[0], _pfds.size(), timeout_ms);
 		if (rc < 0)
 		{
@@ -253,10 +249,8 @@ void EventLoop::run(int timeout_ms, Server *srv)
 				continue;
 			break;
 		}
-
 		if (rc == 0)
 		{
-			// timer tick: let handlers enforce deadlines
 			for (size_t i = 0; i < _pfds.size(); ++i)
 			{
 				int idx = static_cast<int>(i);
@@ -266,33 +260,20 @@ void EventLoop::run(int timeout_ms, Server *srv)
 			}
 			continue;
 		}
-
-		// normal dispatch
 		std::vector<std::pair<int, short> > dispatch;
 		dispatch.reserve(_pfds.size());
 		for (size_t i = 0; i < _pfds.size(); ++i)
 		{
-			// No more new Connections, even if they are in queue
 			if (_stop)
 				break ;
 			short rev = _pfds[i].revents;
 			if (rev && !(rev & POLLNVAL))
 				dispatch.push_back(std::make_pair(_pfds[i].fd, rev));
 		}
-
 		for (size_t i = 0; i < dispatch.size(); ++i)
 		{
 			const int fd = dispatch[i].first;
 			const short rev = dispatch[i].second;
-			// if (DEBUG_CGI) // Defined in Debug.h, changed so now final version doesnt output
-			// fprintf(stderr, "[EV] fd=%d revents=0x%x%s%s%s%s%s\n",
-			// 				fd, rev,
-			// 				(rev & POLLIN) ? " POLLIN" : "",
-			// 				(rev & POLLOUT)? " POLLOUT":"",
-			// 				(rev & POLLERR)? " POLLERR":"",
-			// 				(rev & POLLHUP)? " POLLHUP":"",
-			// 				(rev & POLLNVAL)?" POLLNVAL":"");
-
 			int idx = indexOfFD(fd);
 			if (idx < 0)
 				continue;
@@ -310,7 +291,6 @@ void EventLoop::drain()
 	unsigned long long end = TimeUtil::nowMs() + DRAIN_TIMEOUT_MS;
 	while (TimeUtil::nowMs() < end && _hs.size() > 0)
 	{
-		// timer tick: let handlers enforce deadlines
 		for (size_t i = 0; i < _pfds.size(); ++i)
 		{
 			int idx = static_cast<int>(i);
@@ -318,12 +298,10 @@ void EventLoop::drain()
 			if (h)
 				h->onEvent(_pfds[i].fd, 0);
 		}
-		// normal dispatch
 		std::vector<std::pair<int, short> > dispatch;
 		dispatch.reserve(_pfds.size());
 		for (size_t i = 0; i < _pfds.size(); ++i)
 		{
-			// No more new Connections, even if they are in queue
 			short rev = _pfds[i].revents;
 			if (rev && !(rev & POLLNVAL))
 				dispatch.push_back(std::make_pair(_pfds[i].fd, rev));
@@ -344,11 +322,8 @@ void EventLoop::drain()
 
 void EventLoop::terminate(Server *srv)
 {
-	// clear ClientHandlers here
-	// If no Server was started, we can return early
 	if (!srv)
 		return ;
-	// Try to gently close ClientConnections, and give back 503
 	std::vector<EventLoop::Handler*>::iterator it = _hs.begin();
 	std::vector<EventLoop::Handler*>::iterator end = _hs.end();
 	while (it != end)
@@ -358,7 +333,6 @@ void EventLoop::terminate(Server *srv)
 			ch->conn()->forceTerminate();
 		it++;
 	}
-	// If any Handlers are left, forcefully close theese Connections
 	srv->shutdownAllHandlers();
 }
 

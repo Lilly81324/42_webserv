@@ -8,12 +8,18 @@
 
 static bool starts_with(const std::string& s, const std::string& p)
 
-Tiny utility that returns true if s begins with prefix p using a length check plus compare(0, p.size(), p). 
-Multipart boundaries and end markers are fixed strings like "--<boundary>" and "--<boundary>--", 
-so fast, allocation-free prefix checks are ideal. Keeping this helper local avoids repeated 
-boilerplate and clarifies intent in parsing paths such as detecting boundary lines, consuming marker tokens, 
-or verifying we’re looking at the correct delimiter before mutating buffers. Simplicity, inlined execution, 
-and freedom from locale/encoding concerns make it safe and efficient on hot paths during large multipart uploads.
+This is a tiny, allocation-free prefix check used all over the 
+parser to recognize multipart sentinels such as "--<boundary>" and "--<boundary>--". 
+It first ensures s is at least as long as p, then compares the first p.size() characters. 
+Keeping this utility local avoids noisy inline compare(0, n, ...) 
+calls throughout the state machine and makes intent explicit: “are we looking at a boundary token?” 
+Because multipart framing relies on exact byte sequences (not locale or Unicode), 
+a simple byte-wise compare is both correct and fast. You call it when validating a candidate boundary 
+line (startBoundaryLine), when consuming the boundary text after a CRLF (feed in S_DATA), 
+and when detecting the final end marker ("--" suffix). Using a single helper also reduces 
+copy-paste bugs—if you ever change how you treat comparisons, you change it once. In short, 
+this is a microscopic but hot-path optimization and readability win that underpins correct 
+delimiter recognition without any memory churn.
 
 
 */
@@ -28,14 +34,21 @@ static bool starts_with(const std::string &s, const std::string &p)
 
 MultipartReader::MultipartReader()
 
-Constructor initializes the reader’s state machine to S_PREAMBLE. 
-That means the parser expects optional garbage or CRLF before the very first boundary 
-line. Starting here ensures robustness with diverse clients (some prepend newlines before boundaries). 
-The constructor doesn’t allocate or parse; it simply sets deterministic initial state so subsequent 
-feed() calls can operate safely. Keeping construction minimal allows reusing objects across requests or 
-instantiating them cheaply per upload without overhead. It complements setBoundary/initFromContentType, 
-which will finish configuration before parsing. Predictable baseline state is essential 
-for correctness in streaming, non-blocking scenarios.
+The constructor initializes the streaming parser to a predictable baseline: 
+state = S_PREAMBLE. In real uploads, some clients may insert leading CRLFs or 
+whitespace before the first boundary line. Starting in a preamble state lets the 
+reader safely skip such noise until it sees a valid "--<boundary>" line, then 
+switch to header parsing. The constructor performs no allocations and touches 
+no external resources; it simply sets the finite-state machine (FSM) to a safe 
+initial state so you can immediately call setBoundary/initFromContentType and then 
+feed() repeatedly with incoming bytes from the socket. This cheap construction 
+matters in a single-threaded reactor: you may create a MultipartReader per 
+request as soon as headers are parsed, even under load, without stalling. 
+It also encourages reuse—if you ever pool objects, resetting to S_PREAMBLE guarantees 
+the next request won’t inherit any previous buffer content or error state. 
+The design keeps configuration (boundary setup) separate from streaming 
+(feeding bytes), which mirrors how the HTTP layer works: parse headers first, 
+then stream the bod
 
 */
 
@@ -47,14 +60,19 @@ MultipartReader::MultipartReader() : st_(S_PREAMBLE) {}
 
 bool MultipartReader::ieq(char a, char b)
 
-ASCII case-insensitive character comparison used for header token logic. 
-It manually folds A–Z to lowercase via arithmetic and compares bytes. 
-Multipart header names (Content-Disposition, etc.) are ASCII and case-insensitive by spec, 
-so a locale-free comparison avoids surprises and overhead. 
-Encapsulating the behavior avoids repeatedly calling std::tolower (locale-dependent) 
-and keeps the branch-free fast path. Although small, it underpins 
-reliable recognition of keys across clients that vary capitalization, 
-ensuring downstream parsing (e.g., disposition analysis) sees normalized tokens and behaves consistently.
+ieq is a small helper for ASCII case-insensitive character 
+comparison. It folds each input to lowercase if it’s A–Z by simple arithmetic, 
+then compares the bytes. Multipart header field-names are defined as ASCII 
+and case-insensitive; relying on locale-aware functions like std::tolower 
+can be slower and introduce surprises in non-C locales. With ieq, the code 
+path is branch-light and predictable. This routine supports places where you 
+normalize or check header keys—e.g., while parsing Content-Disposition and other 
+part headers—without allocating temporary lowercase strings or involving locales. 
+While you also normalize full keys to lowercase in S_HEADERS, having a per-char 
+comparator available keeps the code flexible if you ever need case-insensitive 
+scans within tokens. In short, ieq is a minimalist, dependency-free primitive 
+that makes header handling robust and fast for exactly the ASCII semantics 
+multipart requires.
 
 */
 
@@ -71,13 +89,18 @@ bool MultipartReader::ieq(char a, char b)
 
 std::string MultipartReader::trim(const std::string& s)
 
-Trims ASCII spaces and tabs from both ends. Used widely when parsing header 
-lines and parameter lists (e.g., key=value pairs in Content-Disposition). 
-Trimming prevents subtle bugs caused by optional whitespace permitted in RFC formatting and produces 
-clean tokens for dictionary insertion or comparison. It operates by scanning indices and returning a substring, 
-avoiding per-character reallocations. Normalization here simplifies subsequent 
-steps like lower-casing keys and deciding whether a header is present, 
-keeping the main state machine readable and the hot path fast.
+trim removes ASCII spaces and tabs from both ends of a string. 
+It’s used during header parsing to normalize tokens like " Content-Disposition : value " 
+into clean "Content-Disposition" and "value", and within parameter lists such as name="field"; 
+it prevents subtle mismatches and makes map keys/values canonical before storage. 
+Implementation-wise it scans indices from left and right, then returns a substring—no 
+per-character erasing or realloc storms. Normalizing early simplifies the rest of the parser: 
+you can split on ':', trim, lowercase the key (where needed), and proceed deterministically. 
+In multipart, whitespace is often optional around separators (;, =), 
+so trim avoids edge-case bugs (e.g., keys with leading tabs) 
+that would otherwise break lookups like hdrs["content-disposition"]. 
+Keeping it a dedicated helper keeps the main FSM readable and focused on 
+state transitions rather than string housekeeping.
 
 
 */
@@ -94,14 +117,24 @@ std::string MultipartReader::trim(const std::string &s)
 
 /* 
 
-bool MultipartReader::parseContentDisposition(const std::string& v, std::string& name, std::string& filename)
-
-Parses a single Content-Disposition value, expecting "form-data" followed by semicolon-separated parameters. 
-It trims and reads name="..." and optional filename="...", accepting either quoted or unquoted tokens, 
-and advances carefully across semicolons. On success, fills output parameters; otherwise returns false. 
-Correctly extracting name and filename is essential for routing each part to the right sink: fields vs files, 
-and safe file naming downstream. The function’s conservative rules reject malformed headers early (bad content-disposition) 
-to avoid corrupt state or misattributed data writes. Centralizing this logic keeps the main feed() loop straightforward.
+bool MultipartReader::parseContentDisposition(const std::string& v, 
+std::string& name, std::string& filename)
+Parses a single Content-Disposition header value, 
+extracting the form field name and optional filename. 
+First it insists the type is "form-data" (after trimming), 
+because other dispositions (e.g., attachment) are not part form 
+fields in multipart/form-data. Then it walks the parameter list, 
+splitting on ;, trimming each token, and parsing key=value pairs. 
+Values may be quoted—"file.ext"—or unquoted; the code handles both. 
+It specifically fills name and filename outputs if present. 
+This function is crucial because it tells the sink what to do with the 
+part: a missing or malformed name means you cannot route the field; a present 
+filename indicates a file upload and influences storage decisions (e.g., 
+write stream to disk vs. memory). Centralizing this parser avoids duplicating 
+fragile string logic across the FSM and lets you enforce conservative correctness—if 
+the header is malformed, you can fail early with a clear error 
+(setError("bad content-disposition")). Overall, it’s the gatekeeper that 
+translates raw header text into structured semantics for each part.
 
 
 */
@@ -171,12 +204,19 @@ bool MultipartReader::parseContentDisposition(const std::string &v,
 
 bool MultipartReader::initFromContentType(const std::string& ct)
 
-Performs a minimal parse of the HTTP Content-Type header, requiring prefix "multipart/form-data" and a boundary= parameter. 
-It handles optional quoted boundary values (boundary="abc123"). If either the type or boundary is missing/malformed, 
-it returns false so callers can reject the request. Otherwise, it delegates to setBoundary. 
-By isolating header parsing here, the class cleanly separates “configure me” from “stream data,” 
-making it easy for higher-level handlers to validate inputs before feeding bytes. 
-Strictness helps prevent desynchronization bugs where the parser would misinterpret bodies not matching multipart framing.
+This method validates the HTTP Content-Type header for an 
+incoming request body and extracts the boundary parameter. 
+It requires a prefix of "multipart/form-data" and then searches for 
+boundary=. If a quoted boundary is provided (e.g., boundary="abc123"), 
+it removes the quotes. If either the type or a non-empty boundary is missing, 
+it returns false, allowing upper layers to reject the request with 415 or 400. 
+On success it calls setBoundary to store the raw delimiter and precompute tokens. 
+Keeping this logic separate from the streaming FSM lets your higher-level header 
+processor decide which body reader to construct (multipart vs. fixed length vs. chunked) 
+and only instantiate MultipartReader when the headers make sense. 
+It also prevents desynchronization: without a boundary, the parser could accidentally 
+treat content bytes as header lines and corrupt its state. In other words, 
+initFromContentType is the first line of defense and configuration for safe multipart streaming.
 
 
 */
@@ -206,13 +246,17 @@ bool MultipartReader::initFromContentType(const std::string &ct)
 
 bool MultipartReader::setBoundary(const std::string& boundary)
 
-Validates and stores the raw boundary string, rejecting CR/LF to block injection. 
-Precomputes dashBoundary_ = "--" + boundary and endBoundary_ = dashBoundary_ + "--", 
-resets state to S_PREAMBLE, clears buffer and error string. 
-Precomputation speeds scanning and clean state ensures reuse is safe across multiple requests if desired. 
-Denying control characters guards against ambiguous parsing and potential security issues. 
-Having a single initialization point improves testability and keeps the main loop focused on streaming rather than setup. 
-Returns true on success so callers can proceed to feed().
+Stores and validates the raw boundary string. It rejects empty boundaries and boundaries 
+containing CR or LF to avoid ambiguous parsing/injection attacks. Then it precomputes 
+two key strings: dashBoundary_ = "--" + boundary and endBoundary_ = dashBoundary_ + "--". 
+These are the exact tokens that will appear on lines separating parts and terminating the body, 
+respectively. It also resets the parser to S_PREAMBLE, clears the accumulation buffer buf_, 
+and empties err_, preparing the object for a fresh stream. 
+Precomputation matters: during streaming you will compare against these tokens frequently; 
+having them ready as full strings avoids re-allocating them in the hot path. 
+Consolidating boundary initialization in one function keeps the rest of the code 
+free from ad-hoc validation and guarantees the FSM starts from a clean 
+slate each time you (re)configure the reader. Returns true to indicate it’s safe to start feeding bytes.
 
 */
 
@@ -238,11 +282,19 @@ bool MultipartReader::setBoundary(const std::string &boundary)
 
 bool MultipartReader::findLine(std::string& out)
 
-Scans the internal buffer for CRLF (\r\n). When found, returns the line content without CRLF and erases consumed bytes from the buffer; 
-otherwise returns false (need more data). This incremental line reader powers multiple stages: skipping preamble, 
-collecting part headers, and consuming boundary lines. It’s designed for non-blocking feeds where lines may arrive 
-split across network packets; the buffer simply accumulates until a terminator appears. 
-Keeping this logic localized reduces complexity in the state machine and avoids repeated index math scattered throughout the code.
+Incrementally scans the internal buffer buf_ for a CRLF terminator ("\r\n"). 
+If found, it copies the line without CRLF into out and erases the consumed prefix 
+(including the CRLF) from buf_, then returns true. If not found, 
+it returns false so the caller can append more bytes via feed. 
+This is the core building block for line-oriented stages of the FSM: 
+skipping the preamble until a boundary line, collecting part headers up to an empty 
+line, and consuming the boundary line itself in the S_DATA transition. 
+Because network reads can split lines across packets, 
+findLine must tolerate partial lines; by keeping data in buf_ until a full 
+CRLF arrives, it remains safe and non-blocking. Centralizing the 
+CRLF extraction also reduces subtle off-by-one mistakes and keeps the 
+main state transitions readable. In short, it’s a minimal, 
+robust streaming line reader tuned for HTTP multipart needs.
 
 */
 
@@ -263,15 +315,19 @@ bool MultipartReader::findLine(std::string &out)
 
 /* 
 
-
 bool MultipartReader::startBoundaryLine(const std::string& line, bool& isFinal) const
 
-Validates a boundary line. Accepts exactly "--<boundary>" (regular separator) and "--<boundary>--" 
-(final terminator). It first checks the prefix using dashBoundary_, then distinguishes finality 
-via the trailing "--". Any deviation (extra characters, wrong prefix) returns false. 
-Precision here matters: the parser relies on this to switch between part header parsing, part data streaming, 
-or declaring the upload complete. Misclassification would corrupt part framing, either 
-merging files or truncating data. The function keeps the rule simple and explicit, reducing parsing ambiguity.
+Validates that a candidate line is either a regular boundary ("--<boundary>") or the 
+final boundary ("--<boundary>--"). It first checks the fixed prefix using dashBoundary_; 
+if it matches exactly, it marks isFinal=false. If the line equals endBoundary_, 
+it marks isFinal=true. Any other length/extra characters produce false. This strictness is important: 
+the parser must know precisely whether to transition into S_HEADERS for the next part or finish in S_DONE. 
+Accepting near-matches could merge adjacent parts or truncate a file field. 
+The function doesn’t strip CRLF—that’s already handled by findLine. 
+By isolating this logic, your S_PREAMBLE code can cleanly “skip junk lines until a valid 
+boundary appears,” and your S_DATA code can confidently consume the marker 
+and then either stop (final) or parse the next part’s headers. 
+It’s a small gate that preserves the integrity of the entire stream
 
 */
 
@@ -297,15 +353,25 @@ bool MultipartReader::startBoundaryLine(const std::string &line, bool &isFinal) 
 /* 
 
 std::size_t MultipartReader::feed(const char* data, std::size_t n, IMultipartSink* sink)
-
-Streaming engine. Appends bytes to buf_ and advances a state machine:
-
-S_PREAMBLE: read lines until a valid boundary is found; if final boundary appears immediately, mark S_DONE.
-
-S_HEADERS: read header lines until empty line; lower-case keys; require content-disposition; parse it; call sink->onPartBegin(cur_).
-
-S_DATA: search for the earliest \r\n--<boundary> or \r\n--<boundary>--; stream bytes before marker to onPartData; consume marker, CRLF (unless final), call onPartEnd; then either S_HEADERS (next part) or S_DONE.
-It emits “safe” chunks (leaving overlap bytes) when no marker yet. Errors set err_ and S_ERROR. Returns bytes fed.
+This is the streaming engine. It appends incoming bytes to buf_, 
+reports fed = n, and then drives the FSM until it needs more data, reaches S_DONE, or hits S_ERROR.
+S_PREAMBLE: Repeatedly call findLine. Non-matching lines are ignored; a valid boundary 
+line switches to S_HEADERS. If the final boundary appears immediately, the stream ends (S_DONE).
+S_HEADERS: Collect header lines until an empty line. Keys are lower-cased; 
+a content-disposition header is required. It is parsed via parseContentDisposition to 
+extract name/filename. Then sink->onPartBegin(cur_) is invoked; if the sink refuses, 
+parsing stops with an error. Transition to S_DATA.
+S_DATA: Search for the earliest occurrence of "\r\n--<boundary>" or "\r\n--<boundary>--". 
+If none is present yet, emit a safe prefix (buf_.size() - markerLen) to sink->onPartData 
+and keep the overlap to catch boundary splits. If a marker is found, emit data up to the marker, 
+consume CRLF and the boundary token, detect final via trailing "--", 
+optionally consume trailing CRLF, call sink->onPartEnd(), 
+and then either S_DONE (final) or S_HEADERS for the next part.
+Errors call setError(...) and keep fed as the number of bytes 
+accepted into the buffer, allowing the caller to advance network buffers consistently. 
+The function never blocks or inspects errno; it’s designed for non-blocking use right after POLLIN. 
+The IMultipartSink abstraction lets you route data to memory or 
+files without entangling I/O policy with parsing.
 
 */
 

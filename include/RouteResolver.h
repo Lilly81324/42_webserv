@@ -117,6 +117,12 @@ public:
 	 */
 	static const Location *matchLocation(const VirtualServer &vs, const std::string &path, std::string &matched_prefix);
 
+	 // NEW: resolve a pool name (e.g. "backend") into concrete host/port.
+    // Returns true if a target was chosen; false if pool missing/empty/unhealthy.
+    static bool resolveProxyTarget(const VirtualServer &vs,
+                                   const std::string &poolName,
+                                   std::string &outHost,
+                                   int &outPort);
 private:
 	RouteResolver();
 	RouteResolver(const RouteResolver &);

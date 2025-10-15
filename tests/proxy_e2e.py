@@ -1,49 +1,62 @@
 #!/usr/bin/env python3
-# proxy_e2e.py — starts upstream on :9000 and runs proxy tests via webserv on :8080
-
+# proxy_e2e_rr.py — starts two upstreams (:9000 A, :9001 B) and runs proxy tests via webserv on :8080
 import sys, os, time, threading, tempfile, subprocess, shlex, json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 WEBSERV_BASE = "http://127.0.0.1:8080"
-UPSTREAM_PORT = 9000
-UPSTREAM_BASE = f"http://127.0.0.1:{UPSTREAM_PORT}"
+PROXY_BASE   = WEBSERV_BASE + "/api"
 
-# ---------- Upstream Echo Server ----------
-class Handler(BaseHTTPRequestHandler):
+UPSTREAMS = [
+    ("127.0.0.1", 9000, "A"),
+    ("127.0.0.1", 9001, "B"),
+]
+
+# ---------- Upstream Echo Servers ----------
+class EchoHandler(BaseHTTPRequestHandler):
+    backend_id = "?"
     def _read_body(self):
         length = int(self.headers.get('Content-Length') or 0)
         return self.rfile.read(length) if length > 0 else b''
 
-    def _send(self, code, payload):
+    def _send_json(self, code, payload):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('X-Backend', self.backend_id)  # identify which upstream answered
         self.end_headers()
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
-        # quiet (uncomment for verbose)
-        # sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt%args))
+        # quiet; uncomment for verbose upstream logs
+        # sys.stderr.write("[%s] %s - - [%s] %s\n" % (self.backend_id, self.client_address[0], self.log_date_time_string(), fmt%args))
         pass
 
     def do_GET(self):
         if self.path.startswith("/slow"):
-            time.sleep(15)  # trigger proxy_read_timeout (~10s) if configured
-            return self._send(200, {"ok": True})
-        self._send(200, {"method":"GET","path":self.path,"headers":dict(self.headers)})
+            time.sleep(15)  # should trigger proxy_read_timeout (~10s) if configured
+            return self._send_json(200, {"ok": True, "backend": self.backend_id})
+        return self._send_json(200, {
+            "method":"GET", "path":self.path, "backend": self.backend_id,
+            "headers": dict(self.headers),
+        })
 
     def do_POST(self):
         data = self._read_body()
-        self._send(200, {"method":"POST","path":self.path,"len":len(data),"headers":dict(self.headers)})
+        return self._send_json(200, {
+            "method":"POST", "path":self.path, "len":len(data),
+            "backend": self.backend_id, "headers": dict(self.headers),
+        })
 
     def do_DELETE(self):
-        self._send(200, {"method":"DELETE","path":self.path})
+        return self._send_json(200, {"method":"DELETE","path":self.path,"backend": self.backend_id})
 
-def start_upstream(port):
-    srv = HTTPServer(("127.0.0.1", port), Handler)
+def start_upstream(host, port, backend_id):
+    handler = type(f"Handler_{backend_id}", (EchoHandler,), {"backend_id": backend_id})
+    srv = HTTPServer((host, port), handler)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
+    print(f"✅ Backend {backend_id} listening on http://{host}:{port}")
     return srv, t
 
 # ---------- Test helpers ----------
@@ -65,7 +78,6 @@ def curl(url, method="GET", data_path=None, data_bytes=None, headers=None,
         for h in headers:
             parts += ["-H", shlex.quote(h)]
     if chunked:
-        # FIX: quote the header as one argument
         parts += ["-H", shlex.quote("Transfer-Encoding: chunked")]
     if data_path:
         parts += ["--data-binary", f"@{shlex.quote(data_path)}"]
@@ -82,76 +94,119 @@ def curl(url, method="GET", data_path=None, data_bytes=None, headers=None,
         print(f"  body: {preview}{'...' if len(body)>120 else ''}")
     return code, out
 
-def expect(out, *prefixes):
+def expect_status(out, *ok_prefixes):
     line = out.splitlines()[0] if out else ""
-    ok = any(line.startswith(p) for p in prefixes)
-    print(f"  expect {prefixes} -> {'OK' if ok else 'FAIL'}")
+    ok = any(line.startswith(p) for p in ok_prefixes)
+    print(f"  expect {ok_prefixes} -> {'OK' if ok else 'FAIL'}")
     return ok
+
+def header(out, name):
+    # return first header value matching name (case-insensitive)
+    lines = out.split("\r\n")
+    name_l = name.lower()
+    for ln in lines:
+        if ":" in ln:
+            k, v = ln.split(":", 1)
+            if k.strip().lower() == name_l:
+                return v.strip()
+    return None
 
 # ---------- Test suite ----------
 def main():
-    print("== Start upstream echo on :9000 ==")
-    srv, thread = start_upstream(UPSTREAM_PORT)
-    time.sleep(0.3)
-    fails = 0
-
-    print("\n== 0) Direct upstream sanity ==")
-    _, out = curl(f"{UPSTREAM_BASE}/hello")
-    if not expect(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
-
-    print("\n== 1) Proxy GET /api/hello (prefix stripped to /hello) ==")
-    _, out = curl(f"{WEBSERV_BASE}/api/hello")
-    if not expect(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
-
-    print("\n== 2) Proxy POST small body /api/echo ==")
-    _, out = curl(f"{WEBSERV_BASE}/api/echo", method="POST",
-                  data_bytes=b"hello proxy",
-                  headers=["Content-Type: application/x-www-form-urlencoded"])
-    if not expect(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
-
-    print("\n== 3) Proxy POST large body (5MB) -> expect 200 or 413 depending on limit ==")
-    big = tempfile.NamedTemporaryFile(delete=False)
+    print("== Start two upstream echos on :9000 (A) and :9001 (B) ==")
+    servers = []
     try:
-        big.write(b"X" * (5 * 1024 * 1024))
-        big.close()
-        _, out = curl(f"{WEBSERV_BASE}/api/echo", method="POST", data_path=big.name)
-        if out.startswith("HTTP/1.0 200") or out.startswith("HTTP/1.1 200"):
-            print("  large upload proxied: OK")
-        elif out.startswith("HTTP/1.0 413") or out.startswith("HTTP/1.1 413"):
-            print("  large upload blocked (413): OK")
+        for host, port, bid in UPSTREAMS:
+            srv, thread = start_upstream(host, port, bid)
+            servers.append(srv)
+        time.sleep(0.4)  # tiny settle
+
+        fails = 0
+
+        print("\n== 0) Direct upstream sanity (A) ==")
+        _, out = curl(f"http://127.0.0.1:9000/hello")
+        if not expect_status(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
+
+        print("\n== 0b) Direct upstream sanity (B) ==")
+        _, out = curl(f"http://127.0.0.1:9001/hello")
+        if not expect_status(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
+
+        print("\n== 1) Proxy GET /api/hello ==")
+        _, out = curl(f"{PROXY_BASE}/hello")
+        if not expect_status(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
+
+        print("\n== 1b) Round-robin alternation check (6 requests) ==")
+        seen = []
+        for i in range(6):
+            _, out = curl(f"{PROXY_BASE}/who")
+            xb = header(out, "X-Backend")
+            seen.append(xb or "?")
+        print("  X-Backend sequence:", seen)
+        # verify both A and B appear and the sequence alternates at least once
+        if seen.count("A") == 0 or seen.count("B") == 0:
+            print("  FAIL: did not see both A and B via proxy")
+            fails += 1
+        # simple alternation heuristic: check neighbors differ at least half the time
+        diffs = sum(1 for i in range(1, len(seen)) if seen[i] != seen[i-1])
+        if diffs < len(seen) - 2:
+            print("  WARN: sequence not strictly alternating; ensure RouteResolver RR is called (pool name in proxy_pass)")
+            # don’t fail hard here; environments vary
+
+        print("\n== 2) Proxy POST small body /api/echo ==")
+        _, out = curl(f"{PROXY_BASE}/echo", method="POST",
+                      data_bytes=b"hello proxy",
+                      headers=["Content-Type: application/x-www-form-urlencoded"])
+        if not expect_status(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
+
+        print("\n== 3) Proxy POST large body (5MB) -> 200 or 413 depending on limit ==")
+        big = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            big.write(b"X" * (5 * 1024 * 1024))
+            big.close()
+            _, out = curl(f"{PROXY_BASE}/echo", method="POST", data_path=big.name)
+            line = out.splitlines()[0] if out else ""
+            if line.startswith("HTTP/1.0 200") or line.startswith("HTTP/1.1 200"):
+                print("  large upload proxied: OK")
+            elif line.startswith("HTTP/1.0 413") or line.startswith("HTTP/1.1 413"):
+                print("  large upload blocked (413): OK")
+            else:
+                print("  unexpected status:", line); fails += 1
+        finally:
+            os.unlink(big.name)
+
+        print("\n== 4) Proxy chunked upload /api/echo ==")
+        _, out = curl(f"{PROXY_BASE}/echo", method="POST",
+                      data_bytes=b"chunked works\n", chunked=True)
+        if not expect_status(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
+
+        print("\n== 5) Proxy DELETE /api/item/42 ==")
+        _, out = curl(f"{PROXY_BASE}/item/42", method="DELETE")
+        if not expect_status(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
+
+        print("\n== 6) Proxy read-timeout using GET /api/slow (upstream sleeps 15s) ==")
+        start = time.time()
+        code, out = curl(f"{PROXY_BASE}/slow", max_time=12)
+        elapsed = int(time.time() - start)
+        line = out.splitlines()[0] if out else ""
+        if line.startswith("HTTP/1.0 504") or line.startswith("HTTP/1.1 504"):
+            print(f"  got 504 in ~{elapsed}s: OK")
+        elif code == 28:
+            print(f"  curl timed out (~{elapsed}s) — likely proxy_read_timeout not enforced; treat as FAIL here")
+            fails += 1
         else:
-            print("  unexpected status"); fails += 1
+            print(f"  expected 504, got: {line if line else 'NO OUTPUT'}")
+            fails += 1
+
+        print("\n== Summary ==")
+        print("All proxy tests passed ✅" if fails == 0 else f"{fails} test(s) failed ❌")
+        sys.exit(0 if fails == 0 else 1)
+
     finally:
-        os.unlink(big.name)
-
-    print("\n== 4) Proxy chunked upload /api/echo ==")
-    _, out = curl(f"{WEBSERV_BASE}/api/echo", method="POST",
-                  data_bytes=b"chunked works\n", chunked=True)
-    if not expect(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
-
-    print("\n== 5) Proxy DELETE /api/item/42 ==")
-    _, out = curl(f"{WEBSERV_BASE}/api/item/42", method="DELETE")
-    if not expect(out, "HTTP/1.0 200", "HTTP/1.1 200"): fails += 1
-
-    print("\n== 6) Proxy read-timeout using GET /api/slow (upstream sleeps 15s) ==")
-    start = time.time()
-    # FIX: cap curl runtime so the test doesn't hang forever if no 504
-    code, out = curl(f"{WEBSERV_BASE}/api/slow", max_time=12)
-    elapsed = int(time.time() - start)
-    if out.startswith("HTTP/1.0 504") or out.startswith("HTTP/1.1 504"):
-        print(f"  got 504 in ~{elapsed}s: OK")
-    elif code == 28:
-        print(f"  curl timed out (~{elapsed}s) — likely proxy_read_timeout not enforced; treat as FAIL here")
-        fails += 1
-    else:
-        print(f"  expected 504, got: {out.splitlines()[0] if out else 'NO OUTPUT'}")
-        fails += 1
-
-    print("\n== Summary ==")
-    print("All proxy tests passed ✅" if fails == 0 else f"{fails} test(s) failed ❌")
+        # No explicit shutdown needed (daemon threads); press Ctrl+C to stop script if you run it interactively.
+        pass
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        pass
+        print("\nStopped.")

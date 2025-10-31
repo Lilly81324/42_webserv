@@ -17,14 +17,13 @@ static void on_sig(int)
 
 static void ignore_sigpipe()
 {
-    // C++98-safe, only uses signal()
     signal(SIGPIPE, SIG_IGN);
 }
 
 /** For now I get port from ARGV */
 int main(int argc, char** argv)
 {
-	ignore_sigpipe();  // set global handler immediately
+	ignore_sigpipe();
 	try
 	{
 		const std::string &path = (argc == 2) ? argv[1] : "config/extended.conf";
@@ -35,8 +34,6 @@ int main(int argc, char** argv)
 		g_srv = &server;
 		std::signal(SIGINT, on_sig);
 		std::signal(SIGTERM, on_sig);
-		// std::signal(SIGALRM, on_sig);
-		// alarm(4);
 		server.start();
 		server.run(50);
 	}

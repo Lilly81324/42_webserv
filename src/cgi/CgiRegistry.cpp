@@ -8,40 +8,52 @@ date: 8/10/2025
 /* --- CgiRegistry.cpp --- */
 #include "CgiRegistry.h"
 
+/*
 
+CgiRegistry::CgiRegistry() / ~CgiRegistry()
 
-
-/* 
-
-CgiRegistry::CgiRegistry()
-
-Initializes the registry with local_ and global_ pointers set to NULL (0). 
-The registry is intentionally non-owning: it references CGI maps that live in parsed configuration objects 
-(Location, VirtualServer). Starting null makes misuse obvious (lookups will simply return NULL) 
-and avoids accidental dereference before configuration is attached. 
-This lightweight construction keeps the registry cheap to create per request or per router instance, 
-while preserving a single, consistent lookup mechanism for extension→interpreter resolution. 
-It establishes the invariant that the registry may be empty until setSources is called, 
-simplifying error handling and making behavior explicit during early server startup.
+The constructor initializes the registry in a non-owning,
+detached state: both internal pointers (local_, global_)
+are set to NULL so the object starts with “no sources.”
+That makes accidental use obvious—lookups simply return NULL until
+configuration is attached—while keeping the type extremely cheap to construct
+(no copies of maps, no allocations). This is helpful because you can create a
+CgiRegistry per request or per routing decision with negligible cost.
+The destructor is trivial because ownership stays with the parsed configuration
+structures (Location, VirtualServer): the registry never allocates or frees those maps;
+it only points at them. This design choice enforces a clean separation of concerns:
+parsing fills authoritative CGI maps; routing selects which two maps should be visible
+for a given request; CgiRegistry provides a tiny, cache-friendly façade for layered
+lookup without duplicating data or risking lifetime bugs. In short,
+the ctor/dtor make the registry a safe, lightweight handle to configuration,
+perfect for high-frequency use on the hot path.
 
 */
 
 CgiRegistry::CgiRegistry() : local_(0), global_(0) {}
 CgiRegistry::~CgiRegistry() {}
 
+/*
 
-/* 
+void CgiRegistry::setSources(const std::map<std::string,CgiSpec>*
+local, const std::map<std::string,CgiSpec>* global)
 
-void CgiRegistry::setSources(const std::map<std::string,CgiSpec>* local, const std::map<std::string,CgiSpec>* global)
-
-Binds the registry to two optional maps: a per-location override (local) 
-and a server-wide default registry (global). Storing raw pointers (not copies) 
-keeps lookups extremely fast and ensures the registry always reflects the latest parsed 
-configuration without duplication. The precedence model mirrors nginx semantics: 
-look in the tighter scope first (location), then fall back to broader scope (server). 
-Calling this after route resolution means interpreter selection will reflect the matched location’s policies. 
-If either pointer is NULL, that layer is simply skipped, 
-letting you use only global defaults or only per-location rules as needed.
+setSources binds the registry to two optional maps: a local
+(per-location) override and a global (per-server) default.
+By storing pointers instead of copies, the registry reflects the current
+configuration instantly and avoids any cloning cost; it also keeps
+memory ownership clear (maps live with the config).
+The precedence model matches intuitive server semantics:
+check the narrower scope first (location), then fall back to the
+broader scope (server). Either pointer may be NULL; that simply
+removes that layer from consideration, allowing configurations
+that define only global rules or only local overrides.
+You typically call setSources immediately after routing
+(once you know which Location and VirtualServer matched the request),
+so that subsequent CGI resolution is aligned with the chosen route.
+This one call turns the registry from a detached shell into a ready-to-use
+resolver that is both fast (pointer dereferences + map lookup)
+and deterministic (well-defined shadowing rules).
 
 */
 
@@ -52,19 +64,24 @@ void CgiRegistry::setSources(const std::map<std::string, CgiSpec> *local,
 	global_ = global;
 }
 
-
-
-/* 
+/*
 
 static std::string normalizeExt(const std::string& e)
 
-Normalizes a requested extension into a canonical key used by the maps. 
-If the string is empty, it stays empty. Otherwise, 
-if it doesn’t start with a dot, the function prepends ., converting "php" → ".php" and leaving ".py" unchanged. 
-This tiny but crucial step prevents mismatches between configuration authors who include dots and code paths 
-that may strip or omit them when parsing filenames. Having a single normalization point keeps 
-behavior consistent across the entire codebase and avoids duplicate entries like "php" and ".php" 
-representing the same interpreter mapping, simplifying maintenance and preventing lookup bugs
+normalizeExt canonicalizes a filename extension into the exact
+key used for lookups. If the incoming string is empty,
+it returns an empty string (meaning “no extension”).
+Otherwise it ensures the key starts with a dot: "php" becomes ".php",
+while an already dotted value like ".py" is returned unchanged.
+This tiny normalization step prevents subtle mismatches between how
+configuration is authored and how extensions are extracted from request paths.
+Without it, you might end up with duplicate rules ("php" and ".php") or, worse,
+failed lookups when some code path strips the dot and another doesn’t.
+Keeping normalization in a single, private helper guarantees
+consistent behavior across the entire codebase and keeps findByExtension
+focused on lookup logic, not input hygiene. Since the function performs
+only O(1) checks and simple string concatenation, it’s effectively free
+on the hot path while eliminating a whole class of “why didn’t CGI trigger?” bugs.
 
 
 */
@@ -76,20 +93,24 @@ static std::string normalizeExt(const std::string &e)
 	return (e[0] == '.') ? e : std::string(".") + e;
 }
 
-
-
-/* 
+/*
 
 const CgiSpec* CgiRegistry::findByExtension(const std::string& raw) const
 
-Resolves an interpreter specification from a file extension. 
-First canonicalizes raw with normalizeExt. 
-If a local map is present, it probes that first, returning the address of the matching CgiSpec on success. 
-If not found, it checks the global map. Returning NULL indicates “no CGI mapping,” 
-allowing callers (like CgiHandler) to decline CGI handling and fall back to static or other handlers. 
-The pointer return avoids copies, stays cheap, and mirrors the registry’s non-owning contract. 
-This layered lookup encodes override semantics (location beats server) 
-while remaining O(1) average thanks to std::map’s logarithmic lookup on small sets.
+This is the resolver. It first canonicalizes the requested extension via normalizeExt
+to avoid key mismatches, then consults the local map (if set). If a match is found,
+it returns a pointer to the CgiSpec—that’s the per-location override.
+If not, it consults the global map (if set) as a fallback.
+If neither layer contains the extension,
+it returns NULL, signaling “no CGI mapping” so the caller can fall back
+to static handling or other mechanisms. Returning a pointer instead of a copy
+keeps the call cheap and respects the registry’s non-owning contract;
+the pointed-to spec remains valid as long as the underlying configuration objects
+live (which is for the lifetime of the server). Operationally, this function encodes
+the exact override semantics you want: location beats server, deterministic, and O(log n)
+with std::map (and typically tiny n). Handlers such as CgiHandler call this once per
+request to decide whether a path like /foo/bar.php
+should be executed through a configured interpreter.
 
 
 */

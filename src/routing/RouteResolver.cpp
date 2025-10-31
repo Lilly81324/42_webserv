@@ -1,98 +1,157 @@
+// RouteResolver.cpp
 #include "RouteResolver.h"
+#include "VirtualServer.h"
+
+#include <string>
+#include <vector>
+#include <map>	   // C++98: std::map< std::string, ... >
 #include <cstddef> // size_t
 
-/**
- * @brief Checks if a string starts with the specified prefix.
- *
- * This function compares the beginning of the string @p s with the string @p prefix.
- * It returns true if @p s starts with @p prefix, and false otherwise.
- *
- * @param s The string to check.
- * @param prefix The prefix to look for at the start of @p s.
- * @return true if @p s starts with @p prefix, false otherwise.
- */
+// ---------- small helpers ----------
+
 static bool starts_with(const std::string &s, const std::string &prefix)
 {
 	if (prefix.size() > s.size())
 		return false;
-	for (std::string::size_type i = 0; i < prefix.size(); ++i)
-		if (s[i] != prefix[i])
-			return false;
-	return true;
+	return s.compare(0, prefix.size(), prefix) == 0;
 }
+
+// ---------- Location matching ----------
+//
+// Strategy: longest-prefix match among non-regex locations.
+// (If you add regex support later, give it higher or explicit precedence.)
 
 const Location *RouteResolver::matchLocation(const VirtualServer &vs,
 											 const std::string &path)
 {
-	// Policy (nginx-like but simplified):
-	// - Ignore regex locations for now (no std::regex in C++98).
-	// - Exact match wins immediately.
-	// - Otherwise, choose the longest prefix match (first declared on ties).
-	const Location *best = 0;
-	std::string::size_type best_len = 0;
-
-	for (std::vector<Location>::const_iterator it = vs.locations.begin();
-		 it != vs.locations.end(); ++it)
-	{
-		const Location &L = *it;
-		if (L.regex)
-		{
-			// TODO: regex not implemented in this minimal version
-			continue;
-		}
-
-		const std::string &pfx = L.path_prefix;
-		if (pfx.empty())
-			continue;
-
-		// Exact match beats everything
-		if (pfx == path)
-			return &L;
-
-		// Longest prefix
-		if (starts_with(path, pfx) && pfx.size() > best_len)
-		{
-			best = &L;
-			best_len = pfx.size();
-		}
-	}
-	return best; // may be NULL
+	std::string dummy;
+	return matchLocation(vs, path, dummy);
 }
 
 const Location *RouteResolver::matchLocation(const VirtualServer &vs,
 											 const std::string &path,
 											 std::string &matched_prefix)
 {
-	matched_prefix.clear();
 	const Location *best = 0;
-	std::string::size_type best_len = 0;
+	std::size_t best_len = 0;
+	matched_prefix.clear();
 
-	for (std::vector<Location>::const_iterator it = vs.locations.begin();
-		 it != vs.locations.end(); ++it)
+	for (std::size_t i = 0; i < vs.locations.size(); ++i)
 	{
-		const Location &L = *it;
+		const Location &loc = vs.locations[i];
 
-		if (L.regex)
+		// If regex matching is supported in your build, handle it here.
+		// For now we prioritize simple prefix matches (regex==false).
+		if (loc.regex)
 		{
+			// TODO: plug your regex engine here if needed.
 			continue;
 		}
 
-		const std::string &pfx = L.path_prefix;
-		if (pfx.empty())
+		const std::string &pref = loc.path_prefix;
+		if (pref.empty())
+			continue;
+		if (!starts_with(path, pref))
 			continue;
 
-		if (pfx == path)
+		if (pref.size() > best_len)
 		{
-			matched_prefix = pfx;
-			return &L;
-		}
-
-		if (starts_with(path, pfx) && pfx.size() > best_len)
-		{
-			best = &L;
-			best_len = pfx.size();
-			matched_prefix = pfx;
+			best = &loc;
+			best_len = pref.size();
+			matched_prefix = pref;
 		}
 	}
+
+	// If no explicit prefix matched, you might have a default "/" rule.
+	if (!best)
+	{
+		for (std::size_t i = 0; i < vs.locations.size(); ++i)
+		{
+			const Location &loc = vs.locations[i];
+			if (!loc.regex && (loc.path_prefix == "/" || loc.path_prefix.empty()))
+			{
+				best = &loc;
+				matched_prefix = loc.path_prefix;
+				break;
+			}
+		}
+	}
+
 	return best;
+}
+
+// ---------- Upstream resolution (round-robin) ----------
+//
+// We keep a global (file-scope) per-pool cursor. In a single-threaded,
+// single event-loop server this is safe. If you hot-reload config, consider
+// clearing this map.
+
+static std::map<std::string, int> g_rrCursor;
+
+// pick next healthy node by round-robin; returns node index or -1 if none
+static int pick_round_robin_index(const UpstreamPool &pool, const std::string &poolName)
+{
+	// Build list of indices for healthy, usable nodes.
+	std::vector<int> healthy;
+	for (std::size_t i = 0; i < pool.nodes.size(); ++i)
+	{
+		const Upstream &u = pool.nodes[i];
+		if (u.healthy && u.port > 0 && !u.host.empty())
+			healthy.push_back(static_cast<int>(i));
+	}
+	if (healthy.empty())
+		return -1;
+
+	int &cursor = g_rrCursor[poolName]; // default-constructs to 0 on first use
+	if (cursor < 0)
+		cursor = 0;
+	if (cursor >= static_cast<int>(healthy.size()))
+		cursor = 0;
+
+	const int chosen = healthy[cursor];
+	cursor = (cursor + 1) % static_cast<int>(healthy.size());
+	return chosen;
+}
+
+bool RouteResolver::resolveProxyTarget(const VirtualServer &vs,
+									   const std::string &poolName,
+									   std::string &outHost,
+									   int &outPort)
+{
+	outHost.clear();
+	outPort = 0;
+
+	// Find the named upstream pool in this virtual server
+	std::map<std::string, UpstreamPool>::const_iterator it = vs.upstreams.find(poolName);
+	if (it == vs.upstreams.end())
+		return false;
+
+	const UpstreamPool &pool = it->second;
+
+	// Choose strategy (default to roundrobin if unspecified/unknown)
+	const std::string strategy = pool.strategy.empty()
+									 ? std::string("roundrobin")
+									 : pool.strategy;
+
+	int idx = -1;
+	if (strategy == "roundrobin")
+	{
+		idx = pick_round_robin_index(pool, poolName);
+	}
+	else
+	{
+		// Fallback for unrecognized strategies—use RR for now.
+		idx = pick_round_robin_index(pool, poolName);
+	}
+
+	if (idx < 0 || idx >= static_cast<int>(pool.nodes.size()))
+		return false;
+
+	const Upstream &node = pool.nodes[static_cast<std::size_t>(idx)];
+	if (node.host.empty() || node.port <= 0)
+		return false;
+
+	outHost = node.host;
+	outPort = node.port;
+	return true;
 }

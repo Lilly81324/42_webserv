@@ -135,8 +135,6 @@ CGIStreamer::CGIStreamer(HttpRequest &req, HttpResponse &res)
 
 	  // in CGIStreamer.cpp ctor init list
 	  mem_body_(),
-	  mem_off_(0),
-	  using_mem_(false),
 
 	  in_mem_body_(),
 	  in_mem_off_(0),
